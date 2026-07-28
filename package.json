@@ -1,0 +1,27 @@
+{
+  "name": "aicommit",
+  "version": "1.0.0",
+  "description": "AI-powered git commit message generator",
+  "type": "module",
+  "bin": {
+    "aicommit": "./bin/aicommit.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "scripts": {
+    "start": "node bin/aicommit.js"
+  },
+  "dependencies": {
+    "chalk": "^5.4.0",
+    "ora": "^8.2.0",
+    "boxen": "^8.0.1",
+    "@inquirer/confirm": "^5.1.0",
+    "@inquirer/editor": "^4.1.0"
+  },
+  "keywords": ["git", "commit", "ai", "openai", "deepseek", "claude"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
