@@ -60,6 +60,12 @@ function formatMs(ms) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+function maskApiKey(key) {
+  if (!key) return '(not set)';
+  if (key.length <= 8) return '****';
+  return `${key.slice(0, 4)}…${key.slice(-4)} (${key.length} chars)`;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CLI argument parsing
 // ═══════════════════════════════════════════════════════════════════════════
@@ -81,6 +87,7 @@ function showHelp() {
     -h, --help            Show this help message
     -v, --version         Show version number
     -l, --lang=<zh|en>    Commit message language (default: zh)
+    --debug               Print debug info (parsed args, final config, etc.)
 
   ${chalk.bold('Examples:')}
     aicommit              Commit changes in current directory (Chinese)
@@ -97,6 +104,7 @@ function parseArgs() {
   const args = process.argv.slice(2);
   let targetPath = null;
   let cliLang = null;
+  let debug = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -109,6 +117,11 @@ function parseArgs() {
     if (arg === '-v' || arg === '--version') {
       showVersion();
       process.exit(0);
+    }
+
+    if (arg === '--debug') {
+      debug = true;
+      continue;
     }
 
     if (arg === '-l' || arg === '--lang') {
@@ -140,7 +153,7 @@ function parseArgs() {
     }
   }
 
-  return { targetPath, cliLang };
+  return { targetPath, cliLang, debug };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -477,7 +490,7 @@ function gitCommit(message, projectRoot) {
 async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang } = parseArgs();
+  const { targetPath, cliLang, debug } = parseArgs();
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -495,6 +508,7 @@ async function main() {
   console.log('');
   console.log('  ' + chalk.cyan.bold('⚡ aicommit ') + chalk.dim('AI-powered commit message generator'));
   console.log('  ' + chalk.dim('─'.repeat(45)));
+  console.log('  ' + chalk.dim(`Working directory: ${process.cwd()}`));
 
   // ── 1. Config ───────────────────────────────────────────────────────
 
@@ -523,6 +537,28 @@ async function main() {
     }
     config.language = cliLang;
     console.log('  ' + chalk.green('✓') + chalk.dim(` Language set to: ${cliLang === 'zh' ? '中文' : 'English'} (via CLI)`));
+  }
+
+  // ── Debug output ─────────────────────────────────────────────────────
+
+  if (debug) {
+    console.log('');
+    console.log('  ' + chalk.magenta.bold('🐛 Debug info'));
+    console.log('  ' + chalk.dim('─'.repeat(45)));
+    console.log(chalk.dim(`  argv:         ${process.argv.slice(2).join(' ') || '(none)'}`));
+    console.log(chalk.dim(`  targetPath:   ${targetPath || '(not set)'}`));
+    console.log(chalk.dim(`  cwd:          ${process.cwd()}`));
+    console.log(chalk.dim(`  projectRoot:  ${projectRoot}`));
+    console.log(chalk.dim(`  config files: ${loaded.join(', ') || '(none — defaults only)'}`));
+    console.log(chalk.dim(`  cliLang:      ${cliLang || '(not set)'}`));
+    console.log(chalk.dim('  final config:'));
+    for (const [key, value] of Object.entries(config)) {
+      const display = key === 'apiKey'
+        ? maskApiKey(value)
+        : JSON.stringify(value);
+      const truncated = display.length > 100 ? display.slice(0, 100) + '…' : display;
+      console.log(chalk.dim(`    ${key}: ${truncated}`));
+    }
   }
 
   // ── 2. Diff ─────────────────────────────────────────────────────────
