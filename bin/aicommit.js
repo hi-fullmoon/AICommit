@@ -553,13 +553,13 @@ async function main() {
     }
   }
 
-  const success = gitCommit(finalMessage, projectRoot);
+  const success = gitCommit(message, projectRoot);
 
   if (success) {
     console.log('\n  ' + chalk.green.bold('✓ Done!\n'));
   } else {
     console.log(chalk.dim('\n  You can manually commit with:'));
-    console.log('  ' + chalk.dim('$ ') + chalk.green(`git commit -m '${finalMessage.replace(/'/g, "'\\''")}'`));
+    console.log('  ' + chalk.dim('$ ') + chalk.green(`git commit -m '${message.replace(/'/g, "'\\''")}'`));
     console.log('');
   }
 }
