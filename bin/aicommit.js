@@ -23,6 +23,7 @@ const DEFAULT_CONFIG = {
   apiKey: '',
   modelId: 'gpt-4o',
   temperature: 0.3,
+  language: 'zh', // 'zh' = Chinese, 'en' = English
   prompt: [
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
@@ -78,10 +79,11 @@ function showHelp() {
   ${chalk.bold('Options:')}
     -h, --help            Show this help message
     -v, --version         Show version number
+    -l, --lang=<zh|en>    Commit message language (default: zh)
 
   ${chalk.bold('Examples:')}
-    aicommit              Commit changes in current directory
-    aicommit .            Commit changes in current directory
+    aicommit              Commit changes in current directory (Chinese)
+    aicommit --lang=en    Generate English commit message
     aicommit /path/to    Commit changes in the specified directory
 `);
 }
@@ -93,29 +95,51 @@ function showVersion() {
 function parseArgs() {
   const args = process.argv.slice(2);
   let targetPath = null;
+  let cliLang = null;
 
-  for (const arg of args) {
-    switch (arg) {
-      case '-h':
-      case '--help':
-        showHelp();
-        process.exit(0);
-      case '-v':
-      case '--version':
-        showVersion();
-        process.exit(0);
-      default:
-        if (!arg.startsWith('-')) {
-          targetPath = arg;
-        } else {
-          console.error(chalk.red(`  Unknown option: ${arg}`));
-          console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
-          process.exit(1);
-        }
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === '-h' || arg === '--help') {
+      showHelp();
+      process.exit(0);
+    }
+
+    if (arg === '-v' || arg === '--version') {
+      showVersion();
+      process.exit(0);
+    }
+
+    if (arg === '-l' || arg === '--lang') {
+      cliLang = args[++i];
+      if (!cliLang) {
+        console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<zh|en>`));
+        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+        process.exit(1);
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--lang=')) {
+      cliLang = arg.slice('--lang='.length);
+      continue;
+    }
+
+    if (arg.startsWith('-l') && arg.length > 2) {
+      cliLang = arg.slice(2);
+      continue;
+    }
+
+    if (!arg.startsWith('-')) {
+      targetPath = arg;
+    } else {
+      console.error(chalk.red(`  Unknown option: ${arg}`));
+      console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+      process.exit(1);
     }
   }
 
-  return targetPath;
+  return { targetPath, cliLang };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -232,8 +256,17 @@ async function callAPI(apiUrl, apiKey, modelId, messages, temperature) {
 }
 
 async function generateCommitMessage(config, diff, regenerateCount = 0) {
-  const { apiUrl, apiKey, modelId, prompt, temperature } = config;
+  const { apiUrl, apiKey, modelId, prompt, temperature, language } = config;
   const t0 = performance.now();
+
+  // Build language directive — prepended AND appended so it takes priority
+  // even when the user's custom prompt contains conflicting language instructions.
+  const langHintPre = language === 'zh'
+    ? 'IMPORTANT: You MUST write the commit message in Chinese (Simplified Chinese).\n\n'
+    : 'IMPORTANT: You MUST write the commit message in English.\n\n';
+  const langHintPost = language === 'zh'
+    ? '\n\nIMPORTANT: The commit message MUST be written in Chinese (Simplified Chinese).'
+    : '\n\nIMPORTANT: The commit message MUST be written in English.';
 
   // On regenerate, vary the prompt and temperature to get a different result
   const variationHint = regenerateCount > 0
@@ -242,7 +275,7 @@ async function generateCommitMessage(config, diff, regenerateCount = 0) {
   const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
 
   const messages = [
-    { role: 'system', content: prompt },
+    { role: 'system', content: langHintPre + prompt + langHintPost },
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
@@ -426,7 +459,7 @@ function gitCommit(message, projectRoot) {
 async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const targetPath = parseArgs();
+  const { targetPath, cliLang } = parseArgs();
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -461,6 +494,17 @@ async function main() {
     console.log('\n  ' + chalk.red('✗ No API key configured.'));
     console.log(chalk.dim('  Set "apiKey" in ~/.aicommit.config.json or ./.aicommit.config.json\n'));
     process.exit(1);
+  }
+
+  // ── CLI language override ────────────────────────────────────────────
+
+  if (cliLang) {
+    if (cliLang !== 'zh' && cliLang !== 'en') {
+      console.log('\n  ' + chalk.red(`✗ Invalid language: "${cliLang}". Use "zh" or "en".\n`));
+      process.exit(1);
+    }
+    config.language = cliLang;
+    console.log('  ' + chalk.green('✓') + chalk.dim(` Language set to: ${cliLang === 'zh' ? '中文' : 'English'} (via CLI)`));
   }
 
   // ── 2. Diff ─────────────────────────────────────────────────────────
