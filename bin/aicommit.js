@@ -211,6 +211,7 @@ async function callAPI(apiUrl, apiKey, modelId, messages, temperature) {
     messages,
     temperature,
     max_tokens: 500,
+    enable_thinking: false,
   });
 
   const response = await fetch(apiUrl, {
@@ -524,8 +525,9 @@ async function main() {
         message = edited;
         break; // proceed to commit with edited message
       }
-      // If editing was cancelled, loop back to the action menu
-      continue;
+      // User cancelled during edit — exit
+      console.log(chalk.dim('\n  Commit cancelled.\n'));
+      process.exit(0);
     }
 
     if (action === 'regenerate') {
