@@ -24,6 +24,7 @@ const DEFAULT_CONFIG = {
   modelId: 'gpt-4o',
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
+  maxTokens: 1024,
   prompt: [
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
@@ -229,12 +230,12 @@ function getBranch() {
 // AI API call
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function callAPI(apiUrl, apiKey, modelId, messages, temperature) {
+async function callAPI(apiUrl, apiKey, modelId, messages, temperature, maxTokens) {
   const body = JSON.stringify({
     model: modelId,
     messages,
     temperature,
-    max_tokens: 500,
+    max_tokens: maxTokens,
     enable_thinking: false,
   });
 
@@ -256,7 +257,7 @@ async function callAPI(apiUrl, apiKey, modelId, messages, temperature) {
 }
 
 async function generateCommitMessage(config, diff, regenerateCount = 0) {
-  const { apiUrl, apiKey, modelId, prompt, temperature, language } = config;
+  const { apiUrl, apiKey, modelId, prompt, temperature, language, maxTokens } = config;
   const t0 = performance.now();
 
   // Build language directive — prepended AND appended so it takes priority
@@ -279,7 +280,7 @@ async function generateCommitMessage(config, diff, regenerateCount = 0) {
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
-  let data = await callAPI(apiUrl, apiKey, modelId, messages, variedTemperature);
+  let data = await callAPI(apiUrl, apiKey, modelId, messages, variedTemperature, maxTokens);
   let message = data?.choices?.[0]?.message?.content;
   const reasoning = data?.choices?.[0]?.message?.reasoning_content;
 
@@ -304,7 +305,7 @@ async function generateCommitMessage(config, diff, regenerateCount = 0) {
       },
     ];
 
-    data = await callAPI(apiUrl, apiKey, modelId, followUpMessages, variedTemperature);
+    data = await callAPI(apiUrl, apiKey, modelId, followUpMessages, variedTemperature, maxTokens);
     message = data?.choices?.[0]?.message?.content;
   }
 
