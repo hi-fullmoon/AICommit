@@ -206,6 +206,23 @@ function getStagedDiff() {
   return { diff: diff.trim(), isStaged };
 }
 
+function getChangedFiles(isStaged) {
+  const flag = isStaged ? '--staged' : '';
+  try {
+    const out = execSync(`git diff --name-status ${flag}`, {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    if (!out) return [];
+    return out.split('\n').map(line => {
+      // Format: "<status>\t<path>" or "<status>\t<old>\t<new>" for renames
+      const parts = line.split('\t');
+      const status = parts[0];
+      const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
+      return { status, path };
+    });
+  } catch { return []; }
+}
+
 function getDiffStats(diff) {
   if (!diff) return { files: 0, additions: 0, deletions: 0 };
   const lines = diff.split('\n');
@@ -518,6 +535,7 @@ async function main() {
   }
 
   const stats     = getDiffStats(diff);
+  const changedFiles = getChangedFiles(isStaged);
   const branch    = getBranch();
   const stageIcon = isStaged ? chalk.green('staged') : chalk.yellow('unstaged');
   const changeStr = chalk.green(`+${stats.additions}`) + '  ' + chalk.red(`-${stats.deletions}`);
@@ -525,6 +543,21 @@ async function main() {
   let statLine = chalk.dim('  ') + `✓ ${chalk.bold(stats.files)} files (${stageIcon})  ${changeStr}`;
   if (branch) statLine += chalk.dim(`  on ${branch}`);
   console.log(statLine);
+
+  const statusColor = {
+    A: chalk.green,   // Added
+    M: chalk.yellow,  // Modified
+    D: chalk.red,     // Deleted
+    R: chalk.cyan,    // Renamed
+    C: chalk.magenta, // Copied
+    T: chalk.blue,    // Type changed
+  };
+  const statusIcon = { A: '+', M: '~', D: '-', R: '→', C: '©', T: 'Δ' };
+  for (const { status, path } of changedFiles) {
+    const c = statusColor[status.charAt(0)] || chalk.dim;
+    const icon = statusIcon[status.charAt(0)] || status.charAt(0);
+    console.log(`  ${c('  ' + icon)} ${c(path)}`);
+  }
 
   // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
