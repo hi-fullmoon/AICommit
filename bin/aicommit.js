@@ -5,11 +5,13 @@ import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
+import readline     from 'node:readline';
 
 import chalk        from 'chalk';
 import ora          from 'ora';
 import boxen        from 'boxen';
 import confirm      from '@inquirer/confirm';
+import select       from '@inquirer/select';
 import editor       from '@inquirer/editor';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -20,6 +22,7 @@ const DEFAULT_CONFIG = {
   apiUrl: 'https://api.openai.com/v1/chat/completions',
   apiKey: '',
   modelId: 'gpt-4o',
+  temperature: 0.3,
   prompt: [
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
@@ -202,20 +205,14 @@ function getBranch() {
 // AI API call
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function generateCommitMessage(config, diff) {
-  const { apiUrl, apiKey, modelId, prompt } = config;
-
+async function callAPI(apiUrl, apiKey, modelId, messages, temperature) {
   const body = JSON.stringify({
     model: modelId,
-    messages: [
-      { role: 'system', content: prompt },
-      { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` },
-    ],
-    temperature: 0.3,
+    messages,
+    temperature,
     max_tokens: 500,
   });
 
-  const t0 = performance.now();
   const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
@@ -224,16 +221,84 @@ async function generateCommitMessage(config, diff) {
     },
     body,
   });
-  const elapsed = performance.now() - t0;
 
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
   }
 
-  const data    = await response.json();
-  const message = data?.choices?.[0]?.message?.content;
-  if (!message) throw new Error('Unexpected API response shape');
+  return response.json();
+}
+
+async function generateCommitMessage(config, diff, regenerateCount = 0) {
+  const { apiUrl, apiKey, modelId, prompt, temperature } = config;
+  const t0 = performance.now();
+
+  // On regenerate, vary the prompt and temperature to get a different result
+  const variationHint = regenerateCount > 0
+    ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
+    : '';
+  const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
+
+  const messages = [
+    { role: 'system', content: prompt },
+    { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
+  ];
+
+  let data = await callAPI(apiUrl, apiKey, modelId, messages, variedTemperature);
+  let message = data?.choices?.[0]?.message?.content;
+  const reasoning = data?.choices?.[0]?.message?.reasoning_content;
+
+  // Fallback: try Anthropic-style response format (content[0].text)
+  if (!message && message !== '') {
+    message = data?.content?.[0]?.text;
+  }
+
+  // When content is empty but reasoning_content exists (common with DeepSeek
+  // reasoning models), make a follow-up call using the reasoning as context
+  // to extract the final commit message.
+  if (!message && reasoning) {
+    const followUpMessages = [
+      ...messages,
+      { role: 'assistant', content: reasoning },
+      {
+        role: 'user',
+        content:
+          'Based on your analysis above, output ONLY the final conventional commit message ' +
+          '(e.g. feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). ' +
+          'Do not include any other text, explanation, or code fences.',
+      },
+    ];
+
+    data = await callAPI(apiUrl, apiKey, modelId, followUpMessages, variedTemperature);
+    message = data?.choices?.[0]?.message?.content;
+  }
+
+  // Last resort: extract a message from the reasoning content itself
+  if (!message && reasoning) {
+    // Try to find a conventional commit line in the reasoning
+    const match = reasoning.match(/(?:^|\n)((?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)[\w]*[!:]\s*.+?)(?:\n|$)/i);
+    if (match) {
+      message = match[1].trim();
+    } else {
+      // Take the last non-empty line of reasoning as a fallback
+      const lines = reasoning.split('\n').filter(l => l.trim());
+      message = lines[lines.length - 1]?.trim() || reasoning.slice(0, 200).trim();
+    }
+  }
+
+  const elapsed = performance.now() - t0;
+
+  if (!message) {
+    const snippet = JSON.stringify(data, null, 2).slice(0, 600);
+    throw new Error(
+      !data?.choices?.[0]?.message?.content && data?.choices?.[0]?.message?.content === ''
+        ? `API returned an empty commit message.\n  Hint: the model produced reasoning but returned empty content.\n  Try setting "temperature" to a higher value in your config.\n\nRaw response:\n${snippet}`
+        : `Unexpected API response shape — got:\n\n${snippet}\n\n` +
+          `Expected OpenAI format (choices[0].message.content) or ` +
+          `Anthropic format (content[0].text).`,
+    );
+  }
 
   return { message: message.trim(), elapsed, usage: data?.usage };
 }
@@ -262,26 +327,60 @@ function displayMessage(message) {
   }));
 }
 
-async function confirmAndEdit(message) {
+// Vim-friendly select: wraps @inquirer/select with j/k → arrow key remapping.
+// We intercept keypress events BEFORE @inquirer sees them and translate
+// j→down, k→up by emitting synthetic arrow-key events.  @inquirer ignores
+// the original j/k characters, so only the arrow keys take effect.
+async function vimSelect(options) {
+  // Ensure keypress events are enabled on stdin (idempotent)
+  readline.emitKeypressEvents(process.stdin);
+
+  let inTranslate = false; // guard against re-entering our own synthetic emits
+
+  const interceptor = (_str, key) => {
+    if (inTranslate || !key) return;
+    if (key.name === 'j') {
+      inTranslate = true;
+      process.stdin.emit('keypress', undefined, {
+        name: 'down', sequence: '\x1B\x5B\x42', ctrl: false, meta: false, shift: false,
+      });
+      inTranslate = false;
+    } else if (key.name === 'k') {
+      inTranslate = true;
+      process.stdin.emit('keypress', undefined, {
+        name: 'up', sequence: '\x1B\x5B\x41', ctrl: false, meta: false, shift: false,
+      });
+      inTranslate = false;
+    }
+  };
+
+  // prependListener ensures we run BEFORE @inquirer's own keypress handler
+  process.stdin.prependListener('keypress', interceptor);
+
+  try {
+    return await select(options);
+  } finally {
+    process.stdin.removeListener('keypress', interceptor);
+  }
+}
+
+async function confirmAction(message) {
   displayMessage(message);
 
-  const action = await confirm({
-    message:  'Use this message?',
-    default:  true,
-    theme:    { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
+  const action = await vimSelect({
+    message: 'What would you like to do?',
+    choices: [
+      { name:  'Use this message',     value: 'use',        description: 'Commit with the suggested message' },
+      { name:  'Edit message',         value: 'edit',       description: 'Modify the message before committing' },
+      { name:  'Regenerate',           value: 'regenerate', description: 'Ask AI to generate a different message' },
+      { name:  'Cancel',               value: 'cancel',     description: 'Abort the commit' },
+    ],
   });
 
-  if (action) return message;
+  return action;
+}
 
-  // Edit flow: first ask whether to edit or cancel
-  const wantEdit = await confirm({
-    message: 'Edit the message?',
-    default: true,
-    theme:   { prefix: { idle: chalk.dim('?'), done: chalk.yellow('?') } },
-  });
-
-  if (!wantEdit) return null;
-
+async function editMessage(message) {
   const edited = await editor({
     message:   'Edit your commit message',
     default:   message,
@@ -381,37 +480,61 @@ async function main() {
   if (branch) statLine += chalk.dim(`  on ${branch}`);
   console.log(statLine);
 
-  // ── 3. AI call ──────────────────────────────────────────────────────
-
-  const spinner = ora({
-    text:  chalk.dim(`Calling ${chalk.bold(config.modelId)} ...`),
-    color: 'cyan',
-  }).start();
+  // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
   let message, elapsed, usage;
-  try {
-    ({ message, elapsed, usage } = await generateCommitMessage(config, diff));
-    let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
-    if (usage) {
-      const tk = `${chalk.dim('tokens:')} ${usage.prompt_tokens}+${usage.completion_tokens}`;
-      done += chalk.dim(`  (${tk})`);
+  let regenerateCount = 0;
+
+  while (true) {
+    const spinner = ora({
+      text:  chalk.dim(`Calling ${chalk.bold(config.modelId)} ...`),
+      color: 'cyan',
+    }).start();
+
+    try {
+      ({ message, elapsed, usage } = await generateCommitMessage(config, diff, regenerateCount));
+      let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
+      if (usage) {
+        const tk = `${chalk.dim('tokens:')} ${usage.prompt_tokens}+${usage.completion_tokens}`;
+        done += chalk.dim(`  (${tk})`);
+      }
+      spinner.succeed(done);
+    } catch (err) {
+      spinner.fail(chalk.red('API call failed'));
+      console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
+      process.exit(1);
     }
-    spinner.succeed(done);
-  } catch (err) {
-    spinner.fail(chalk.red('API call failed'));
-    console.log(chalk.dim(`  ${err.message}\n`));
-    process.exit(1);
-  }
 
-  if (!message) {
-    console.log('\n  ' + chalk.red('✗ Empty response from AI.\n'));
-    process.exit(1);
-  }
+    if (!message) {
+      console.log('\n  ' + chalk.red('✗ Empty response from AI.\n'));
+      process.exit(1);
+    }
 
-  // ── 4. Confirm & commit ────────────────────────────────────────────
+    // ── 4. User action ─────────────────────────────────────────────────
 
-  const finalMessage = await confirmAndEdit(message);
-  if (!finalMessage) {
+    const action = await confirmAction(message);
+
+    if (action === 'use') {
+      break; // proceed to commit
+    }
+
+    if (action === 'edit') {
+      const edited = await editMessage(message);
+      if (edited) {
+        message = edited;
+        break; // proceed to commit with edited message
+      }
+      // If editing was cancelled, loop back to the action menu
+      continue;
+    }
+
+    if (action === 'regenerate') {
+      regenerateCount++;
+      console.log(chalk.dim(`\n  ↻ Regenerating (attempt #${regenerateCount + 1})...`));
+      continue;
+    }
+
+    // action === 'cancel'
     console.log(chalk.dim('\n  Commit cancelled.\n'));
     process.exit(0);
   }
