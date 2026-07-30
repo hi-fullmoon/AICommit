@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, access, stat } from 'node:fs/promises';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -475,8 +475,9 @@ function gitAdd(projectRoot) {
 
 function gitCommit(message, projectRoot) {
   try {
-    const escaped = message.replace(/'/g, "'\\''");
-    execSync(`git commit -m '${escaped}'`, { cwd: projectRoot, stdio: 'inherit' });
+    // Pass the message as an argv item instead of a shell string — quoting it
+    // for a shell breaks on Windows, where cmd.exe ignores single quotes.
+    execFileSync('git', ['commit', '-m', message], { cwd: projectRoot, stdio: 'inherit' });
     return true;
   } catch {
     return false;
