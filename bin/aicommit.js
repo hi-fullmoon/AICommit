@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = {
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
     'The message should have a short subject line (max 72 chars), optionally followed by a blank line and a more detailed body if needed.',
-    'Output ONLY the commit message, nothing else.',
+    'Output ONLY the commit message, nothing else — do not wrap it in markdown code fences.',
   ].join(' '),
 };
 
@@ -54,6 +54,15 @@ function deepMerge(a, b) {
     }
   }
   return result;
+}
+
+// Strip markdown code fences the model sometimes wraps around the message
+// (e.g. "```\nfix: ...\n```" or "```text\n...\n```"), plus stray backticks.
+function cleanCommitMessage(msg) {
+  const lines = msg.trim().split('\n');
+  if (lines.length > 0 && /^\s*```[a-zA-Z]*\s*$/.test(lines[0])) lines.shift();
+  if (lines.length > 0 && /^\s*```\s*$/.test(lines[lines.length - 1])) lines.pop();
+  return lines.join('\n').trim();
 }
 
 function formatMs(ms) {
@@ -365,7 +374,7 @@ async function generateCommitMessage(config, diff, regenerateCount = 0) {
     );
   }
 
-  return { message: message.trim(), elapsed, usage: data?.usage };
+  return { message: cleanCommitMessage(message), elapsed, usage: data?.usage };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
