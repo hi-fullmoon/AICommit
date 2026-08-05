@@ -13,14 +13,22 @@
     "start": "node bin/aicommit.js"
   },
   "dependencies": {
-    "chalk": "^5.4.0",
-    "ora": "^8.2.0",
-    "boxen": "^8.0.1",
+    "@inquirer/checkbox": "^4.3.2",
     "@inquirer/confirm": "^5.1.0",
     "@inquirer/editor": "^4.1.0",
-    "@inquirer/select": "^4.1.0"
+    "@inquirer/select": "^4.1.0",
+    "boxen": "^8.0.1",
+    "chalk": "^5.4.0",
+    "ora": "^8.2.0"
   },
-  "keywords": ["git", "commit", "ai", "openai", "deepseek", "claude"],
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "openai",
+    "deepseek",
+    "claude"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"

@@ -116,7 +116,7 @@ If no staged changes exist, it falls back to unstaged changes (`git diff`).
 Groups all changes (staged, unstaged and untracked) into logical commits:
 
 1. The AI partitions the changed files into groups by feature/module, each with a conventional commit message
-2. You review the plan — **commit all**, **regenerate a message** for any group (uses that group's diff), **edit the plan** (JSON in your editor), or **cancel**
+2. You review the plan — **commit all**, **regenerate messages** for any groups you pick (multi-select, uses each group's diff), **edit the plan** (JSON in your editor), or **cancel**
 3. Each group is staged and committed in sequence
 
 Notes: splitting is file-level (a file with two unrelated changes lands entirely in one group), and if a commit fails mid-way the already-made commits are kept and the remaining groups are printed for manual completion.

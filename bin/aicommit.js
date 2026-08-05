@@ -13,6 +13,7 @@ import ora          from 'ora';
 import boxen        from 'boxen';
 import confirm      from '@inquirer/confirm';
 import select       from '@inquirer/select';
+import checkbox     from '@inquirer/checkbox';
 import editor       from '@inquirer/editor';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -422,11 +423,12 @@ function displayMessage(message) {
   }));
 }
 
-// Vim-friendly select: wraps @inquirer/select with j/k → arrow key remapping.
-// We intercept keypress events BEFORE @inquirer sees them and translate
-// j→down, k→up by emitting synthetic arrow-key events.  @inquirer ignores
-// the original j/k characters, so only the arrow keys take effect.
-async function vimSelect(options) {
+// Vim-friendly prompts: wraps @inquirer prompts with j/k → arrow key
+// remapping. We intercept keypress events BEFORE @inquirer sees them and
+// translate j→down, k→up by emitting synthetic arrow-key events.
+// @inquirer ignores the original j/k characters, so only the arrow keys
+// take effect.
+async function withVimKeys(promptFn, options) {
   // Ensure keypress events are enabled on stdin (idempotent)
   readline.emitKeypressEvents(process.stdin);
 
@@ -453,10 +455,18 @@ async function vimSelect(options) {
   process.stdin.prependListener('keypress', interceptor);
 
   try {
-    return await select(options);
+    return await promptFn(options);
   } finally {
     process.stdin.removeListener('keypress', interceptor);
   }
+}
+
+async function vimSelect(options) {
+  return withVimKeys(select, options);
+}
+
+async function vimCheckbox(options) {
+  return withVimKeys(checkbox, options);
 }
 
 async function confirmAction(message) {
@@ -849,15 +859,16 @@ async function splitFlow(config, projectRoot) {
     }
 
     if (action === 'regenerate') {
-      const idx = await vimSelect({
-        message: 'Regenerate which commit message?',
-        choices: [
-          ...groups.map((g, i) => ({ name: `${i + 1}. ${g.message}`, value: i })),
-          { name: chalk.dim('Back'), value: -1 },
-        ],
+      const picked = await vimCheckbox({
+        message: 'Regenerate which commit messages? (space to select, enter to confirm)',
+        choices: groups.map((g, i) => ({
+          // checkbox rows are single-line — show the subject only
+          name:  `${i + 1}. ${g.message.split('\n')[0]}`,
+          value: i,
+        })),
       });
 
-      if (idx >= 0) {
+      for (const idx of picked) {
         const groupDiff = getGroupDiff(projectRoot, head, groups[idx], allFiles);
         const rspinner = ora({
           text:  chalk.dim(`Regenerating message for group ${idx + 1} ...`),
@@ -866,11 +877,11 @@ async function splitFlow(config, projectRoot) {
         try {
           regenCounts[idx]++;
           const { message, elapsed } = await generateCommitMessage(config, groupDiff, regenCounts[idx]);
-          rspinner.succeed(`Regenerated in ${chalk.bold(formatMs(elapsed))}`);
+          rspinner.succeed(`Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`);
           groups[idx] = { ...groups[idx], message };
         } catch (err) {
           regenCounts[idx]--;
-          rspinner.fail(chalk.red('Regenerate failed'));
+          rspinner.fail(chalk.red(`Group ${idx + 1} regenerate failed`));
           console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
         }
       }
