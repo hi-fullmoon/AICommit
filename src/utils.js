@@ -21,8 +21,11 @@ export function deepMerge(a, b) {
 
 // Strip markdown code fences the model sometimes wraps around the message
 // (e.g. "```\nfix: ...\n```" or "```text\n...\n```"), plus stray backticks.
+// Also strips inline <think>...</think> blocks — MiniMax embeds thinking
+// this way in `content` when thinking is enabled (M2.x can't disable it).
 export function cleanCommitMessage(msg) {
-  const lines = msg.trim().split('\n');
+  const cleaned = msg.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const lines = cleaned.trim().split('\n');
   if (lines.length > 0 && /^\s*```[a-zA-Z]*\s*$/.test(lines[0])) lines.shift();
   if (lines.length > 0 && /^\s*```\s*$/.test(lines[lines.length - 1])) lines.pop();
   return lines.join('\n').trim();

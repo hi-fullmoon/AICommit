@@ -6,7 +6,15 @@ export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, ma
     messages,
     temperature,
     max_tokens: maxTokens,
+    // Disable thinking across vendors; unknown params are ignored by
+    // APIs that don't support them:
+    // - enable_thinking: Qwen-style switch
+    // - thinking.type=disabled: MiniMax OpenAI-compatible API (M3)
+    // - reasoning_split: MiniMax M2.x can't disable thinking, but this moves
+    //   the reasoning out of `content` into `reasoning_details`
     enable_thinking: false,
+    thinking: { type: 'disabled' },
+    reasoning_split: true,
   });
 
   const response = await fetch(apiUrl, {
@@ -52,7 +60,13 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
 
   let data = await callAPI(apiUrl, apiKey, modelId, messages, variedTemperature, maxTokens);
   let message = data?.choices?.[0]?.message?.content;
-  const reasoning = data?.choices?.[0]?.message?.reasoning_content;
+  const msg0 = data?.choices?.[0]?.message;
+  // Reasoning may come as OpenAI-style `reasoning_content` (DeepSeek) or
+  // MiniMax-style `reasoning_details` ([{ type: 'thinking', text }], possibly
+  // multiple segments with interleaved thinking).
+  const reasoning = msg0?.reasoning_content
+    || msg0?.reasoning_details?.map(d => d?.text).filter(Boolean).join('\n')
+    || null;
 
   // Fallback: try Anthropic-style response format (content[0].text)
   if (!message && message !== '') {
