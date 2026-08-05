@@ -88,6 +88,9 @@ aicommit --help
 # Show version
 aicommit -v
 aicommit --version
+
+# Split changes into multiple logical commits
+aicommit --split
 ```
 
 The tool will:
@@ -100,11 +103,23 @@ If no staged changes exist, it falls back to unstaged changes (`git diff`).
 
 ### Options
 
-| Option          | Description                            |
-|-----------------|----------------------------------------|
-| `path`          | Target directory (default: current dir)|
-| `-h`, `--help`  | Show help message                      |
-| `-v`, `--version` | Show version number                  |
+| Option            | Description                              |
+|-------------------|------------------------------------------|
+| `path`            | Target directory (default: current dir)  |
+| `-h`, `--help`    | Show help message                        |
+| `-v`, `--version` | Show version number                      |
+| `-l`, `--lang`    | Commit message language (`zh` or `en`)   |
+| `-s`, `--split`   | Split changes into multiple logical commits |
+
+### Split mode (`--split`)
+
+Groups all changes (staged, unstaged and untracked) into logical commits:
+
+1. The AI partitions the changed files into groups by feature/module, each with a conventional commit message
+2. You review the plan — **commit all**, **regenerate a message** for any group (uses that group's diff), **edit the plan** (JSON in your editor), or **cancel**
+3. Each group is staged and committed in sequence
+
+Notes: splitting is file-level (a file with two unrelated changes lands entirely in one group), and if a commit fails mid-way the already-made commits are kept and the remaining groups are printed for manual completion.
 
 ## License
 
