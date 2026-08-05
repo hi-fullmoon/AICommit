@@ -22,7 +22,38 @@ export const DEFAULT_CONFIG = {
   ].join(' '),
 };
 
-export async function loadConfig() {
+// Resolve the final flat config from a merged config that may contain a
+// "providers" map: pick `cliModel` → config.default → first provider key,
+// deep-merge that entry over the top-level values, then drop the
+// providers/default keys so downstream code sees a plain flat config.
+function resolveProvider(config, cliModel) {
+  const providers = config.providers;
+
+  if (cliModel && !providers) {
+    console.error(chalk.red(`  ✗ -m/--model given ("${cliModel}") but no "providers" defined in config.`));
+    console.error(chalk.dim('  Define a "providers" map in ~/.aicommit.config.json or ./.aicommit.config.json'));
+    process.exit(1);
+  }
+
+  if (!providers || typeof providers !== 'object' || Object.keys(providers).length === 0) {
+    return { config, providerName: null };
+  }
+
+  const name = cliModel || config.default || Object.keys(providers)[0];
+
+  if (!providers[name]) {
+    console.error(chalk.red(`  ✗ Unknown provider: "${name}"`));
+    console.error(chalk.dim(`  Available providers: ${Object.keys(providers).join(', ')}`));
+    process.exit(1);
+  }
+
+  const resolved = deepMerge(config, providers[name]);
+  delete resolved.providers;
+  delete resolved.default;
+  return { config: resolved, providerName: name };
+}
+
+export async function loadConfig(cliModel = null) {
   let projectRoot;
   try {
     projectRoot = execSync('git rev-parse --show-toplevel', {
@@ -53,5 +84,7 @@ export async function loadConfig() {
     }
   }
 
-  return { config, projectRoot, loaded };
+  const { config: resolvedConfig, providerName } = resolveProvider(config, cliModel);
+
+  return { config: resolvedConfig, projectRoot, loaded, providerName };
 }

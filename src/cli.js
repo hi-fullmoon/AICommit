@@ -19,12 +19,14 @@ function showHelp() {
     -h, --help            Show this help message
     -v, --version         Show version number
     -l, --lang=<zh|en>    Commit message language (default: zh)
+    -m, --model=<name>    Use the named provider from config "providers"
     -s, --split           Split changes into multiple logical commits
     --debug               Print debug info (parsed args, final config, etc.)
 
   ${chalk.bold('Examples:')}
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
+    aicommit -m deepseek  Switch to the "deepseek" provider from config
     aicommit --split      Group changes into several logical commits
     aicommit /path/to    Commit changes in the specified directory
 `);
@@ -38,6 +40,7 @@ export function parseArgs() {
   const args = process.argv.slice(2);
   let targetPath = null;
   let cliLang = null;
+  let cliModel = null;
   let debug = false;
   let split = false;
 
@@ -84,6 +87,26 @@ export function parseArgs() {
       continue;
     }
 
+    if (arg === '-m' || arg === '--model') {
+      cliModel = args[++i];
+      if (!cliModel) {
+        console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<name>`));
+        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+        process.exit(1);
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--model=')) {
+      cliModel = arg.slice('--model='.length);
+      continue;
+    }
+
+    if (arg.startsWith('-m') && arg.length > 2) {
+      cliModel = arg.slice(2);
+      continue;
+    }
+
     if (!arg.startsWith('-')) {
       targetPath = arg;
     } else {
@@ -93,5 +116,5 @@ export function parseArgs() {
     }
   }
 
-  return { targetPath, cliLang, debug, split };
+  return { targetPath, cliLang, cliModel, debug, split };
 }

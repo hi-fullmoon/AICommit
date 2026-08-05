@@ -17,7 +17,7 @@ import { splitFlow } from './split.js';
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang, debug, split } = parseArgs();
+  const { targetPath, cliLang, cliModel, debug, split } = parseArgs();
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -39,7 +39,7 @@ export async function main() {
 
   // ── 1. Config ───────────────────────────────────────────────────────
 
-  const { config, projectRoot, loaded } = await loadConfig();
+  const { config, projectRoot, loaded, providerName } = await loadConfig(cliModel);
 
   if (loaded.length === 0) {
     console.log(chalk.dim('\n  No config files found — using defaults.'));
@@ -47,6 +47,11 @@ export async function main() {
   } else {
     const labels = loaded.map(l => chalk.bold(l)).join(', ');
     console.log('\n  ' + chalk.green('✓') + chalk.dim(` Config loaded from: ${labels}`));
+  }
+
+  if (providerName) {
+    const viaCli = cliModel ? chalk.dim(' (via CLI)') : '';
+    console.log('  ' + chalk.green('✓') + chalk.dim(` Model: ${providerName} (${config.modelId})${viaCli}`));
   }
 
   if (!config.apiKey) {
@@ -78,6 +83,8 @@ export async function main() {
     console.log(chalk.dim(`  projectRoot:  ${projectRoot}`));
     console.log(chalk.dim(`  config files: ${loaded.join(', ') || '(none — defaults only)'}`));
     console.log(chalk.dim(`  cliLang:      ${cliLang || '(not set)'}`));
+    console.log(chalk.dim(`  cliModel:     ${cliModel || '(not set)'}`));
+    console.log(chalk.dim(`  providerName: ${providerName || '(not set)'}`));
     console.log(chalk.dim(`  split:        ${split}`));
     console.log(chalk.dim('  final config:'));
     for (const [key, value] of Object.entries(config)) {

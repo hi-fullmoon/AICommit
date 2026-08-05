@@ -1,7 +1,20 @@
 {
-  "apiUrl": "https://api.openai.com/v1/chat/completions",
-  "apiKey": "sk-your-api-key-here",
-  "modelId": "gpt-4o",
+  "default": "minimax",
+
+  "providers": {
+    "minimax": {
+      "apiUrl": "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+      "apiKey": "sk-your-minimax-key-here",
+      "modelId": "MiniMax-Text-01"
+    },
+    "deepseek": {
+      "apiUrl": "https://api.deepseek.com/v1/chat/completions",
+      "apiKey": "sk-your-deepseek-key-here",
+      "modelId": "deepseek-chat",
+      "temperature": 0.3
+    }
+  },
+
   "language": "zh",
   "maxTokens": 1024,
   "prompt": "Generate a concise, conventional commit message for the following git diff. Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). The message should have a short subject line (max 72 chars), optionally followed by a blank line and a more detailed body if needed. Output ONLY the commit message, nothing else."
