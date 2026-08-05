@@ -2,5 +2,7 @@
   "apiUrl": "https://api.deepseek.com/v1/chat/completions",
   "apiKey": "sk-your-deepseek-key",
   "modelId": "deepseek-v4-flash",
-  "prompt": "Generate a concise, conventional commit message for the following git diff. Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). Output ONLY the commit message, nothing else."
+  "prompt": "Generate a concise, conventional commit message for the following git diff. Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). Output ONLY the commit message, nothing else.",
+   "language": "zh",
+  "maxTokens": 1024
 }
