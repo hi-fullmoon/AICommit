@@ -11,7 +11,8 @@
     "src/"
   ],
   "scripts": {
-    "start": "node bin/aicommit.js"
+    "start": "node bin/aicommit.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@inquirer/checkbox": "^4.3.2",
