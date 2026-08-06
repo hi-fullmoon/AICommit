@@ -28,8 +28,17 @@ test('cleanCommitMessage strips code fences and <think> blocks', () => {
   assert.equal(cleanCommitMessage('  docs: trim\n'), 'docs: trim');
 });
 
-test('formatUsage joins prompt and completion token counts', () => {
-  assert.equal(formatUsage({ prompt_tokens: 5, completion_tokens: 2 }), '5+2');
+test('formatUsage always uses k/M units (k is the smallest)', () => {
+  assert.equal(formatUsage({ prompt_tokens: 6800, completion_tokens: 900, total_tokens: 7700 }), '6.8k+0.9k (7.7k)');
+  assert.equal(formatUsage({ prompt_tokens: 500, completion_tokens: 200 }), '0.5k+0.2k (0.7k)');
+  assert.equal(formatUsage({ prompt_tokens: 1200000, completion_tokens: 500 }), '1.2M+0.5k (1.2M)');
+});
+
+test('formatUsage handles total-only and empty usage objects', () => {
+  assert.equal(formatUsage({ total_tokens: 7000 }), '7k');
+  assert.equal(formatUsage({ total_tokens: 1000000 }), '1M');
+  assert.equal(formatUsage({ total_tokens: 50 }), '0.05k');
+  assert.equal(formatUsage({}), '');
 });
 
 test('formatMs renders milliseconds and seconds', () => {

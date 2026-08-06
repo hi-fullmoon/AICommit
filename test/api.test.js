@@ -42,6 +42,35 @@ test('reasoning model: empty content + reasoning triggers a follow-up call', asy
   assert.equal(calls.length, 2); // follow-up was actually made
 });
 
+test('usage aggregates across the reasoning follow-up call', async () => {
+  stubFetch([
+    { choices: [{ message: { content: null, reasoning_content: 'think\nfix: x\n' } }],
+      usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } },
+    { choices: [{ message: { content: 'fix: x' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+  ]);
+  const { message, usage } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'fix: x');
+  assert.deepEqual(usage, { prompt_tokens: 110, completion_tokens: 55, total_tokens: 165 });
+});
+
+test('usage is reported from a single call when no follow-up is needed', async () => {
+  stubFetch([
+    { choices: [{ message: { content: 'refactor: simplify' } }],
+      usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 } },
+  ]);
+  const { usage } = await generateCommitMessage(cfg(), diff);
+  assert.deepEqual(usage, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
+});
+
+test('usage is null when the provider reports no token counts', async () => {
+  stubFetch([
+    { choices: [{ message: { content: 'chore: no usage' } }], usage: {} },
+  ]);
+  const { usage } = await generateCommitMessage(cfg(), diff);
+  assert.equal(usage, null);
+});
+
 test('long reasoning trace is truncated to its tail for the follow-up', async () => {
   const calls = stubFetch([
     { choices: [{ message: { content: null, reasoning_content: 'A'.repeat(20000) + '\nfeat: add x\n' } }] },

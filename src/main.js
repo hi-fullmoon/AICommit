@@ -178,10 +178,7 @@ export async function main() {
     try {
       ({ message, elapsed, usage } = await generateCommitMessage(config, diff, regenerateCount));
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
-      if (usage) {
-        const tk = `${chalk.dim('tokens:')} ${formatUsage(usage)}`;
-        done += chalk.dim(`  (${tk})`);
-      }
+      if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
       spinner.succeed(done);
     } catch (err) {
       spinner.fail(chalk.red('API call failed'));

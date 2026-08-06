@@ -86,7 +86,7 @@ async function generateSplitPlan(config, files, diff) {
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
   // empty content work here just like in the single-commit flow.
-  const { text, data } = await getResponseText(
+  const { text, usage } = await getResponseText(
     config,
     [
       { role: 'system', content: system },
@@ -102,7 +102,7 @@ async function generateSplitPlan(config, files, diff) {
     throw new Error('API returned an empty split plan.');
   }
 
-  return { raw: text, elapsed: performance.now() - t0, usage: data?.usage };
+  return { raw: text, elapsed: performance.now() - t0, usage };
 }
 
 // Extract the JSON array from the model's response (tolerates code fences
@@ -286,7 +286,7 @@ export async function splitFlow(config, projectRoot) {
     let elapsed, usage;
     ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff));
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
-    if (usage) done += chalk.dim(`  (tokens: ${formatUsage(usage)})`);
+    if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
     spinner.succeed(done);
   } catch (err) {
     spinner.fail(chalk.red('API call failed'));
@@ -356,8 +356,10 @@ export async function splitFlow(config, projectRoot) {
         }).start();
         try {
           regenCounts[idx]++;
-          const { message, elapsed } = await generateCommitMessage(config, groupDiff, regenCounts[idx]);
-          rspinner.succeed(`Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`);
+          const { message, elapsed, usage } = await generateCommitMessage(config, groupDiff, regenCounts[idx]);
+          let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`;
+          if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
+          rspinner.succeed(done);
           groups[idx] = { ...groups[idx], message };
         } catch (err) {
           regenCounts[idx]--;

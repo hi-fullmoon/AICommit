@@ -35,8 +35,27 @@ export function formatMs(ms) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+// Abbreviate a token count with k/M units — k is the smallest unit shown,
+// so even sub-thousand counts render as 0.xk. Sub-0.1k counts keep a second
+// decimal so tiny values (e.g. the ping check) don't collapse to "0k".
+function formatTokens(n) {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+  const k = n / 1_000;
+  // The leading `+` strips a trailing ".0" so 7000 renders as "7k", not "7.0k".
+  return `${+(k.toFixed(k < 0.1 ? 2 : 1))}k`;
+}
+
+// "6.8k+900 (7.7k)" — prompt + completion, with the total appended. Uses the
+// provider-reported total_tokens when present, else derives it from the parts.
 export function formatUsage(usage) {
-  return `${usage.prompt_tokens}+${usage.completion_tokens}`;
+  const hasBreakdown =
+    typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number';
+  if (hasBreakdown) {
+    const total = usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens;
+    return `${formatTokens(usage.prompt_tokens)}+${formatTokens(usage.completion_tokens)} (${formatTokens(total)})`;
+  }
+  if (typeof usage.total_tokens === 'number') return `${formatTokens(usage.total_tokens)}`;
+  return '';
 }
 
 // Indent every line of an error message by two spaces, so multi-line API

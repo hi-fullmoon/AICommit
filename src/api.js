@@ -113,14 +113,30 @@ const FOLLOWUP_COMMIT_PROMPT =
   '(e.g. feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). ' +
   'Do not include any other text, explanation, or code fences.';
 
+// Combine usage across every API call in one round. Reasoning models can
+// trigger a follow-up call (see getResponseText); summing both keeps the
+// reported token count honest instead of dropping the reasoning tokens.
+function sumUsage(...usages) {
+  const total = {};
+  for (const u of usages) {
+    if (!u) continue;
+    for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens']) {
+      if (typeof u[key] === 'number') total[key] = (total[key] || 0) + u[key];
+    }
+  }
+  return Object.keys(total).length ? total : null;
+}
+
 // Make the API call and return the assistant text plus the first response's
 // reasoning. Reasoning models that can't disable thinking (MiniMax M2.x,
 // DeepSeek R1, OpenRouter reasoning models) may return empty content with a
 // reasoning trace; in that case a follow-up call feeds the (truncated) tail
 // of the reasoning back as context so the model produces the final answer.
-// Shared by the commit flow and the split flow.
+// Shared by the commit flow and the split flow. `usage` aggregates the token
+// counts of every call made in the round.
 export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
   let data = await callAPI(config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens);
+  const usages = [data?.usage];
   const reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
 
@@ -134,10 +150,11 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
       { role: 'assistant', content: truncated },
       { role: 'user', content: followUpPrompt },
     ], temperature, maxTokens);
+    usages.push(data?.usage);
     text = extractMessage(data);
   }
 
-  return { text, data, reasoning };
+  return { text, data, reasoning, usage: sumUsage(...usages) };
 }
 
 export async function generateCommitMessage(config, diff, regenerateCount = 0) {
@@ -164,7 +181,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
-  const { text, data, reasoning } = await getResponseText(
+  const { text, data, reasoning, usage } = await getResponseText(
     config, messages, variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
   );
   let message = text;
@@ -186,5 +203,5 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
     );
   }
 
-  return { message: cleanCommitMessage(message), elapsed, usage: data?.usage };
+  return { message: cleanCommitMessage(message), elapsed, usage };
 }
