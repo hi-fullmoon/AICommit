@@ -35,6 +35,10 @@ export function formatMs(ms) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+export function formatUsage(usage) {
+  return `${usage.prompt_tokens}+${usage.completion_tokens}`;
+}
+
 export function maskApiKey(key) {
   if (!key) return '(not set)';
   if (key.length <= 8) return '****';

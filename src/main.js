@@ -9,15 +9,15 @@ import { loadConfig } from './config.js';
 import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitAdd, gitCommit,
 } from './git.js';
-import { generateCommitMessage } from './api.js';
+import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage } from './ui.js';
-import { formatMs, maskApiKey } from './utils.js';
+import { formatMs, maskApiKey, formatUsage } from './utils.js';
 import { splitFlow } from './split.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang, cliModel, debug, split } = parseArgs();
+  const { targetPath, cliLang, cliModel, debug, split, check } = parseArgs();
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -52,6 +52,43 @@ export async function main() {
   if (providerName) {
     const viaCli = cliModel ? chalk.dim(' (via CLI)') : '';
     console.log('  ' + chalk.green('✓') + chalk.dim(` Model: ${providerName} (${config.modelId})${viaCli}`));
+  }
+
+  // ── 1.5. Connection check ───────────────────────────────────────────
+
+  if (check) {
+    console.log('');
+    const spinner = ora({
+      text:  chalk.dim(`Checking ${chalk.bold(config.modelId)} ...`),
+      color: 'cyan',
+    }).start();
+
+    try {
+      const report = await checkConnection(config);
+      spinner.succeed('Connection OK');
+
+      console.log('');
+      console.log('  ' + chalk.dim('Provider:  ') + (providerName || chalk.dim('(flat config)')));
+      console.log('  ' + chalk.dim('Endpoint:  ') + config.apiUrl);
+      console.log('  ' + chalk.dim('API key:   ') + maskApiKey(config.apiKey));
+      console.log('  ' + chalk.dim('Model:     ') + config.modelId);
+      if (report.content) {
+        console.log('  ' + chalk.dim('Reply:     ') + `"${report.content.slice(0, 80)}"`);
+      } else {
+        console.log('  ' + chalk.yellow('Reply:     (empty — endpoint is reachable but the model returned no text)'));
+      }
+      console.log('  ' + chalk.dim('Latency:   ') + formatMs(report.elapsed));
+      if (report.model) console.log('  ' + chalk.dim('Echoed:    ') + report.model);
+      if (report.usage) {
+        console.log('  ' + chalk.dim('Tokens:    ') + formatUsage(report.usage));
+      }
+      console.log('');
+      process.exit(0);
+    } catch (err) {
+      spinner.fail('Connection failed');
+      console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
+      process.exit(1);
+    }
   }
 
   if (!config.apiKey) {
@@ -142,7 +179,7 @@ export async function main() {
       ({ message, elapsed, usage } = await generateCommitMessage(config, diff, regenerateCount));
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) {
-        const tk = `${chalk.dim('tokens:')} ${usage.prompt_tokens}+${usage.completion_tokens}`;
+        const tk = `${chalk.dim('tokens:')} ${formatUsage(usage)}`;
         done += chalk.dim(`  (${tk})`);
       }
       spinner.succeed(done);

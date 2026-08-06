@@ -21,6 +21,7 @@ function showHelp() {
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -m, --model=<name>    Use the named provider from config "providers"
     -s, --split           Split changes into multiple logical commits
+    -c, --check           Verify the configured LLM is reachable (ping test)
     --debug               Print debug info (parsed args, final config, etc.)
 
   ${chalk.bold('Examples:')}
@@ -28,6 +29,8 @@ function showHelp() {
     aicommit --lang=en    Generate English commit message
     aicommit -m deepseek  Switch to the "deepseek" provider from config
     aicommit --split      Group changes into several logical commits
+    aicommit -c           Verify the configured (default) provider is reachable
+    aicommit -c -m openrouter  Verify the "openrouter" provider is reachable
     aicommit /path/to    Commit changes in the specified directory
 `);
 }
@@ -43,6 +46,7 @@ export function parseArgs() {
   let cliModel = null;
   let debug = false;
   let split = false;
+  let check = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -64,6 +68,11 @@ export function parseArgs() {
 
     if (arg === '-s' || arg === '--split') {
       split = true;
+      continue;
+    }
+
+    if (arg === '-c' || arg === '--check') {
+      check = true;
       continue;
     }
 
@@ -116,5 +125,5 @@ export function parseArgs() {
     }
   }
 
-  return { targetPath, cliLang, cliModel, debug, split };
+  return { targetPath, cliLang, cliModel, debug, split, check };
 }
