@@ -8,6 +8,7 @@ import { parseArgs } from './cli.js';
 import { loadConfig } from './config.js';
 import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitAdd, gitCommit,
+  stripLockFileContent, condenseDiff, getDiffStat,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage, vimSelect } from './ui.js';
@@ -164,6 +165,18 @@ export async function main() {
     console.log(`  ${c('  ' + icon)} ${c(path)}`);
   }
 
+  // Prepare the diff the model sees (computed once — it doesn't change across
+  // regenerations): lock-file contents are stripped to a stub (they carry no
+  // commit intent) and oversized diffs are condensed to a --stat summary plus
+  // truncated hunks, so token spend stays proportional to what the model needs.
+  const strippedDiff = stripLockFileContent(diff);
+  const { diff: modelDiff, truncated } = condenseDiff(
+    strippedDiff, config.maxDiffChars, getDiffStat(isStaged),
+  );
+  if (truncated) {
+    console.log(chalk.dim(`  (diff condensed for the model — ${strippedDiff.length} → ${modelDiff.length} chars)`));
+  }
+
   // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
   let message, elapsed, usage;
@@ -176,7 +189,7 @@ export async function main() {
     }).start();
 
     try {
-      ({ message, elapsed, usage } = await generateCommitMessage(config, diff, regenerateCount));
+      ({ message, elapsed, usage } = await generateCommitMessage(config, modelDiff, regenerateCount));
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
       spinner.succeed(done);

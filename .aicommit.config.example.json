@@ -22,5 +22,6 @@
 
   "language": "en",
   "maxTokens": 1024,
+  "maxDiffChars": 30000,
   "prompt": "Generate a concise, conventional commit message for the following git diff. Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). The message should have a short subject line (max 72 chars), optionally followed by a blank line and a more detailed body if needed. Output ONLY the commit message, nothing else."
 }

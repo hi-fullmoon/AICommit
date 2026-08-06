@@ -14,6 +14,10 @@ export const DEFAULT_CONFIG = {
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
   maxTokens: 1024,
+  // Cap on diff characters sent to the model per call. Oversized diffs are
+  // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
+  // change set doesn't burn tokens on lines the model doesn't need.
+  maxDiffChars: 30000,
   prompt: [
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',

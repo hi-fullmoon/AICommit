@@ -130,8 +130,10 @@ function sumUsage(...usages) {
 // Make the API call and return the assistant text plus the first response's
 // reasoning. Reasoning models that can't disable thinking (MiniMax M2.x,
 // DeepSeek R1, OpenRouter reasoning models) may return empty content with a
-// reasoning trace; in that case a follow-up call feeds the (truncated) tail
-// of the reasoning back as context so the model produces the final answer.
+// reasoning trace; in that case a follow-up call feeds the (truncated) tail of
+// the reasoning back as context so the model produces the final answer — the
+// original messages (which include the full diff) are NOT re-sent, since the
+// reasoning tail already carries the model's own analysis of them.
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
 export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
@@ -145,8 +147,13 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
       ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
       : reasoning;
 
+    // Don't re-send the original messages — the user message is the full diff,
+    // which can be tens of thousands of tokens. The reasoning tail already
+    // contains the model's analysis of it; keep only the (cheap) system prompt
+    // for language/format constraints, then the reasoning + the follow-up ask.
+    const systemMsg = messages.find(m => m.role === 'system');
     data = await callAPI(config.apiUrl, config.apiKey, config.modelId, [
-      ...messages,
+      ...(systemMsg ? [systemMsg] : []),
       { role: 'assistant', content: truncated },
       { role: 'user', content: followUpPrompt },
     ], temperature, maxTokens);

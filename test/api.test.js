@@ -71,6 +71,20 @@ test('usage is null when the provider reports no token counts', async () => {
   assert.equal(usage, null);
 });
 
+test('reasoning follow-up does not re-send the original diff', async () => {
+  const calls = stubFetch([
+    { choices: [{ message: { content: null, reasoning_content: 'analyzing…\nfix: x\n' } }] },
+    { choices: [{ message: { content: 'fix: x' } }] },
+  ]);
+  await generateCommitMessage(cfg(), diff);
+  const followUp = calls[1].messages;
+  assert.ok(followUp.some(m => m.role === 'system'), 'system prompt kept for constraints');
+  assert.equal(followUp.find(m => m.role === 'assistant').content, 'analyzing…\nfix: x\n');
+  assert.ok(!followUp.some(m => m.content.includes('Here is the git diff')), 'diff not re-sent');
+  assert.equal(followUp.at(-1).role, 'user');
+  assert.match(followUp.at(-1).content, /output ONLY the final conventional commit message/);
+});
+
 test('long reasoning trace is truncated to its tail for the follow-up', async () => {
   const calls = stubFetch([
     { choices: [{ message: { content: null, reasoning_content: 'A'.repeat(20000) + '\nfeat: add x\n' } }] },

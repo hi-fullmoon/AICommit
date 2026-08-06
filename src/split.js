@@ -7,7 +7,7 @@ import ora from 'ora';
 import editor from '@inquirer/editor';
 
 import { getResponseText, generateCommitMessage } from './api.js';
-import { getBranch, hasHead, runGit } from './git.js';
+import { getBranch, hasHead, runGit, stripLockFileContent, isLockFile } from './git.js';
 import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
 import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.js';
 
@@ -63,10 +63,11 @@ async function generateSplitPlan(config, files, diff) {
     ? 'Write each commit message in Chinese (Simplified Chinese).'
     : 'Write each commit message in English.';
 
-  const truncated = diff.length > SPLIT_MAX_DIFF_CHARS;
+  const stripped  = stripLockFileContent(diff);
+  const truncated = stripped.length > SPLIT_MAX_DIFF_CHARS;
   const diffPart  = truncated
-    ? diff.slice(0, SPLIT_MAX_DIFF_CHARS) + '\n... (diff truncated)'
-    : diff;
+    ? stripped.slice(0, SPLIT_MAX_DIFF_CHARS) + '\n... (diff truncated)'
+    : stripped;
 
   const system = [
     'You are an expert at organizing git changes into small, atomic commits.',
@@ -198,7 +199,7 @@ function getGroupDiff(projectRoot, head, group, allFiles) {
       cwd: projectRoot, encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
     }).trim();
-    if (diff) return diff;
+    if (diff) return stripLockFileContent(diff);
   } catch { /* fall through to the file-list preview */ }
 
   const byPath = new Map(allFiles.map(f => [f.path, f]));
@@ -206,7 +207,7 @@ function getGroupDiff(projectRoot, head, group, allFiles) {
   for (const p of group.files) {
     const status = byPath.get(p)?.status || '?';
     parts.push(`${status} ${p}`);
-    if (status === '??' || status === '?') {
+    if ((status === '??' || status === '?') && !isLockFile(p)) {
       try {
         const content = readFileSync(join(projectRoot, p), 'utf-8');
         const preview = content.length > 2000

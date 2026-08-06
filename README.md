@@ -53,6 +53,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `language` | Commit message language, `zh` or `en` (default: `zh`)              |
 | `temperature` | Sampling temperature (default: `0.3`)                           |
 | `maxTokens` | Max response tokens (default: `1024`)                             |
+| `maxDiffChars` | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`) |
 
 Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
