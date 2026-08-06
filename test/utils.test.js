@@ -29,9 +29,15 @@ test('cleanCommitMessage strips code fences and <think> blocks', () => {
 });
 
 test('formatUsage always uses k/M units (k is the smallest)', () => {
-  assert.equal(formatUsage({ prompt_tokens: 6800, completion_tokens: 900, total_tokens: 7700 }), '6.8k+0.9k (7.7k)');
-  assert.equal(formatUsage({ prompt_tokens: 500, completion_tokens: 200 }), '0.5k+0.2k (0.7k)');
-  assert.equal(formatUsage({ prompt_tokens: 1200000, completion_tokens: 500 }), '1.2M+0.5k (1.2M)');
+  assert.equal(formatUsage({ prompt_tokens: 6800, completion_tokens: 900, total_tokens: 7700 }), '6.8k in + 0.9k out (total 7.7k)');
+  assert.equal(formatUsage({ prompt_tokens: 500, completion_tokens: 200 }), '0.5k in + 0.2k out (total 0.7k)');
+  assert.equal(formatUsage({ prompt_tokens: 1200000, completion_tokens: 500 }), '1.2M in + 0.5k out (total 1.2M)');
+});
+
+test('formatUsage total is the sum of the displayed parts, not the raw total', () => {
+  // The provider's raw total (1950) would round to "2k" on its own, but the
+  // displayed parts (1.6k + 0.3k) must add up to the shown total (1.9k).
+  assert.equal(formatUsage({ prompt_tokens: 1600, completion_tokens: 300, total_tokens: 1950 }), '1.6k in + 0.3k out (total 1.9k)');
 });
 
 test('formatUsage handles total-only and empty usage objects', () => {
