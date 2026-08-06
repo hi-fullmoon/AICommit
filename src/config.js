@@ -23,14 +23,15 @@ export const DEFAULT_CONFIG = {
 };
 
 // Resolve the final flat config from a merged config that may contain a
-// "providers" map: pick `cliModel` → config.default → first provider key,
-// deep-merge that entry over the top-level values, then drop the
-// providers/default keys so downstream code sees a plain flat config.
-function resolveProvider(config, cliModel) {
+// "providers" map: pick `cliProvider` → config.defaultProvider → first
+// provider key, deep-merge that entry over the top-level values, then drop
+// the providers/defaultProvider keys so downstream code sees a plain flat
+// config.
+function resolveProvider(config, cliProvider) {
   const providers = config.providers;
 
-  if (cliModel && !providers) {
-    console.error(chalk.red(`  ✗ -m/--model given ("${cliModel}") but no "providers" defined in config.`));
+  if (cliProvider && !providers) {
+    console.error(chalk.red(`  ✗ -p/--provider given ("${cliProvider}") but no "providers" defined in config.`));
     console.error(chalk.dim('  Define a "providers" map in ~/.aicommit.config.json or ./.aicommit.config.json'));
     process.exit(1);
   }
@@ -39,7 +40,7 @@ function resolveProvider(config, cliModel) {
     return { config, providerName: null };
   }
 
-  const name = cliModel || config.default || Object.keys(providers)[0];
+  const name = cliProvider || config.defaultProvider || Object.keys(providers)[0];
 
   if (!providers[name]) {
     console.error(chalk.red(`  ✗ Unknown provider: "${name}"`));
@@ -49,11 +50,11 @@ function resolveProvider(config, cliModel) {
 
   const resolved = deepMerge(config, providers[name]);
   delete resolved.providers;
-  delete resolved.default;
+  delete resolved.defaultProvider;
   return { config: resolved, providerName: name };
 }
 
-export async function loadConfig(cliModel = null) {
+export async function loadConfig(cliProvider = null) {
   let projectRoot;
   try {
     projectRoot = execSync('git rev-parse --show-toplevel', {
@@ -84,7 +85,7 @@ export async function loadConfig(cliModel = null) {
     }
   }
 
-  const { config: resolvedConfig, providerName } = resolveProvider(config, cliModel);
+  const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
   return { config: resolvedConfig, projectRoot, loaded, providerName };
 }

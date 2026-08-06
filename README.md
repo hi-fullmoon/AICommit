@@ -14,11 +14,11 @@ Requires Node.js >= 18.
 
 Config is deep-merged: `./.aicommit.config.json` (project) overrides `~/.aicommit.config.json` (global). See [.aicommit.config.example.json](.aicommit.config.example.json).
 
-Multiple providers can be defined and switched at runtime with `-m` / `--model`:
+Multiple providers can be defined and switched at runtime with `-p` / `--provider`:
 
 ```json
 {
-  "default": "minimax",
+  "defaultProvider": "minimax",
 
   "providers": {
     "minimax": {
@@ -40,12 +40,12 @@ Multiple providers can be defined and switched at runtime with `-m` / `--model`:
 }
 ```
 
-The selected provider's values are deep-merged over the top-level keys, so shared settings (`language`, `prompt`, `temperature`, `maxTokens`, ...) only need to be set once. Without `-m`, the `default` provider is used (or the first entry in `providers` if `default` is omitted). A flat single-model config (top-level `apiUrl`/`apiKey`/`modelId`, no `providers`) still works as before.
+The selected provider's values are deep-merged over the top-level keys, so shared settings (`language`, `prompt`, `temperature`, `maxTokens`, ...) only need to be set once. Without `-p`, the `defaultProvider` is used (or the first entry in `providers` if `defaultProvider` is omitted). A flat single-model config (top-level `apiUrl`/`apiKey`/`modelId`, no `providers`) still works as before.
 
 | Key        | Description                                                        |
 | ---------- | ------------------------------------------------------------------ |
 | `providers` | Named provider configs (`apiUrl`/`apiKey`/`modelId`/...)        |
-| `default`  | Provider used when `-m` is not given                               |
+| `defaultProvider` | Provider used when `-p` is not given (renamed from `default`) |
 | `apiUrl`   | OpenAI-compatible chat completions endpoint                        |
 | `apiKey`   | API key (empty string allowed for local models)                    |
 | `modelId`  | Model identifier                                                   |
@@ -63,16 +63,16 @@ aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
 aicommit -l zh           # commit message language
-aicommit -m deepseek     # switch to the "deepseek" provider
+aicommit -p deepseek     # switch to the "deepseek" provider
 aicommit -c              # verify the configured LLM is reachable
-aicommit -c -m openrouter # verify the "openrouter" provider specifically
+aicommit -c -p openrouter # verify the "openrouter" provider specifically
 aicommit -h              # help
 ```
 
 | Option            | Description                                   |
 | ----------------- | --------------------------------------------- |
 | `-l`, `--lang`    | Commit message language (`zh` or `en`)        |
-| `-m`, `--model`   | Use the named provider from `providers`       |
+| `-p`, `--provider` | Use the named provider from `providers`      |
 | `-s`, `--split`   | Split changes into multiple logical commits   |
 | `-c`, `--check`   | Ping the provider to verify endpoint/key/model are working (exit 0 on success, 1 on failure) |
 | `-v`, `--version` | Show version                                  |

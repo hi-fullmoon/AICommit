@@ -10,14 +10,14 @@ import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitAdd, gitCommit,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
-import { statusColor, statusIcon, confirmAction, editMessage } from './ui.js';
-import { formatMs, maskApiKey, formatUsage } from './utils.js';
+import { statusColor, statusIcon, confirmAction, editMessage, vimSelect } from './ui.js';
+import { formatMs, maskApiKey, formatUsage, indentError } from './utils.js';
 import { splitFlow } from './split.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang, cliModel, debug, split, check } = parseArgs();
+  const { targetPath, cliLang, cliProvider, debug, split, check } = parseArgs();
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -39,7 +39,7 @@ export async function main() {
 
   // ── 1. Config ───────────────────────────────────────────────────────
 
-  const { config, projectRoot, loaded, providerName } = await loadConfig(cliModel);
+  const { config, projectRoot, loaded, providerName } = await loadConfig(cliProvider);
 
   if (loaded.length === 0) {
     console.log(chalk.dim('\n  No config files found — using defaults.'));
@@ -50,7 +50,7 @@ export async function main() {
   }
 
   if (providerName) {
-    const viaCli = cliModel ? chalk.dim(' (via CLI)') : '';
+    const viaCli = cliProvider ? chalk.dim(' (via CLI)') : '';
     console.log('  ' + chalk.green('✓') + chalk.dim(` Model: ${providerName} (${config.modelId})${viaCli}`));
   }
 
@@ -86,7 +86,7 @@ export async function main() {
       process.exit(0);
     } catch (err) {
       spinner.fail('Connection failed');
-      console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
+      console.log(`\n  ${indentError(err)}\n`);
       process.exit(1);
     }
   }
@@ -120,7 +120,7 @@ export async function main() {
     console.log(chalk.dim(`  projectRoot:  ${projectRoot}`));
     console.log(chalk.dim(`  config files: ${loaded.join(', ') || '(none — defaults only)'}`));
     console.log(chalk.dim(`  cliLang:      ${cliLang || '(not set)'}`));
-    console.log(chalk.dim(`  cliModel:     ${cliModel || '(not set)'}`));
+    console.log(chalk.dim(`  cliProvider:  ${cliProvider || '(not set)'}`));
     console.log(chalk.dim(`  providerName: ${providerName || '(not set)'}`));
     console.log(chalk.dim(`  split:        ${split}`));
     console.log(chalk.dim('  final config:'));
@@ -185,8 +185,21 @@ export async function main() {
       spinner.succeed(done);
     } catch (err) {
       spinner.fail(chalk.red('API call failed'));
-      console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
-      process.exit(1);
+      console.log(`\n  ${indentError(err)}\n`);
+      // A transient API failure shouldn't kill the session — let the user
+      // retry, fall back to the previous message (if any), or cancel.
+      const choice = await vimSelect({
+        message: 'The API call failed. What would you like to do?',
+        choices: [
+          ...(message ? [{ name: 'Keep the previous message', value: 'keep' }] : []),
+          { name: 'Try again', value: 'retry' },
+          { name: 'Cancel', value: 'cancel' },
+        ],
+      });
+      if (choice === 'keep') break; // commit with the previous good message
+      if (choice === 'retry') continue;
+      console.log(chalk.dim('\n  Commit cancelled.\n'));
+      process.exit(0);
     }
 
     if (!message) {
