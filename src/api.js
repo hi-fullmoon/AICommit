@@ -106,8 +106,42 @@ function extractFromReasoning(reasoning) {
   return nonEmpty[nonEmpty.length - 1]?.trim() || '';
 }
 
+// Prompt for the follow-up call when a reasoning model returned only a
+// reasoning trace and no content.
+const FOLLOWUP_COMMIT_PROMPT =
+  'Based on your analysis above, output ONLY the final conventional commit message ' +
+  '(e.g. feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). ' +
+  'Do not include any other text, explanation, or code fences.';
+
+// Make the API call and return the assistant text plus the first response's
+// reasoning. Reasoning models that can't disable thinking (MiniMax M2.x,
+// DeepSeek R1, OpenRouter reasoning models) may return empty content with a
+// reasoning trace; in that case a follow-up call feeds the (truncated) tail
+// of the reasoning back as context so the model produces the final answer.
+// Shared by the commit flow and the split flow.
+export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
+  let data = await callAPI(config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens);
+  const reasoning = extractReasoning(data?.choices?.[0]?.message);
+  let text = extractMessage(data);
+
+  if (!text.trim() && reasoning) {
+    const truncated = reasoning.length > MAX_REASONING_CHARS
+      ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
+      : reasoning;
+
+    data = await callAPI(config.apiUrl, config.apiKey, config.modelId, [
+      ...messages,
+      { role: 'assistant', content: truncated },
+      { role: 'user', content: followUpPrompt },
+    ], temperature, maxTokens);
+    text = extractMessage(data);
+  }
+
+  return { text, data, reasoning };
+}
+
 export async function generateCommitMessage(config, diff, regenerateCount = 0) {
-  const { apiUrl, apiKey, modelId, prompt, temperature, language, maxTokens } = config;
+  const { prompt, temperature, language, maxTokens } = config;
   const t0 = performance.now();
 
   // Build language directive — prepended AND appended so it takes priority
@@ -130,35 +164,10 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
-  let data = await callAPI(apiUrl, apiKey, modelId, messages, variedTemperature, maxTokens);
-  let message = extractMessage(data);
-  const reasoning = extractReasoning(data?.choices?.[0]?.message);
-
-  // When content is empty but reasoning exists (models that can't disable
-  // thinking — MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models),
-  // make a follow-up call using the reasoning as context to extract the
-  // final commit message. Only the tail of the reasoning is sent back — it
-  // holds the conclusion, and a full trace would be slow and expensive.
-  if (!message.trim() && reasoning) {
-    const truncated = reasoning.length > MAX_REASONING_CHARS
-      ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
-      : reasoning;
-
-    const followUpMessages = [
-      ...messages,
-      { role: 'assistant', content: truncated },
-      {
-        role: 'user',
-        content:
-          'Based on your analysis above, output ONLY the final conventional commit message ' +
-          '(e.g. feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). ' +
-          'Do not include any other text, explanation, or code fences.',
-      },
-    ];
-
-    data = await callAPI(apiUrl, apiKey, modelId, followUpMessages, variedTemperature, maxTokens);
-    message = extractMessage(data);
-  }
+  const { text, data, reasoning } = await getResponseText(
+    config, messages, variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
+  );
+  let message = text;
 
   // Last resort: extract a message from the reasoning content itself
   if (!message.trim() && reasoning) {
