@@ -12,10 +12,15 @@
       "apiKey": "sk-your-deepseek-key-here",
       "modelId": "deepseek-chat",
       "temperature": 0.3
+    },
+    "openrouter": {
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "sk-or-v1-your-openrouter-key-here",
+      "modelId": "openai/gpt-4o-mini"
     }
   },
 
-  "language": "zh",
+  "language": "en",
   "maxTokens": 1024,
   "prompt": "Generate a concise, conventional commit message for the following git diff. Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). The message should have a short subject line (max 72 chars), optionally followed by a blank line and a more detailed body if needed. Output ONLY the commit message, nothing else."
 }

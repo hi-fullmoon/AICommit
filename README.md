@@ -30,6 +30,11 @@ Multiple providers can be defined and switched at runtime with `-m` / `--model`:
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKey": "sk-...",
       "modelId": "deepseek-chat"
+    },
+    "openrouter": {
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "sk-or-v1-...",
+      "modelId": "openai/gpt-4o-mini"
     }
   }
 }
@@ -49,7 +54,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `temperature` | Sampling temperature (default: `0.3`)                           |
 | `maxTokens` | Max response tokens (default: `1024`)                             |
 
-Works with any OpenAI-compatible API: OpenAI, DeepSeek, Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
+Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
 ## Usage
 
@@ -59,6 +64,8 @@ aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
 aicommit -l zh           # commit message language
 aicommit -m deepseek     # switch to the "deepseek" provider
+aicommit -c              # verify the configured LLM is reachable
+aicommit -c -m openrouter # verify the "openrouter" provider specifically
 aicommit -h              # help
 ```
 
@@ -67,6 +74,7 @@ aicommit -h              # help
 | `-l`, `--lang`    | Commit message language (`zh` or `en`)        |
 | `-m`, `--model`   | Use the named provider from `providers`       |
 | `-s`, `--split`   | Split changes into multiple logical commits   |
+| `-c`, `--check`   | Ping the provider to verify endpoint/key/model are working (exit 0 on success, 1 on failure) |
 | `-v`, `--version` | Show version                                  |
 | `-h`, `--help`    | Show help                                     |
 
