@@ -6,10 +6,10 @@ import chalk from 'chalk';
 import ora from 'ora';
 import editor from '@inquirer/editor';
 
-import { callAPI, generateCommitMessage } from './api.js';
+import { getResponseText, generateCommitMessage } from './api.js';
 import { getBranch, hasHead, runGit } from './git.js';
 import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
-import { cleanCommitMessage, formatMs } from './utils.js';
+import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -56,7 +56,7 @@ function getSplitDiff(projectRoot, head) {
 // Ask the model to partition the changed files into logical commits.
 // Returns the raw response text; parsing happens in parsePlan/normalizePlan.
 async function generateSplitPlan(config, files, diff) {
-  const { apiUrl, apiKey, modelId, temperature, language, maxTokens } = config;
+  const { temperature, language, maxTokens } = config;
   const t0 = performance.now();
 
   const langLine = language === 'zh'
@@ -83,20 +83,26 @@ async function generateSplitPlan(config, files, diff) {
     `Changed files:\n${files.map(f => `${f.status} ${f.path}`).join('\n')}` +
     `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
 
-  const data = await callAPI(apiUrl, apiKey, modelId, [
-    { role: 'system', content: system },
-    { role: 'user',   content: user },
-  ], temperature, Math.max(maxTokens, 2048));
+  // Reuse the shared call + reasoning-follow-up path so reasoning models
+  // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
+  // empty content work here just like in the single-commit flow.
+  const { text, data } = await getResponseText(
+    config,
+    [
+      { role: 'system', content: system },
+      { role: 'user',   content: user },
+    ],
+    temperature,
+    Math.max(maxTokens, 2048),
+    'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
+    'Do not include any other text, explanation, or code fences.',
+  );
 
-  const raw = data?.choices?.[0]?.message?.content
-    || data?.content?.[0]?.text
-    || '';
-
-  if (!raw.trim()) {
+  if (!text.trim()) {
     throw new Error('API returned an empty split plan.');
   }
 
-  return { raw, elapsed: performance.now() - t0, usage: data?.usage };
+  return { raw: text, elapsed: performance.now() - t0, usage: data?.usage };
 }
 
 // Extract the JSON array from the model's response (tolerates code fences
@@ -280,11 +286,11 @@ export async function splitFlow(config, projectRoot) {
     let elapsed, usage;
     ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff));
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
-    if (usage) done += chalk.dim(`  (tokens: ${usage.prompt_tokens}+${usage.completion_tokens})`);
+    if (usage) done += chalk.dim(`  (tokens: ${formatUsage(usage)})`);
     spinner.succeed(done);
   } catch (err) {
     spinner.fail(chalk.red('API call failed'));
-    console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
+    console.log(`\n  ${indentError(err)}\n`);
     process.exit(1);
   }
 
@@ -356,7 +362,7 @@ export async function splitFlow(config, projectRoot) {
         } catch (err) {
           regenCounts[idx]--;
           rspinner.fail(chalk.red(`Group ${idx + 1} regenerate failed`));
-          console.log(`\n  ${err.message.split('\n').join('\n  ')}\n`);
+          console.log(`\n  ${indentError(err)}\n`);
         }
       }
       continue; // show the updated plan again

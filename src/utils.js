@@ -39,6 +39,12 @@ export function formatUsage(usage) {
   return `${usage.prompt_tokens}+${usage.completion_tokens}`;
 }
 
+// Indent every line of an error message by two spaces, so multi-line API
+// errors align under the surrounding CLI indentation.
+export function indentError(err) {
+  return err.message.split('\n').join('\n  ');
+}
+
 export function maskApiKey(key) {
   if (!key) return '(not set)';
   if (key.length <= 8) return '****';
