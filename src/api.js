@@ -1,6 +1,10 @@
 import { cleanCommitMessage } from './utils.js';
 
-export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, maxTokens) {
+// Default per-request timeout; overridable via the "timeoutMs" config key.
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs) {
+  const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
   const body = JSON.stringify({
     model: modelId,
     messages,
@@ -17,16 +21,28 @@ export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, ma
     reasoning_split: true,
   });
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      // Identify the app to OpenRouter (ignored by other providers).
-      'X-Title': 'aicommit',
-    },
-    body,
-  });
+  let response;
+  try {
+    response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        // Identify the app to OpenRouter (ignored by other providers).
+        'X-Title': 'aicommit',
+      },
+      body,
+      signal: AbortSignal.timeout(timeout),
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      throw new Error(
+        `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
+        `Raise "timeoutMs" in your config if this keeps happening.`,
+      );
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -41,7 +57,7 @@ export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, ma
 // echoed model id, and a preview of the model's reply. Uses the same request
 // body as a real call, so it validates the actual path a commit would take.
 export async function checkConnection(config) {
-  const { apiUrl, apiKey, modelId, maxTokens } = config;
+  const { apiUrl, apiKey, modelId, maxTokens, timeoutMs } = config;
   const t0 = performance.now();
 
   const data = await callAPI(
@@ -51,6 +67,7 @@ export async function checkConnection(config) {
     [{ role: 'user', content: 'Reply with exactly: OK' }],
     0,
     Math.min(maxTokens || 1024, 64),
+    timeoutMs,
   );
 
   const content = extractMessage(data);
@@ -137,7 +154,7 @@ function sumUsage(...usages) {
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
 export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
-  let data = await callAPI(config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens);
+  let data = await callAPI(config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens, config.timeoutMs);
   const usages = [data?.usage];
   const reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
@@ -156,7 +173,7 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
       ...(systemMsg ? [systemMsg] : []),
       { role: 'assistant', content: truncated },
       { role: 'user', content: followUpPrompt },
-    ], temperature, maxTokens);
+    ], temperature, maxTokens, config.timeoutMs);
     usages.push(data?.usage);
     text = extractMessage(data);
   }
@@ -168,12 +185,9 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
   const { prompt, temperature, language, maxTokens } = config;
   const t0 = performance.now();
 
-  // Build language directive — prepended AND appended so it takes priority
-  // even when the user's custom prompt contains conflicting language instructions.
-  const langHintPre = language === 'zh'
-    ? 'IMPORTANT: You MUST write the commit message in Chinese (Simplified Chinese).\n\n'
-    : 'IMPORTANT: You MUST write the commit message in English.\n\n';
-  const langHintPost = language === 'zh'
+  // Build the language directive — appended after the (possibly custom)
+  // prompt so it takes priority over conflicting language instructions in it.
+  const langHint = language === 'zh'
     ? '\n\nIMPORTANT: The commit message MUST be written in Chinese (Simplified Chinese).'
     : '\n\nIMPORTANT: The commit message MUST be written in English.';
 
@@ -184,7 +198,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
   const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
 
   const messages = [
-    { role: 'system', content: langHintPre + prompt + langHintPost },
+    { role: 'system', content: prompt + langHint },
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
