@@ -32,12 +32,39 @@ export const DEFAULT_CONFIG = {
   // with "*" wildcards (e.g. ["*.min.js", "*.map", "*.snap"]). Generated
   // artifacts carry no commit intent but can be enormous.
   stripFiles: [],
+  // Structured rules + few-shot examples: weaker models follow numbered rules
+  // and mimic concrete examples far more reliably than abstract prose. Two
+  // examples with different types (one scoped, one not) keep weak models from
+  // copying a single example's type/scope onto every diff.
   prompt: [
-    'Generate a concise, conventional commit message for the following git diff.',
-    'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
-    'The message should have a short subject line (max 72 chars), optionally followed by a blank line and a more detailed body if needed.',
-    'Output ONLY the commit message, nothing else — do not wrap it in markdown code fences.',
-  ].join(' '),
+    'You are a commit message generator. Write ONE conventional commit message for the git diff the user provides.',
+    '',
+    'Rules:',
+    '1. The first line MUST be "<type>: <subject>" or "<type>(<scope>): <subject>", where <type> is one of: feat, fix, chore, docs, refactor, test, style, perf, ci, build.',
+    '2. Subject: imperative mood ("add", not "added" or "adds"), no trailing period, max 72 chars.',
+    '3. Add a body after a blank line only when the "what" or "why" is not obvious from the subject; most diffs need only the first line.',
+    '4. Output ONLY the commit message — no explanation, no quotes, no markdown code fences. The first character of your reply must be the first letter of the type.',
+    '5. The examples below only show the format — always pick the type, scope, and wording from the actual diff.',
+    '',
+    'Example diff:',
+    '```diff',
+    'diff --git a/src/auth.js b/src/auth.js',
+    '+export async function login(user, pass) {',
+    "+  return api.post('/login', { user, pass });",
+    '+}',
+    '```',
+    'Example output:',
+    'feat(auth): add login API call',
+    '',
+    'Example diff:',
+    '```diff',
+    'diff --git a/README.md b/README.md',
+    '-## Instalation',
+    '+## Installation',
+    '```',
+    'Example output:',
+    'docs: fix typo in installation heading',
+  ].join('\n'),
 };
 
 // Resolve the final flat config from a merged config that may contain a

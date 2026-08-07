@@ -150,6 +150,51 @@ test('Anthropic-format response (content[0].text) is used without a follow-up', 
   assert.equal(calls.length, 1);
 });
 
+test('non-conventional reply triggers a corrective retry without re-sending the diff', async () => {
+  const calls = stubFetch([
+    { choices: [{ message: { content: 'Updated the login page styling.' } }] },
+    { choices: [{ message: { content: 'style: update login page styling' } }] },
+  ]);
+  const { message } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'style: update login page styling');
+  assert.equal(calls.length, 2, 'one corrective retry was made');
+  const retry = calls[1].messages;
+  assert.equal(retry[0].role, 'system', 'system prompt kept for language/format constraints');
+  assert.match(retry.at(-1).content, /Updated the login page styling\./, 'bad reply fed back');
+  assert.ok(!retry.some(m => m.content.includes('Here is the git diff')), 'diff not re-sent');
+});
+
+test('corrective retry usage aggregates with the first call', async () => {
+  stubFetch([
+    { choices: [{ message: { content: '"feat: add x"' } }],
+      usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } },
+    { choices: [{ message: { content: 'feat: add x' } }],
+      usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 } },
+  ]);
+  const { message, usage } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'feat: add x');
+  assert.deepEqual(usage, { prompt_tokens: 120, completion_tokens: 15, total_tokens: 135 });
+});
+
+test('empty corrective retry keeps the original reply', async () => {
+  const calls = stubFetch([
+    { choices: [{ message: { content: 'Updated the login page styling.' } }] },
+    { choices: [{ message: { content: null } }] },
+  ]);
+  const { message } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'Updated the login page styling.');
+  assert.equal(calls.length, 2);
+});
+
+test('valid conventional reply makes no corrective retry', async () => {
+  const calls = stubFetch([
+    { choices: [{ message: { content: 'fix(api): handle empty diff' } }] },
+  ]);
+  const { message } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'fix(api): handle empty diff');
+  assert.equal(calls.length, 1);
+});
+
 test('empty response throws a helpful error mentioning maxTokens', async () => {
   stubFetch([{ choices: [{ message: { content: null } }] }]);
   await assert.rejects(() => generateCommitMessage(cfg(), diff), /maxTokens/);

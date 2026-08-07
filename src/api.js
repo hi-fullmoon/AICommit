@@ -89,6 +89,28 @@ const COMMIT_TYPE_RE = /\b(?:feat|fix|chore|docs|refactor|test|style|perf|ci|bui
 // would be slow and expensive for no benefit.
 const MAX_REASONING_CHARS = 8000;
 
+// Strict first-line check that decides whether a corrective retry is
+// worthwhile: a conventional commit starts with a known type, an optional
+// scope, optional "!", then ": ". Weak models often return prose ("Updated
+// the login page") or a quoted message — both fail here and earn one retry.
+const CONVENTIONAL_SUBJECT_RE = /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
+
+// Prompt for the corrective retry: the model already produced the right
+// content in the wrong shape, so the diff is NOT re-sent — reformatting the
+// bad reply is enough, and far cheaper than a second full-diff call.
+function correctivePrompt(badReply) {
+  return [
+    'Your previous reply was not a valid conventional commit message:',
+    '',
+    badReply.slice(0, 1000),
+    '',
+    'Rewrite it as a conventional commit message: first line "<type>: <subject>" ' +
+    '(type one of feat, fix, chore, docs, refactor, test, style, perf, ci, build), ' +
+    'then an optional body after a blank line. ' +
+    'Output ONLY the rewritten message — no explanation, no quotes, no code fences.',
+  ].join('\n');
+}
+
 // Read the assistant text from either OpenAI format
 // (choices[0].message.content, possibly an array of parts) or Anthropic
 // format (content[0].text).
@@ -202,14 +224,32 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
     { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
   ];
 
-  const { text, data, reasoning, usage } = await getResponseText(
+  const { text, data, reasoning, usage: firstUsage } = await getResponseText(
     config, messages, variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
   );
+  let usage = firstUsage;
   let message = text;
 
   // Last resort: extract a message from the reasoning content itself
   if (!message.trim() && reasoning) {
     message = extractFromReasoning(reasoning);
+  }
+  message = cleanCommitMessage(message);
+
+  // Weak models sometimes answer with prose or a quoted message instead of a
+  // conventional commit. Give the model one cheap chance to reformat its own
+  // reply; keep whatever comes back — a non-empty reply beats nothing.
+  if (message.trim() && !CONVENTIONAL_SUBJECT_RE.test(message.split('\n', 1)[0])) {
+    const retry = await getResponseText(
+      config,
+      [messages[0], { role: 'user', content: correctivePrompt(message) }],
+      variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
+    );
+    const fixed = cleanCommitMessage(retry.text);
+    if (fixed.trim()) {
+      message = fixed;
+      usage = sumUsage(usage, retry.usage);
+    }
   }
 
   const elapsed = performance.now() - t0;
