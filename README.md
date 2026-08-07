@@ -53,7 +53,11 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `language` | Commit message language, `zh` or `en` (default: `zh`)              |
 | `temperature` | Sampling temperature (default: `0.3`)                           |
 | `maxTokens` | Max response tokens (default: `1024`)                             |
+| `timeoutMs` | Per-request timeout in milliseconds (default: `120000`)            |
 | `maxDiffChars` | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`) |
+| `maxFileDiffChars` | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`) |
+| `diffContextLines` | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `3`) |
+| `stripFiles` | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`) |
 
 Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
