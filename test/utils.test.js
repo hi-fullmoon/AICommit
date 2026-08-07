@@ -28,6 +28,13 @@ test('cleanCommitMessage strips code fences and <think> blocks', () => {
   assert.equal(cleanCommitMessage('  docs: trim\n'), 'docs: trim');
 });
 
+test('cleanCommitMessage strips fences sharing a line with the message', () => {
+  assert.equal(cleanCommitMessage('``` feat: add x'), 'feat: add x');
+  assert.equal(cleanCommitMessage('``` feat: add x ```'), 'feat: add x');
+  assert.equal(cleanCommitMessage('```\nfeat: add x\n- body line\n```'), 'feat: add x\n- body line');
+  assert.equal(cleanCommitMessage('```text feat: add x'), 'feat: add x');
+});
+
 test('formatUsage always uses k/M units (k is the smallest)', () => {
   assert.equal(formatUsage({ prompt_tokens: 6800, completion_tokens: 900, total_tokens: 7700 }), '6.8k in + 0.9k out (total 7.7k)');
   assert.equal(formatUsage({ prompt_tokens: 500, completion_tokens: 200 }), '0.5k in + 0.2k out (total 0.7k)');
