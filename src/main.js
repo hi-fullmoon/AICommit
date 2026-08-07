@@ -8,7 +8,7 @@ import { parseArgs } from './cli.js';
 import { loadConfig } from './config.js';
 import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitAdd, gitCommit,
-  stripLockFileContent, condenseDiff, getDiffStat,
+  stripLockFileContent, condenseDiff, getDiffStat, getUntrackedFiles,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage, vimSelect } from './ui.js';
@@ -142,15 +142,25 @@ export async function main() {
     // Only one changed file — continue with the normal single-commit flow.
   }
 
-  const { diff, isStaged } = getStagedDiff();
+  // All git commands run at the repo root (projectRoot), so the diff the
+  // model sees covers exactly what `git add -A` + `git commit` will commit,
+  // even when aicommit is invoked from a subdirectory.
+  const { diff, isStaged } = getStagedDiff(projectRoot, config.diffContextLines);
   if (!diff) {
     console.log('\n  ' + chalk.yellow('✗ No changes to commit.'));
-    console.log(chalk.dim('  Stage your changes with ') + chalk.bold('git add') + chalk.dim(' first.\n'));
+    // Untracked files never appear in git diff — call them out explicitly
+    // instead of letting the user think there's nothing to commit.
+    const untracked = getUntrackedFiles(projectRoot);
+    if (untracked.length) {
+      console.log(chalk.dim(`  ${untracked.length} untracked file(s) found — run `) + chalk.bold('git add') + chalk.dim(' to include them.\n'));
+    } else {
+      console.log(chalk.dim('  Stage your changes with ') + chalk.bold('git add') + chalk.dim(' first.\n'));
+    }
     process.exit(1);
   }
 
   const stats     = getDiffStats(diff);
-  const changedFiles = getChangedFiles(isStaged);
+  const changedFiles = getChangedFiles(isStaged, projectRoot);
   const branch    = getBranch();
   const stageIcon = isStaged ? chalk.green('staged') : chalk.yellow('unstaged');
   const changeStr = chalk.green(`+${stats.additions}`) + '  ' + chalk.red(`-${stats.deletions}`);
@@ -166,12 +176,13 @@ export async function main() {
   }
 
   // Prepare the diff the model sees (computed once — it doesn't change across
-  // regenerations): lock-file contents are stripped to a stub (they carry no
-  // commit intent) and oversized diffs are condensed to a --stat summary plus
-  // truncated hunks, so token spend stays proportional to what the model needs.
-  const strippedDiff = stripLockFileContent(diff);
+  // regenerations): lock-file and stripFiles contents are stubbed (they carry
+  // no commit intent) and oversized diffs are condensed to a --stat summary
+  // plus truncated hunks, so token spend stays proportional to what the
+  // model needs.
+  const strippedDiff = stripLockFileContent(diff, config.stripFiles);
   const { diff: modelDiff, truncated } = condenseDiff(
-    strippedDiff, config.maxDiffChars, getDiffStat(isStaged),
+    strippedDiff, config.maxDiffChars, getDiffStat(isStaged, projectRoot), config.maxFileDiffChars,
   );
   if (truncated) {
     console.log(chalk.dim(`  (diff condensed for the model — ${strippedDiff.length} → ${modelDiff.length} chars)`));
