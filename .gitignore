@@ -1,2 +1,4 @@
 node_modules/
 .aicommit.config.json
+
+.DS_Store
