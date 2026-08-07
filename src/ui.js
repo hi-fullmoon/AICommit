@@ -92,8 +92,8 @@ export async function confirmAction(message) {
     message: 'What would you like to do?',
     choices: [
       { name:  'Use this message',     value: 'use',        description: 'Commit with the suggested message' },
-      { name:  'Edit message',         value: 'edit',       description: 'Modify the message before committing' },
       { name:  'Regenerate',           value: 'regenerate', description: 'Ask AI to generate a different message' },
+      { name:  'Edit message',         value: 'edit',       description: 'Modify the message before committing' },
       { name:  'Cancel',               value: 'cancel',     description: 'Abort the commit' },
     ],
   });
