@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getDiffStats, isLockFile, stripLockFileContent, condenseDiff } from '../src/git.js';
+import { getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff, unifiedArg } from '../src/git.js';
 
 test('getDiffStats counts files and +/- lines, ignoring headers', () => {
   const diff = [
@@ -54,6 +54,55 @@ test('isLockFile recognizes common lock files by basename, case-insensitively', 
   ]) {
     assert.equal(isLockFile(p), false, p);
   }
+});
+
+test('matchStripPattern matches basenames with * and ? wildcards, case-insensitively', () => {
+  const patterns = ['*.min.js', '*.map', 'asset-?.png'];
+  assert.equal(matchStripPattern('dist/app.min.js', patterns), true);
+  assert.equal(matchStripPattern('app.MIN.JS', patterns), true);
+  assert.equal(matchStripPattern('dist/bundle.js.map', patterns), true);
+  assert.equal(matchStripPattern('img/asset-1.png', patterns), true);
+  assert.equal(matchStripPattern('src/app.js', patterns), false);
+  assert.equal(matchStripPattern('asset-12.png', patterns), false);
+  assert.equal(matchStripPattern('src/app.js', []), false);
+  assert.equal(matchStripPattern('src/app.js', null), false);
+  assert.equal(matchStripPattern('src/app.js', ['', 42]), false);
+});
+
+test('unifiedArg builds --unified=<n> and falls back to 3 for bad input', () => {
+  assert.equal(unifiedArg(0), '--unified=0');
+  assert.equal(unifiedArg(1), '--unified=1');
+  assert.equal(unifiedArg(3), '--unified=3');
+  assert.equal(unifiedArg(undefined), '--unified=3');
+  assert.equal(unifiedArg(-1), '--unified=3');
+  assert.equal(unifiedArg(1.5), '--unified=3');
+  assert.equal(unifiedArg('1'), '--unified=3');
+});
+
+test('stripLockFileContent also stubs sections matched by stripFiles globs', () => {
+  const diff = [
+    'diff --git a/src/index.js b/src/index.js',
+    'index 1..2 100644',
+    '--- a/src/index.js',
+    '+++ b/src/index.js',
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+    'diff --git a/dist/app.min.js b/dist/app.min.js',
+    'index a..b 100644',
+    '--- a/dist/app.min.js',
+    '+++ b/dist/app.min.js',
+    '@@ -1 +1 @@',
+    '-minifiedOld',
+    '+minifiedNew',
+  ].join('\n');
+
+  const out = stripLockFileContent(diff, ['*.min.js']);
+  assert.ok(out.includes('diff --git a/src/index.js'), 'keeps regular file');
+  assert.ok(out.includes('+new'), 'keeps regular hunks');
+  assert.ok(out.includes('diff --git a/dist/app.min.js'), 'keeps stubbed header');
+  assert.ok(out.includes('generated file — content omitted'), 'stubs glob-matched body');
+  assert.ok(!out.includes('minifiedNew'), 'drops glob-matched hunks');
 });
 
 test('stripLockFileContent stubs lock-file sections and keeps regular diffs', () => {
@@ -117,4 +166,61 @@ test('condenseDiff with a single oversized section returns just the marker', () 
   const cut = condenseDiff(one, 50, '');
   assert.equal(cut.truncated, true);
   assert.ok(cut.diff.includes('diff truncated'));
+});
+
+
+test('condenseDiff caps a single oversized file section, keeping other files', () => {
+  const bigSection = [
+    'diff --git a/big.txt b/big.txt',
+    'index 1..2 100644',
+    '--- a/big.txt',
+    '+++ b/big.txt',
+    '@@ -1 +1 @@',
+    '+' + 'x'.repeat(500),
+  ].join('\n') + '\n';
+  const smallSection = [
+    'diff --git a/small.txt b/small.txt',
+    'index 3..4 100644',
+    '--- a/small.txt',
+    '+++ b/small.txt',
+    '@@ -1 +1 @@',
+    '+small',
+  ].join('\n');
+  const diff = bigSection + smallSection;
+
+  // Under the total budget, but big.txt exceeds the per-file cap: its section
+  // is truncated at a line boundary while small.txt survives intact.
+  const cut = condenseDiff(diff, 10_000, '', 120);
+  assert.equal(cut.truncated, true);
+  assert.ok(cut.diff.includes('diff --git a/big.txt'), 'big file header kept');
+  assert.ok(cut.diff.includes('file section truncated'), 'per-file cut marked');
+  assert.ok(!cut.diff.includes('x'.repeat(500)), 'big file body cut');
+  assert.ok(cut.diff.includes('+small'), 'small file kept whole');
+  // No line is cut mid-content: the kept big-file body ends at a newline.
+  const kept = cut.diff.split('file section truncated')[0];
+  assert.ok(kept.endsWith('\n... ('), 'cut lands on a line boundary');
+});
+
+test('condenseDiff per-file cap feeds into the total-budget pass when still over', () => {
+  const sections = [];
+  for (let i = 0; i < 5; i++) {
+    sections.push([
+      `diff --git a/f${i}.txt b/f${i}.txt`,
+      'index 1..2 100644',
+      `--- a/f${i}.txt`,
+      `+++ b/f${i}.txt`,
+      '@@ -1 +1 @@',
+      '+' + 'y'.repeat(200),
+    ].join('\n'));
+  }
+  const diff = sections.join('\n');
+
+  // Per-file cap shrinks each section, but the total still exceeds maxChars:
+  // later files are dropped and the stat summary is prepended.
+  const cut = condenseDiff(diff, 400, 'STAT', 120);
+  assert.equal(cut.truncated, true);
+  assert.ok(cut.diff.startsWith('STAT'), 'stat prepended');
+  assert.ok(cut.diff.includes('diff --git a/f0.txt'), 'first file kept');
+  assert.ok(cut.diff.includes('diff truncated'), 'total cut marked');
+  assert.ok(!cut.diff.includes('y'.repeat(200)), 'no section kept whole');
 });
