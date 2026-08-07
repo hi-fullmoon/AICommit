@@ -14,10 +14,24 @@ export const DEFAULT_CONFIG = {
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
   maxTokens: 1024,
+  // Per-request timeout in milliseconds — a hung endpoint aborts with a clear
+  // error instead of leaving the spinner running forever.
+  timeoutMs: 120000,
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
   // change set doesn't burn tokens on lines the model doesn't need.
   maxDiffChars: 30000,
+  // Cap on a single file's diff section. One huge file (e.g. a new generated
+  // asset) is truncated to its header and leading hunks instead of eating
+  // the whole maxDiffChars budget and pushing every other file out.
+  maxFileDiffChars: 3000,
+  // Context lines around each diff hunk (git diff --unified=<n>). Fewer lines
+  // means fewer tokens; commit messages rarely need git's default of 3.
+  diffContextLines: 3,
+  // Extra files to stub out of the diff like lock files, matched by basename
+  // with "*" wildcards (e.g. ["*.min.js", "*.map", "*.snap"]). Generated
+  // artifacts carry no commit intent but can be enormous.
+  stripFiles: [],
   prompt: [
     'Generate a concise, conventional commit message for the following git diff.',
     'Follow the conventional commits format (e.g., feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:).',
