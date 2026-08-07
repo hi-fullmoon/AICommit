@@ -32,7 +32,7 @@ export function cleanCommitMessage(msg) {
 }
 
 export function formatMs(ms) {
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 // Round a raw token count to the precision it's displayed at, expressed in k
