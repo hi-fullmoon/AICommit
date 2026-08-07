@@ -32,6 +32,15 @@ const cfg = (extra = {}) => ({
 });
 const diff = '--- a/x\n+++ b/x\n+foo';
 
+test('system prompt carries the language directive exactly once, appended after the prompt', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({ language: 'zh' }), diff);
+  const sys = calls[0].messages.find(m => m.role === 'system').content;
+  const hits = sys.match(/MUST be written in Chinese/g) || [];
+  assert.equal(hits.length, 1);
+  assert.ok(sys.startsWith('generate a commit message'), 'custom prompt first');
+});
+
 test('reasoning model: empty content + reasoning triggers a follow-up call', async () => {
   const calls = stubFetch([
     { choices: [{ message: { content: null, reasoning_content: 'think\nconclusion: fix: handle empty diff\n' } }] },
@@ -158,4 +167,13 @@ test('checkConnection extracts array-of-parts content and echoed model', async (
 test('checkConnection surfaces HTTP errors', async () => {
   globalThis.fetch = async () => new Response('bad key', { status: 401 });
   await assert.rejects(() => checkConnection(cfg()), /HTTP 401/);
+});
+
+test('request timeouts are wrapped with a helpful message', async () => {
+  globalThis.fetch = async () => {
+    const err = new Error('The operation timed out.');
+    err.name = 'TimeoutError';
+    throw err;
+  };
+  await assert.rejects(() => checkConnection(cfg({ timeoutMs: 5000 })), /timed out after 5s/);
 });

@@ -52,6 +52,11 @@ test('formatMs renders milliseconds and seconds', () => {
   assert.equal(formatMs(1500), '1.5s');
 });
 
+test('formatMs rounds sub-second floats (performance.now() is not an integer)', () => {
+  assert.equal(formatMs(452.090916), '452ms');
+  assert.equal(formatMs(2.5), '3ms');
+});
+
 test('maskApiKey masks short keys and summarizes long ones', () => {
   assert.equal(maskApiKey(''), '(not set)');
   assert.equal(maskApiKey('short'), '****');
