@@ -209,9 +209,18 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
 
   // Build the language directive — appended after the (possibly custom)
   // prompt so it takes priority over conflicting language instructions in it.
-  const langHint = language === 'zh'
-    ? '\n\nIMPORTANT: The commit message MUST be written in Chinese (Simplified Chinese).'
-    : '\n\nIMPORTANT: The commit message MUST be written in English.';
+  // It must explicitly override the examples' language too: a custom prompt
+  // full of Chinese few-shot examples makes weak models mimic the examples'
+  // language over an abstract instruction.
+  const targetLang = language === 'zh' ? 'Simplified Chinese' : 'English';
+  const langHint =
+    `\n\nIMPORTANT: Write the ENTIRE commit message (subject AND body) in ${targetLang}, ` +
+    `regardless of the language used in any instructions or examples above — ` +
+    `examples show the format only, never the language.`;
+
+  // Weak models weigh the end of the request most, so repeat the language
+  // constraint after the diff where it can't be drowned out by the prompt.
+  const langReminder = `\n\n(Remember: the commit message must be in ${targetLang}.)`;
 
   // On regenerate, vary the prompt and temperature to get a different result
   const variationHint = regenerateCount > 0
@@ -221,7 +230,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
 
   const messages = [
     { role: 'system', content: prompt + langHint },
-    { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint },
+    { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder },
   ];
 
   const { text, data, reasoning, usage: firstUsage } = await getResponseText(

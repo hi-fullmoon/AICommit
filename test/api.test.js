@@ -36,9 +36,16 @@ test('system prompt carries the language directive exactly once, appended after 
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
   await generateCommitMessage(cfg({ language: 'zh' }), diff);
   const sys = calls[0].messages.find(m => m.role === 'system').content;
-  const hits = sys.match(/MUST be written in Chinese/g) || [];
+  const hits = sys.match(/Simplified Chinese/g) || [];
   assert.equal(hits.length, 1);
   assert.ok(sys.startsWith('generate a commit message'), 'custom prompt first');
+});
+
+test('user message repeats the language constraint after the diff', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({ language: 'en' }), diff);
+  const user = calls[0].messages.find(m => m.role === 'user').content;
+  assert.ok(user.endsWith('(Remember: the commit message must be in English.)'));
 });
 
 test('reasoning model: empty content + reasoning triggers a follow-up call', async () => {
