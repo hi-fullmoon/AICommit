@@ -12,32 +12,22 @@ export function unifiedArg(contextLines) {
   return `--unified=${n}`;
 }
 
+// Only the staged diff is considered — aicommit never stages anything itself,
+// so the model sees exactly what `git commit` will commit. Returns '' when
+// nothing is staged.
 export function getStagedDiff(cwd, contextLines) {
   const opts = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAX_BUFFER, cwd };
-  const u = unifiedArg(contextLines);
-  let diff;
   try {
-    diff = execFileSync('git', ['diff', u, '--staged'], opts);
-  } catch { diff = ''; }
-
-  const isStaged = diff.trim().length > 0;
-
-  if (!isStaged) {
-    try {
-      diff = execFileSync('git', ['diff', u], opts);
-    } catch { diff = ''; }
-  }
-
-  return { diff: diff.trim(), isStaged };
+    return execFileSync('git', ['diff', unifiedArg(contextLines), '--staged'], opts).trim();
+  } catch { return ''; }
 }
 
-// Compact one-line-per-file summary of the same changes getStagedDiff returns.
-// Used to prepend context when a diff is condensed, so the model still sees
-// the full change scope without paying for every hunk.
-export function getDiffStat(isStaged, cwd) {
-  const flag = isStaged ? '--staged' : '';
+// Compact one-line-per-file summary of the same staged changes getStagedDiff
+// returns. Used to prepend context when a diff is condensed, so the model
+// still sees the full change scope without paying for every hunk.
+export function getDiffStat(cwd) {
   try {
-    return execSync(`git diff --stat ${flag}`, {
+    return execSync('git diff --stat --staged', {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAX_BUFFER, cwd,
     }).trim();
   } catch { return ''; }
@@ -144,15 +134,33 @@ export function condenseDiff(diff, maxChars, stat, maxSectionChars = Infinity) {
   return { diff: stat ? `${stat}\n\n${body}` : body, truncated: true };
 }
 
-export function getChangedFiles(isStaged, cwd) {
-  const flag = isStaged ? '--staged' : '';
+export function getChangedFiles(cwd) {
   try {
-    const out = execSync(`git diff --name-status ${flag}`, {
+    const out = execSync('git diff --name-status --staged', {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
     }).trim();
     if (!out) return [];
     return out.split('\n').map(line => {
       // Format: "<status>\t<path>" or "<status>\t<old>\t<new>" for renames
+      const parts = line.split('\t');
+      const status = parts[0];
+      const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
+      return { status, path };
+    });
+  } catch { return []; }
+}
+
+// Working-tree changes vs. the index (git diff without --staged) — same shape
+// as getChangedFiles. git diff --staged returns empty for these, so the "no
+// staged changes" path uses this to surface them instead of telling the user
+// there's nothing to commit when git status clearly shows work.
+export function getUnstagedFiles(cwd) {
+  try {
+    const out = execSync('git diff --name-status', {
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
+    }).trim();
+    if (!out) return [];
+    return out.split('\n').map(line => {
       const parts = line.split('\t');
       const status = parts[0];
       const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
@@ -190,10 +198,6 @@ export function getBranch() {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
     }).trim();
   } catch { return null; }
-}
-
-export function gitAdd(projectRoot) {
-  execSync('git add -A', { cwd: projectRoot, stdio: 'pipe' });
 }
 
 export function gitCommit(message, projectRoot) {

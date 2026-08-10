@@ -1,7 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff, unifiedArg } from '../src/git.js';
+import {
+  getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff,
+  unifiedArg, getChangedFiles, getUnstagedFiles,
+} from '../src/git.js';
+
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'aicommit-test-'));
+  execSync('git init -q', { cwd: dir });
+  execSync('git config user.email test@example.com && git config user.name Test', { cwd: dir });
+  writeFileSync(join(dir, 'a.txt'), 'one\n');
+  writeFileSync(join(dir, 'b.txt'), 'two\n');
+  execSync('git add . && git commit -qm init', { cwd: dir });
+  return dir;
+}
+
+test('getChangedFiles lists only staged paths; getUnstagedFiles only working-tree changes', () => {
+  const dir = makeRepo();
+  try {
+    // Staged change: a.txt. Unstaged change: b.txt.
+    writeFileSync(join(dir, 'a.txt'), 'one changed\n');
+    execSync('git add a.txt', { cwd: dir });
+    writeFileSync(join(dir, 'b.txt'), 'two changed\n');
+
+    assert.deepEqual(getChangedFiles(dir).map(f => f.path), ['a.txt']);
+    assert.deepEqual(getUnstagedFiles(dir).map(f => f.path), ['b.txt']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('getUnstagedFiles returns empty on a clean tree', () => {
+  const dir = makeRepo();
+  try {
+    assert.deepEqual(getUnstagedFiles(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('getDiffStats counts files and +/- lines, ignoring headers', () => {
   const diff = [

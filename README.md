@@ -83,7 +83,7 @@ aicommit -h              # help
 | `-v`, `--version` | Show version                                  |
 | `-h`, `--help`    | Show help                                     |
 
-Flow: reads the staged diff (falls back to unstaged changes), sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`).
+Flow: reads the staged diff (aicommit never runs `git add` — stage what you want to commit first), sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`).
 
 ### Split mode
 

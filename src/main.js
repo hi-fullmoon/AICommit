@@ -7,8 +7,9 @@ import ora from 'ora';
 import { parseArgs } from './cli.js';
 import { loadConfig } from './config.js';
 import {
-  getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitAdd, gitCommit,
+  getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitCommit,
   stripLockFileContent, condenseDiff, getDiffStat, getUntrackedFiles,
+  getUnstagedFiles,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage, vimSelect } from './ui.js';
@@ -50,10 +51,26 @@ export async function main() {
     console.log('\n  ' + chalk.green('✓') + chalk.dim(` Config loaded from: ${labels}`));
   }
 
+  // ── CLI language override ─────────────────────────────────────────
+  // Apply the -l/--lang override before the summary lines below, so the
+  // printed language always reflects the one that will actually be used.
+
+  if (cliLang) {
+    if (cliLang !== 'zh' && cliLang !== 'en') {
+      console.log('\n  ' + chalk.red(`✗ Invalid language: "${cliLang}". Use "zh" or "en".\n`));
+      process.exit(1);
+    }
+    config.language = cliLang;
+  }
+
   if (providerName) {
     const viaCli = cliProvider ? chalk.dim(' (via CLI)') : '';
     console.log('  ' + chalk.green('✓') + chalk.dim(` Model: ${providerName} (${config.modelId})${viaCli}`));
   }
+
+  const langLabel = config.language === 'zh' ? '中文' : 'English';
+  const langViaCli = cliLang ? chalk.dim(' (via CLI)') : '';
+  console.log('  ' + chalk.green('✓') + chalk.dim(` Language: ${langLabel}${langViaCli}`));
 
   // ── 1.5. Connection check ───────────────────────────────────────────
 
@@ -98,17 +115,6 @@ export async function main() {
     process.exit(1);
   }
 
-  // ── CLI language override ────────────────────────────────────────────
-
-  if (cliLang) {
-    if (cliLang !== 'zh' && cliLang !== 'en') {
-      console.log('\n  ' + chalk.red(`✗ Invalid language: "${cliLang}". Use "zh" or "en".\n`));
-      process.exit(1);
-    }
-    config.language = cliLang;
-    console.log('  ' + chalk.green('✓') + chalk.dim(` Language set to: ${cliLang === 'zh' ? '中文' : 'English'} (via CLI)`));
-  }
-
   // ── Debug output ─────────────────────────────────────────────────────
 
   if (debug) {
@@ -142,27 +148,45 @@ export async function main() {
     // Only one changed file — continue with the normal single-commit flow.
   }
 
-  // All git commands run at the repo root (projectRoot), so the diff the
-  // model sees covers exactly what `git add -A` + `git commit` will commit,
-  // even when aicommit is invoked from a subdirectory.
-  const { diff, isStaged } = getStagedDiff(projectRoot, config.diffContextLines);
+  // Only staged changes are considered — aicommit never runs `git add`, so the
+  // diff the model sees covers exactly what `git commit` will commit. All git
+  // commands run at the repo root (projectRoot), even when aicommit is invoked
+  // from a subdirectory.
+  const diff = getStagedDiff(projectRoot, config.diffContextLines);
   if (!diff) {
-    console.log('\n  ' + chalk.yellow('✗ No changes to commit.'));
-    // Untracked files never appear in git diff — call them out explicitly
-    // instead of letting the user think there's nothing to commit.
+    // Nothing staged. But git diff --staged is also empty for unstaged work
+    // and untracked files — surface what git status actually shows instead of
+    // falsely claiming there's nothing to commit.
+    const unstaged  = getUnstagedFiles(projectRoot);
     const untracked = getUntrackedFiles(projectRoot);
-    if (untracked.length) {
-      console.log(chalk.dim(`  ${untracked.length} untracked file(s) found — run `) + chalk.bold('git add') + chalk.dim(' to include them.\n'));
+
+    const tips = [];
+    if (unstaged.length)  tips.push(`${unstaged.length} unstaged file(s)`);
+    if (untracked.length) tips.push(`${untracked.length} untracked file(s)`);
+
+    if (!tips.length) {
+      console.log('\n  ' + chalk.yellow('✗ No changes to commit.\n'));
     } else {
-      console.log(chalk.dim('  Stage your changes with ') + chalk.bold('git add') + chalk.dim(' first.\n'));
+      console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`) + '\n');
+      for (const { status, path } of unstaged) {
+        const c = statusColor[status.charAt(0)] || chalk.dim;
+        const icon = statusIcon[status.charAt(0)] || status.charAt(0);
+        console.log(`  ${c('  ' + icon)} ${c(path)}`);
+      }
+      for (const path of untracked) {
+        const c = statusColor['?'];
+        const icon = statusIcon['?'];
+        console.log(`  ${c('  ' + icon)} ${c(path)}`);
+      }
+      console.log(chalk.dim('\n  Run ') + chalk.bold('git add') + chalk.dim(' to stage the files you want to commit, then run aicommit again.\n'));
     }
     process.exit(1);
   }
 
   const stats     = getDiffStats(diff);
-  const changedFiles = getChangedFiles(isStaged, projectRoot);
+  const changedFiles = getChangedFiles(projectRoot);
   const branch    = getBranch();
-  const stageIcon = isStaged ? chalk.green('staged') : chalk.yellow('unstaged');
+  const stageIcon = chalk.green('staged');
   const changeStr = chalk.green(`+${stats.additions}`) + '  ' + chalk.red(`-${stats.deletions}`);
 
   let statLine = chalk.dim('  ') + `✓ ${chalk.bold(stats.files)} files (${stageIcon})  ${changeStr}`;
@@ -182,7 +206,7 @@ export async function main() {
   // model needs.
   const strippedDiff = stripLockFileContent(diff, config.stripFiles);
   const { diff: modelDiff, truncated } = condenseDiff(
-    strippedDiff, config.maxDiffChars, getDiffStat(isStaged, projectRoot), config.maxFileDiffChars,
+    strippedDiff, config.maxDiffChars, getDiffStat(projectRoot), config.maxFileDiffChars,
   );
   if (truncated) {
     console.log(chalk.dim(`  (diff condensed for the model — ${strippedDiff.length} → ${modelDiff.length} chars)`));
@@ -258,19 +282,9 @@ export async function main() {
     process.exit(0);
   }
 
-  // ── 5. Auto-stage (if unstaged) & commit ────────────────────────────
+  // ── 5. Commit ────────────────────────────────────────────────────────
 
   console.log('');
-
-  if (!isStaged) {
-    process.stdout.write(chalk.dim('  → Auto-staging changes... '));
-    try {
-      gitAdd(projectRoot);
-      console.log(chalk.green('✓'));
-    } catch {
-      console.log(chalk.yellow('⚠'));
-    }
-  }
 
   const success = gitCommit(message, projectRoot);
 
