@@ -44,6 +44,18 @@ test('getUnstagedFiles returns empty on a clean tree', () => {
   }
 });
 
+test('getUnstagedFiles exposes real paths for staging via addPaths', () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(join(dir, 'b.txt'), 'two changed\n');
+    const [file] = getUnstagedFiles(dir);
+    assert.equal(file.path, 'b.txt');
+    assert.deepEqual(file.addPaths, ['b.txt']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('getDiffStats counts files and +/- lines, ignoring headers', () => {
   const diff = [
     'diff --git a/a.txt b/a.txt',

@@ -9,10 +9,10 @@ import { loadConfig } from './config.js';
 import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitCommit,
   stripLockFileContent, condenseDiff, getDiffStat, getUntrackedFiles,
-  getUnstagedFiles,
+  getUnstagedFiles, runGit,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
-import { statusColor, statusIcon, confirmAction, editMessage, vimSelect } from './ui.js';
+import { statusColor, statusIcon, confirmAction, editMessage, vimSelect, vimCheckbox } from './ui.js';
 import { formatMs, maskApiKey, formatUsage, indentError } from './utils.js';
 import { splitFlow } from './split.js';
 
@@ -148,11 +148,13 @@ export async function main() {
     // Only one changed file — continue with the normal single-commit flow.
   }
 
-  // Only staged changes are considered — aicommit never runs `git add`, so the
-  // diff the model sees covers exactly what `git commit` will commit. All git
-  // commands run at the repo root (projectRoot), even when aicommit is invoked
-  // from a subdirectory.
-  const diff = getStagedDiff(projectRoot, config.diffContextLines);
+  // Only staged changes are considered — the diff the model sees covers
+  // exactly what `git commit` will commit. When nothing is staged but the
+  // working tree has changes, the user is offered to stage all/some files
+  // interactively instead of being sent away to run `git add` manually.
+  // All git commands run at the repo root (projectRoot), even when aicommit
+  // is invoked from a subdirectory.
+  let diff = getStagedDiff(projectRoot, config.diffContextLines);
   if (!diff) {
     // Nothing staged. But git diff --staged is also empty for unstaged work
     // and untracked files — surface what git status actually shows instead of
@@ -166,21 +168,73 @@ export async function main() {
 
     if (!tips.length) {
       console.log('\n  ' + chalk.yellow('✗ No changes to commit.\n'));
-    } else {
-      console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`) + '\n');
-      for (const { status, path } of unstaged) {
-        const c = statusColor[status.charAt(0)] || chalk.dim;
-        const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-        console.log(`  ${c('  ' + icon)} ${c(path)}`);
-      }
-      for (const path of untracked) {
-        const c = statusColor['?'];
-        const icon = statusIcon['?'];
-        console.log(`  ${c('  ' + icon)} ${c(path)}`);
-      }
-      console.log(chalk.dim('\n  Run ') + chalk.bold('git add') + chalk.dim(' to stage the files you want to commit, then run aicommit again.\n'));
+      process.exit(1);
     }
-    process.exit(1);
+
+    console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`) + '\n');
+    for (const { status, path } of unstaged) {
+      const c = statusColor[status.charAt(0)] || chalk.dim;
+      const icon = statusIcon[status.charAt(0)] || status.charAt(0);
+      console.log(`  ${c('  ' + icon)} ${c(path)}`);
+    }
+    for (const path of untracked) {
+      const c = statusColor['?'];
+      const icon = statusIcon['?'];
+      console.log(`  ${c('  ' + icon)} ${c(path)}`);
+    }
+    console.log('');
+
+    // Offer to stage instead of exiting — the user can stage everything or
+    // pick files one by one.
+    const stageAction = await vimSelect({
+      message: 'No staged changes. How would you like to stage files?',
+      choices: [
+        { name: 'Stage all changes',      value: 'all',    description: 'Run git add -A (unstaged + untracked)' },
+        { name: 'Select files to stage',  value: 'pick',   description: 'Choose files individually' },
+        { name: 'Cancel',                 value: 'cancel', description: 'Exit without staging' },
+      ],
+    });
+
+    if (stageAction === 'cancel') {
+      console.log(chalk.dim('\n  Cancelled — stage files with ') + chalk.bold('git add') + chalk.dim(' and run aicommit again.\n'));
+      process.exit(0);
+    }
+
+    let toStage = null; // null → stage everything
+    if (stageAction === 'pick') {
+      const choices = [
+        ...unstaged.map(({ status, path, addPaths }) => ({
+          name: `${statusIcon[status.charAt(0)] || status.charAt(0)} ${path}`,
+          value: addPaths,
+        })),
+        ...untracked.map((path) => ({
+          name: `${statusIcon['?']} ${path}`,
+          value: [path],
+        })),
+      ];
+      const picked = await vimCheckbox({
+        message: 'Select files to stage (space to select, enter to confirm)',
+        choices,
+      });
+      if (!picked.length) {
+        console.log(chalk.dim('\n  No files selected — nothing staged.\n'));
+        process.exit(0);
+      }
+      toStage = picked.flat();
+    }
+
+    try {
+      runGit(toStage ? ['add', '--', ...toStage] : ['add', '-A'], projectRoot);
+    } catch (err) {
+      console.log('\n  ' + chalk.red(`✗ Failed to stage files: ${err.message}\n`));
+      process.exit(1);
+    }
+
+    diff = getStagedDiff(projectRoot, config.diffContextLines);
+    if (!diff) {
+      console.log('\n  ' + chalk.yellow('✗ Nothing staged — no diff to commit.\n'));
+      process.exit(1);
+    }
   }
 
   const stats     = getDiffStats(diff);

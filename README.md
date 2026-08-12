@@ -83,7 +83,7 @@ aicommit -h              # help
 | `-v`, `--version` | Show version                                  |
 | `-h`, `--help`    | Show help                                     |
 
-Flow: reads the staged diff (aicommit never runs `git add` — stage what you want to commit first), sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`).
+Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing.
 
 ### Split mode
 

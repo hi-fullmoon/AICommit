@@ -12,9 +12,9 @@ export function unifiedArg(contextLines) {
   return `--unified=${n}`;
 }
 
-// Only the staged diff is considered — aicommit never stages anything itself,
-// so the model sees exactly what `git commit` will commit. Returns '' when
-// nothing is staged.
+// Only the staged diff is considered, so the model sees exactly what
+// `git commit` will commit (staging happens up front, interactively, when
+// nothing is staged yet). Returns '' when nothing is staged.
 export function getStagedDiff(cwd, contextLines) {
   const opts = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAX_BUFFER, cwd };
   try {
@@ -153,7 +153,9 @@ export function getChangedFiles(cwd) {
 // Working-tree changes vs. the index (git diff without --staged) — same shape
 // as getChangedFiles. git diff --staged returns empty for these, so the "no
 // staged changes" path uses this to surface them instead of telling the user
-// there's nothing to commit when git status clearly shows work.
+// there's nothing to commit when git status clearly shows work. `addPaths`
+// carries the real path(s) for `git add` — `path` stays a display string
+// ("old → new" for renames), which git cannot add directly.
 export function getUnstagedFiles(cwd) {
   try {
     const out = execSync('git diff --name-status', {
@@ -164,7 +166,8 @@ export function getUnstagedFiles(cwd) {
       const parts = line.split('\t');
       const status = parts[0];
       const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
-      return { status, path };
+      const addPaths = parts.length === 3 ? [parts[1], parts[2]] : [parts[1]];
+      return { status, path, addPaths };
     });
   } catch { return []; }
 }
