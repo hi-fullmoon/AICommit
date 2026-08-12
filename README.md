@@ -12,7 +12,15 @@ Requires Node.js >= 18.
 
 ## Configure
 
-Config is deep-merged: `./.aicommit.config.json` (project) overrides `~/.aicommit.config.json` (global). See [.aicommit.config.example.json](.aicommit.config.example.json).
+The fastest way is the interactive wizard:
+
+```bash
+aicommit setup
+```
+
+It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection — then writes the config for you (global or project level, your choice).
+
+To configure by hand instead: config is deep-merged: `./.aicommit.config.json` (project) overrides `~/.aicommit.config.json` (global). See [.aicommit.config.example.json](.aicommit.config.example.json).
 
 Multiple providers can be defined and switched at runtime with `-p` / `--provider`:
 
@@ -22,14 +30,14 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
 
   "providers": {
     "minimax": {
-      "apiUrl": "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+      "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKey": "sk-...",
-      "modelId": "MiniMax-Text-01"
+      "modelId": "MiniMax-M3"
     },
     "deepseek": {
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKey": "sk-...",
-      "modelId": "deepseek-chat"
+      "modelId": "deepseek-v4-flash"
     },
     "openrouter": {
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
@@ -64,6 +72,7 @@ Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://ope
 ## Usage
 
 ```bash
+aicommit setup           # interactive configuration wizard
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits

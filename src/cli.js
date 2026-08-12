@@ -11,6 +11,10 @@ function showHelp() {
 
   ${chalk.bold('Usage:')}
     ${chalk.dim('$')} aicommit [path] [options]
+    ${chalk.dim('$')} aicommit setup
+
+  ${chalk.bold('Commands:')}
+    setup                 Interactive configuration wizard
 
   ${chalk.bold('Arguments:')}
     path                  Target directory (default: current directory)
@@ -25,6 +29,7 @@ function showHelp() {
     --debug               Print debug info (parsed args, final config, etc.)
 
   ${chalk.bold('Examples:')}
+    aicommit setup        Run the interactive configuration wizard
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
@@ -41,12 +46,23 @@ function showVersion() {
 
 export function parseArgs() {
   const args = process.argv.slice(2);
+
+  // "setup" is a standalone subcommand — it doesn't combine with the
+  // commit-flow options, so short-circuit before parsing them.
+  if (args[0] === 'setup') {
+    return {
+      targetPath: null, cliLang: null, cliProvider: null,
+      debug: false, split: false, check: false, setup: true,
+    };
+  }
+
   let targetPath = null;
   let cliLang = null;
   let cliProvider = null;
   let debug = false;
   let split = false;
   let check = false;
+  const setup = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -125,5 +141,5 @@ export function parseArgs() {
     }
   }
 
-  return { targetPath, cliLang, cliProvider, debug, split, check };
+  return { targetPath, cliLang, cliProvider, debug, split, check, setup };
 }

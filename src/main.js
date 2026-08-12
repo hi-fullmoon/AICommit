@@ -15,11 +15,19 @@ import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage, vimSelect, vimCheckbox } from './ui.js';
 import { formatMs, maskApiKey, formatUsage, indentError } from './utils.js';
 import { splitFlow } from './split.js';
+import { runSetup } from './setup.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang, cliProvider, debug, split, check } = parseArgs();
+  const { targetPath, cliLang, cliProvider, debug, split, check, setup } = parseArgs();
+
+  // The setup wizard is a standalone flow — no git repo, diff, or loaded
+  // config required.
+  if (setup) {
+    await runSetup();
+    return;
+  }
 
   if (targetPath) {
     const resolved = resolve(targetPath);
@@ -45,7 +53,7 @@ export async function main() {
 
   if (loaded.length === 0) {
     console.log(chalk.dim('\n  No config files found — using defaults.'));
-    console.log(chalk.dim('  Create ~/.aicommit.config.json to configure.'));
+    console.log(chalk.dim('  Run ') + chalk.bold('aicommit setup') + chalk.dim(' to configure interactively.'));
   } else {
     const labels = loaded.map(l => chalk.bold(l)).join(', ');
     console.log('\n  ' + chalk.green('✓') + chalk.dim(` Config loaded from: ${labels}`));

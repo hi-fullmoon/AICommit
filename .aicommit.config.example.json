@@ -1,16 +1,15 @@
 {
   "defaultProvider": "minimax",
-
   "providers": {
     "minimax": {
-      "apiUrl": "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+      "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKey": "sk-your-minimax-key-here",
-      "modelId": "MiniMax-Text-01"
+      "modelId": "MiniMax-M3"
     },
     "deepseek": {
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKey": "sk-your-deepseek-key-here",
-      "modelId": "deepseek-chat",
+      "modelId": "deepseek-v4-flash",
       "temperature": 0.3
     },
     "openrouter": {
@@ -19,13 +18,16 @@
       "modelId": "openai/gpt-4o-mini"
     }
   },
-
   "language": "en",
   "maxTokens": 1024,
   "timeoutMs": 120000,
   "maxDiffChars": 30000,
   "maxFileDiffChars": 3000,
   "diffContextLines": 3,
-  "stripFiles": ["*.min.js", "*.map", "*.snap"],
-  "prompt": "You are a commit message generator. Write ONE conventional commit message for the git diff the user provides.\n\nRules:\n1. The first line MUST be \"<type>: <subject>\" or \"<type>(<scope>): <subject>\", where <type> is one of: feat, fix, chore, docs, refactor, test, style, perf, ci, build.\n2. Subject: imperative mood (\"add\", not \"added\" or \"adds\"), no trailing period, max 72 chars.\n3. Add a body after a blank line only when the \"what\" or \"why\" is not obvious from the subject; most diffs need only the first line.\n4. Output ONLY the commit message — no explanation, no quotes, no markdown code fences. The first character of your reply must be the first letter of the type.\n5. The examples below only show the format — always pick the type, scope, and wording from the actual diff.\n\nExample diff:\n```diff\ndiff --git a/src/auth.js b/src/auth.js\n+export async function login(user, pass) {\n+  return api.post('/login', { user, pass });\n+}\n```\nExample output:\nfeat(auth): add login API call\n\nExample diff:\n```diff\ndiff --git a/README.md b/README.md\n-## Instalation\n+## Installation\n```\nExample output:\ndocs: fix typo in installation heading"
+  "stripFiles": [
+    "*.min.js",
+    "*.map",
+    "*.snap"
+  ],
+  "prompt": "You are a git commit message generator. Write ONE commit message for the git diff the user provides.\n\n## Output contract (highest priority)\n\n- Output ONLY the commit message itself: no reasoning, no explanation, no quotes, no markdown code fences.\n- The first character of your reply must be the first letter of the type (e.g. \"f\" for feat).\n\n## Format\n\n<type>: <short subject>\n\n- <change point 1>\n- <change point 2>\n\n- The subject line is required; after a blank line you may add several bullet points starting with \"- \".\n- When the change is simple and the subject says it all, omit the bullet points — output the subject only.\n- If the diff contains several independent changes: pick the type and subject from the most important change, and list the rest as bullet points.\n\n## Types\n\n| Type | When to use | Example |\n| :--- | :--- | :--- |\n| feat | New feature, page, or module | feat: add organization registration page |\n| fix | Bug fix | fix: table pagination not working |\n| chore | Build, dependency upgrades, config changes | chore: upgrade @xh/base to 6.26.16 |\n| refactor | Restructuring code without changing behavior | refactor: extract shared form logic into a hook |\n| style | Formatting or style adjustments | style: adjust form field alignment |\n| docs | Documentation updates | docs: update menu directory index |\n| test | Test-related changes | test: add unit tests for the login API |\n\n## Wording requirements\n\n- Subject: max 50 characters, summarizing the intent of the change; bullet points describe the concrete changes (what was added, removed, or adjusted).\n- Never use empty filler wording like \"updated the code\" or \"made many changes\" that carries no information.\n\n## Examples\n\n### Good commits\n\nfeat: set up system menu routes and page structure\n\n- add 19 page directories and base components across 7 modules\n- configure routes in config/routes.ts\n- add src/config/menu.ts menu config, wired into BasicLayout\n\nfeat: change the default landing page to organization registration\n\n- redirect the root route / to /org/institution\n- land on /org/institution after successful login\n\n### Bad commits (never output like this)\n\nUpdated the code\n\nfeat: made many changes"
 }

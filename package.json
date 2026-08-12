@@ -18,6 +18,8 @@
     "@inquirer/checkbox": "^4.3.2",
     "@inquirer/confirm": "^5.1.0",
     "@inquirer/editor": "^4.1.0",
+    "@inquirer/input": "^5.1.2",
+    "@inquirer/password": "^5.1.1",
     "@inquirer/select": "^4.1.0",
     "boxen": "^8.0.1",
     "chalk": "^5.4.0",
