@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, chmod } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -132,10 +132,12 @@ export async function runSetup() {
   // ── 3. API key ──────────────────────────────────────────────────────
 
   const hasKey = Boolean(existingProvider.apiKey);
+  // An empty key is allowed — local models (Ollama, LM Studio, LiteLLM) are
+  // keyless; the optional connection test below still catches a missing key
+  // for providers that require one.
   const keyInput = await password({
-    message:  `API key for ${providerName}${hasKey ? ` (current: ${maskApiKey(existingProvider.apiKey)} — leave empty to keep)` : ''}`,
+    message:  `API key for ${providerName}${hasKey ? ` (current: ${maskApiKey(existingProvider.apiKey)} — leave empty to keep)` : ' (leave empty for local models)'}`,
     mask:     '*',
-    validate: v => (v.trim() || hasKey) ? true : 'API key is required',
   });
   const apiKey = keyInput.trim() || existingProvider.apiKey;
 
@@ -195,6 +197,9 @@ export async function runSetup() {
 
   const merged = mergeSetupConfig(existing, { providerName, entry, language });
   await writeFile(targetPath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  // The config stores a plaintext API key — keep it out of other users'
+  // reach (writeFile produces 0644 under a typical 022 umask).
+  await chmod(targetPath, 0o600);
 
   console.log('');
   console.log('  ' + chalk.green.bold('✓ Config saved'));

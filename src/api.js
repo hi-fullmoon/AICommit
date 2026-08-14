@@ -255,9 +255,11 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
       variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
     );
     const fixed = cleanCommitMessage(retry.text);
+    // The retry is a real API call that cost tokens regardless of whether it
+    // produced a usable message — count its usage unconditionally.
+    usage = sumUsage(usage, retry.usage);
     if (fixed.trim()) {
       message = fixed;
-      usage = sumUsage(usage, retry.usage);
     }
   }
 

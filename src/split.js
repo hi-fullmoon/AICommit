@@ -22,7 +22,7 @@ const SPLIT_MAX_DIFF_CHARS = 16000;
 // All changes: staged, unstaged and untracked (porcelain -z avoids quoting
 // issues with special characters in paths). Runs at the repo root so paths
 // are root-relative — executeSplit stages them from projectRoot.
-function getAllChangedFiles(cwd) {
+export function getAllChangedFiles(cwd) {
   try {
     const out = execSync('git status --porcelain -z -uall', {
       encoding: 'utf-8',
@@ -36,9 +36,17 @@ function getAllChangedFiles(cwd) {
       const entry = entries[i];
       const status = entry.slice(0, 2);
       const path = entry.slice(3);
-      // Renames/copies carry a second NUL-separated path — skip it
-      if (status.includes('R') || status.includes('C')) i++;
-      files.push({ status: status.trim() || '?', path });
+      // porcelain -z prints renames/copies as "<dest>\0<src>\0". Keep both
+      // paths: committing only the destination would drop the source's
+      // deletion. They are shown as one "src → dest" entry (so the model
+      // groups them together) and carried in addPaths for git add/diff.
+      if (status.includes('R') || status.includes('C')) {
+        const dest = path;
+        const src = entries[++i];
+        files.push({ status: status.trim() || '?', path: `${src} → ${dest}`, addPaths: [src, dest] });
+      } else {
+        files.push({ status: status.trim() || '?', path, addPaths: [path] });
+      }
     }
     return files;
   } catch {
@@ -172,6 +180,21 @@ export function normalizePlan(groups, allFiles, language) {
   return result;
 }
 
+// Resolve group file entries back to the real paths git can stage/diff.
+// Renames are stored under a display path ("src → dest") but must be added
+// under both paths, otherwise only the destination is committed and the
+// source's deletion is left behind.
+function expandPaths(groupFiles, allFiles) {
+  const byDisplay = new Map(allFiles.map((f) => [f.path, f]));
+  const out = [];
+  for (const p of groupFiles) {
+    const f = byDisplay.get(p);
+    if (f && f.addPaths) out.push(...f.addPaths);
+    else out.push(p);
+  }
+  return out;
+}
+
 function displayPlan(groups, allFiles) {
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
   console.log('\n  ' + chalk.cyan.bold(`Split plan: ${groups.length} commit${groups.length > 1 ? 's' : ''}`));
@@ -216,7 +239,8 @@ async function editPlan(groups, allFiles, language) {
 // empty feed the model the file names plus a content preview instead.
 function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlobs) {
   const u = unifiedArg(contextLines);
-  const args = head ? ['diff', u, 'HEAD', '--', ...group.files] : ['diff', u, '--cached', '--', ...group.files];
+  const addPaths = expandPaths(group.files, allFiles);
+  const args = head ? ['diff', u, 'HEAD', '--', ...addPaths] : ['diff', u, '--cached', '--', ...addPaths];
   try {
     const diff = execFileSync('git', args, {
       cwd: projectRoot,
@@ -251,16 +275,21 @@ function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlo
 // groups one by one: unstage all → add the group's files → commit.
 // Note: if a file has both staged and unstaged changes, the whole file is
 // committed in its group — file-level splitting cannot separate hunks.
-function executeSplit(groups, projectRoot, head) {
+export function executeSplit(groups, projectRoot, allFiles) {
   runGit(['add', '-A'], projectRoot);
 
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
     console.log('  ' + chalk.dim(`[${i + 1}/${groups.length}] `) + highlightMessage(g.message.split('\n')[0]));
     try {
-      if (head) runGit(['reset', '-q'], projectRoot);
+      // Re-check HEAD every round: the first commit creates HEAD, so an
+      // unborn index only needs `git rm --cached .` on the first round and
+      // `git reset` (which requires HEAD) from the second round on. Keeping
+      // the initial `head` value here would re-run `git rm --cached .` and
+      // turn every previously committed file into a deletion.
+      if (hasHead(projectRoot)) runGit(['reset', '-q'], projectRoot);
       else runGit(['rm', '-r', '-q', '--cached', '.'], projectRoot);
-      runGit(['add', '--', ...g.files], projectRoot);
+      runGit(['add', '--', ...expandPaths(g.files, allFiles)], projectRoot);
       runGit(['commit', '-m', g.message], projectRoot, true);
     } catch {
       console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
@@ -401,7 +430,7 @@ export async function splitFlow(config, projectRoot) {
   }
 
   console.log('');
-  const ok = executeSplit(groups, projectRoot, head);
+  const ok = executeSplit(groups, projectRoot, allFiles);
   if (ok) {
     console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${groups.length} commits.\n`));
   }

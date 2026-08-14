@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, chmod } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -127,6 +127,16 @@ function resolveProvider(config, cliProvider) {
   return { config: resolved, providerName: name };
 }
 
+// Whether a raw config (or any of its providers) carries a plaintext API key.
+function configHasApiKey(cfg) {
+  if (cfg && typeof cfg.apiKey === 'string' && cfg.apiKey) return true;
+  const providers = cfg?.providers;
+  if (providers && typeof providers === 'object') {
+    return Object.values(providers).some((p) => p && typeof p.apiKey === 'string' && p.apiKey);
+  }
+  return false;
+}
+
 export async function loadConfig(cliProvider = null) {
   let projectRoot;
   try {
@@ -152,6 +162,9 @@ export async function loadConfig(cliProvider = null) {
         const parsed = JSON.parse(raw);
         config = deepMerge(config, parsed);
         loaded.push(label);
+        // Tighten loose permissions on config files that actually hold a key
+        // (a hand-created or older 0644 file would otherwise expose it).
+        if (configHasApiKey(parsed)) await chmod(p, 0o600).catch(() => {});
       } catch (err) {
         console.error(chalk.red(`  ⚠ Failed to parse ${p}: ${err.message}`));
       }

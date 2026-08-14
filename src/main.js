@@ -117,11 +117,9 @@ export async function main() {
     }
   }
 
-  if (!config.apiKey) {
-    console.log('\n  ' + chalk.red('✗ No API key configured.'));
-    console.log(chalk.dim('  Set "apiKey" in ~/.aicommit.config.json or ./.aicommit.config.json\n'));
-    process.exit(1);
-  }
+  // An empty apiKey is valid for local, keyless endpoints (Ollama, LM Studio,
+  // LiteLLM); the request layer omits the Authorization header for them, so a
+  // missing key must not abort the run here.
 
   // ── Debug output ─────────────────────────────────────────────────────
 
