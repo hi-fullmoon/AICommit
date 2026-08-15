@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { normalizePlan, getAllChangedFiles, executeSplit } from '../src/split.js';
+import { normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan } from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
 // executeSplit / getAllChangedFiles.
@@ -61,6 +61,45 @@ test('normalizePlan drops unknown, duplicate, and empty groups', () => {
   const result = normalizePlan(groups, allFiles, 'en');
   assert.equal(result.length, 1);
   assert.equal(result[0].message, 'feat: a\n\nx');
+});
+
+test('condenseFileList lists every file when under the cap', () => {
+  const files = [M('a.js'), M('b.js'), M('c.js')];
+  assert.equal(condenseFileList(files, 5), 'M a.js\nM b.js\nM c.js');
+});
+
+test('condenseFileList caps the list and notes how many files were hidden', () => {
+  const files = Array.from({ length: 5 }, (_, i) => M(`f${i}.js`));
+  const out = condenseFileList(files, 3);
+  assert.ok(out.startsWith('M f0.js\nM f1.js\nM f2.js'));
+  assert.match(out, /and 2 more files/);
+});
+
+test('condenseFileList applies the default cap when none is given', () => {
+  const files = Array.from({ length: 105 }, (_, i) => M(`f${i}.js`));
+  const out = condenseFileList(files);
+  assert.match(out, /and 5 more files/);
+  assert.ok(!out.includes('f100.js'));
+});
+
+test('parsePlan parses a complete JSON array', () => {
+  const raw = '[{"subject":"feat: a","files":["a.js"]},{"subject":"chore: b","files":["b.js"]}]';
+  const plan = parsePlan(raw);
+  assert.equal(plan.length, 2);
+  assert.equal(plan[1].subject, 'chore: b');
+});
+
+test('parsePlan tolerates trailing prose and a leading code fence', () => {
+  const raw = '```json\n[{"subject":"feat: a","files":["a.js"]}]\n```\n以上就是我的计划。';
+  const plan = parsePlan(raw);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].subject, 'feat: a');
+});
+
+test('parsePlan distinguishes prose from a truncated plan', () => {
+  assert.throws(() => parsePlan('好的，我来分组。'), /contains no JSON array/);
+  const truncated = '[{"subject":"feat: a","files":["a.js","b.js",';
+  assert.throws(() => parsePlan(truncated), /truncated before the plan completed/);
 });
 
 test('getAllChangedFiles keeps both paths for a rename', (t) => {

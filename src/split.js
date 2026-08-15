@@ -19,6 +19,27 @@ import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.
 // context to assign files to groups, not every line of a huge diff.
 const SPLIT_MAX_DIFF_CHARS = 16000;
 
+// Cap the number of files shown to the grouping call. A huge change (e.g.
+// hundreds of vendored assets) would otherwise force the model to enumerate
+// every path in its JSON reply — blowing past maxTokens and truncating the
+// plan mid-array. Files beyond the cap are dropped from the prompt; any file
+// the model does not list is swept into the catch-all group by normalizePlan.
+const SPLIT_MAX_PLAN_FILES = 100;
+
+// Condense a changed-file list for the grouping prompt: keep the first `cap`
+// files and note the rest. The model is told it may omit bulk files, so it
+// should never need to enumerate a huge list — this keeps its reply small
+// enough to stay within maxTokens. Files beyond the cap still reach the
+// commit (via the catch-all group in normalizePlan); they just aren't shown
+// to the model.
+export function condenseFileList(files, cap = SPLIT_MAX_PLAN_FILES) {
+  const shown = files.slice(0, cap);
+  const hidden = files.length - shown.length;
+  const list = shown.map((f) => `${f.status} ${f.path}`).join('\n');
+  if (hidden <= 0) return list;
+  return `${list}\n... and ${hidden} more files (not shown — they will be collected into a final catch-all commit)`;
+}
+
 // All changes: staged, unstaged and untracked (porcelain -z avoids quoting
 // issues with special characters in paths). Runs at the repo root so paths
 // are root-relative — executeSplit stages them from projectRoot.
@@ -88,13 +109,14 @@ async function generateSplitPlan(config, files, diff) {
     'Rules:',
     '- Each group must represent ONE logical change and get a conventional commit message (feat, fix, chore, docs, refactor, test, style, perf, ci, build).',
     '- Give every message a short subject line; add a brief body (what changed and why) after a blank line unless the subject alone says it all.',
-    '- Every changed file must appear in EXACTLY one group; do not invent files.',
+    '- List the important files in each group. You may omit bulk files (e.g. vendored assets, build artifacts, lock files) — any file you do not list is collected into a final "chore: update remaining files" commit automatically.',
+    '- Do not invent files that are not in the "Changed files:" list above.',
     '- Prefer a few coherent groups over many tiny ones; use a single group if the changes are one logical unit.',
     '- ' + langLine,
     '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"Add a login form and session handling.","files":["a.js"]}], no markdown fences, no explanation.',
   ].join('\n');
 
-  const user = `Changed files:\n${files.map((f) => `${f.status} ${f.path}`).join('\n')}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
+  const user = `Changed files:\n${condenseFileList(files)}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
 
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
@@ -106,7 +128,7 @@ async function generateSplitPlan(config, files, diff) {
       { role: 'user', content: user },
     ],
     temperature,
-    Math.max(maxTokens, 2048),
+    Math.max(maxTokens, 4096),
     'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
       'Do not include any other text, explanation, or code fences.',
   );
@@ -120,14 +142,19 @@ async function generateSplitPlan(config, files, diff) {
 
 // Extract the JSON array from the model's response (tolerates code fences
 // and surrounding prose).
-function parsePlan(raw) {
+export function parsePlan(raw) {
   let text = raw.trim();
   const fence = text.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/);
   if (fence) text = fence[1].trim();
   const start = text.indexOf('[');
+  if (start === -1) {
+    throw new Error('the response contains no JSON array — the model returned prose instead of a split plan');
+  }
   const end = text.lastIndexOf(']');
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error('no JSON array found in the response');
+  if (end < start) {
+    throw new Error('the response was truncated before the plan completed (no closing "]") — ' +
+      'the change has too many files for the model to list within maxTokens. ' +
+      'Raise "maxTokens" in your config, or add vendored/binary assets to "stripFiles" to shrink the plan.');
   }
   const parsed = JSON.parse(text.slice(start, end + 1));
   if (!Array.isArray(parsed)) throw new Error('response is not a JSON array');
