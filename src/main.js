@@ -368,6 +368,16 @@ export async function main() {
       color: 'cyan',
     }).start();
 
+    // Ctrl+C while the model call is in flight cancels the commit cleanly:
+    // stop the spinner (restoring the cursor) and exit, instead of dying
+    // mid-frame with a half-drawn spinner line.
+    const cancelOnSigint = () => {
+      spinner.stop();
+      console.log(chalk.dim('\n  Commit cancelled.\n'));
+      process.exit(130); // 128 + SIGINT
+    };
+    process.on('SIGINT', cancelOnSigint);
+
     try {
       ({ message, elapsed, usage } = await generateCommitMessage(config, modelDiff, regenerateCount));
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
@@ -390,6 +400,8 @@ export async function main() {
       if (choice === 'retry') continue;
       console.log(chalk.dim('\n  Commit cancelled.\n'));
       process.exit(0);
+    } finally {
+      process.removeListener('SIGINT', cancelOnSigint);
     }
 
     if (!message) {

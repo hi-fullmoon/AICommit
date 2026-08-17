@@ -392,6 +392,14 @@ export async function splitFlow(config, projectRoot) {
   }).start();
 
   let raw;
+  // Same Ctrl+C contract as the single-commit flow: interrupting the model
+  // call cancels the split cleanly instead of leaving a half-drawn spinner.
+  const cancelOnSigint = () => {
+    spinner.stop();
+    console.log(chalk.dim('\n  Split cancelled.\n'));
+    process.exit(130); // 128 + SIGINT
+  };
+  process.on('SIGINT', cancelOnSigint);
   try {
     let elapsed, usage;
     ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff));
@@ -402,6 +410,8 @@ export async function splitFlow(config, projectRoot) {
     spinner.fail(chalk.red('API call failed'));
     console.log(`\n  ${indentError(err)}\n`);
     process.exit(1);
+  } finally {
+    process.removeListener('SIGINT', cancelOnSigint);
   }
 
   let groups;
@@ -464,6 +474,12 @@ export async function splitFlow(config, projectRoot) {
           text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
           color: 'cyan',
         }).start();
+        const cancelRegenOnSigint = () => {
+          rspinner.stop();
+          console.log(chalk.dim('\n  Split cancelled.\n'));
+          process.exit(130); // 128 + SIGINT
+        };
+        process.on('SIGINT', cancelRegenOnSigint);
         try {
           regenCounts[idx]++;
           const { message, elapsed, usage } = await generateCommitMessage(config, groupDiff, regenCounts[idx]);
@@ -475,6 +491,8 @@ export async function splitFlow(config, projectRoot) {
           regenCounts[idx]--;
           rspinner.fail(chalk.red(`Group ${idx + 1} regenerate failed`));
           console.log(`\n  ${indentError(err)}\n`);
+        } finally {
+          process.removeListener('SIGINT', cancelRegenOnSigint);
         }
       }
       continue; // show the updated plan again
