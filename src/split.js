@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -245,9 +245,9 @@ function displayPlan(groups, allFiles) {
 // Returns the normalized plan, or null to keep the current one.
 async function editPlan(groups, allFiles, language) {
   const edited = await editor({
-    message: 'Edit the split plan (JSON array of {message, files})',
+    message: 'Edit the split plan (save and close to apply, leave empty to keep the current plan)',
     default: JSON.stringify(groups, null, 2),
-    postfix: 'Save and close to apply, or leave empty to keep the current plan.',
+    postfix: '.json', // file extension — gives the editor JSON highlighting
     waitForUseInput: false,
   });
 
@@ -258,6 +258,32 @@ async function editPlan(groups, allFiles, language) {
   } catch (err) {
     console.log('\n  ' + chalk.red(`✗ Invalid plan JSON: ${err.message} — keeping the current plan.\n`));
     return null;
+  }
+}
+
+// Common binary formats — sending their bytes to the model as utf-8 garbage
+// helps no one, so previews are skipped for these extensions.
+const BINARY_FILE_RE = /\.(?:png|jpe?g|gif|webp|ico|icns|pdf|zip|gz|tgz|bz2|xz|7z|rar|mp[34]|mov|avi|woff2?|ttf|otf|eot|jar|class|so|dylib|dll|exe|bin|wasm|sqlite3?)$/i;
+
+// Read at most maxBytes of a file for the new-file preview. Reads through a
+// file descriptor instead of readFileSync so a huge untracked file (a build
+// artifact, a dump) is never loaded into memory whole. Returns null for
+// files containing NUL bytes (binary content a text preview can't help with).
+function readFilePreview(path, maxBytes = 2000) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const { size } = fstatSync(fd);
+    const n = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(n);
+    readSync(fd, buf, 0, n, 0);
+    if (buf.includes(0)) return null;
+    const text = buf.toString('utf-8');
+    return size > maxBytes ? text + '\n... (truncated)' : text;
+  } catch {
+    return null; // unreadable file — the name alone still helps
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -285,14 +311,9 @@ function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlo
   for (const p of group.files) {
     const status = byPath.get(p)?.status || '?';
     parts.push(`${status} ${p}`);
-    if ((status === '??' || status === '?') && !isLockFile(p) && !matchStripPattern(p, stripGlobs)) {
-      try {
-        const content = readFileSync(join(projectRoot, p), 'utf-8');
-        const preview = content.length > 2000 ? content.slice(0, 2000) + '\n... (truncated)' : content;
-        parts.push('```\n' + preview + '\n```');
-      } catch {
-        /* unreadable file — the name alone still helps */
-      }
+    if ((status === '??' || status === '?') && !isLockFile(p) && !matchStripPattern(p, stripGlobs) && !BINARY_FILE_RE.test(p)) {
+      const preview = readFilePreview(join(projectRoot, p));
+      if (preview) parts.push('```\n' + preview + '\n```');
     }
   }
   return 'Changed files (new files, no diff available):\n' + parts.join('\n');
@@ -319,8 +340,14 @@ export function executeSplit(groups, projectRoot, allFiles) {
       runGit(['add', '--', ...expandPaths(g.files, allFiles)], projectRoot);
       runGit(['commit', '-m', g.message], projectRoot, true);
     } catch {
+      // Re-stage the remaining groups' files so the user isn't left with an
+      // empty index and can finish with plain `git commit` once the issue
+      // (usually a hook) is resolved. Best effort — the working tree still
+      // holds everything even if this add fails.
+      const rest = groups.slice(i).flatMap((g) => expandPaths(g.files, allFiles));
+      try { runGit(['add', '--', ...rest], projectRoot); } catch { /* best effort */ }
       console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
-      console.log(chalk.dim(`  ${i} commit(s) already made. Remaining groups:`));
+      console.log(chalk.dim(`  ${i} commit(s) already made. Remaining groups (files re-staged):`));
       for (let j = i; j < groups.length; j++) {
         console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
       }
@@ -347,7 +374,7 @@ export async function splitFlow(config, projectRoot) {
     return false;
   }
 
-  const branch = getBranch();
+  const branch = getBranch(projectRoot);
   const head = hasHead(projectRoot);
 
   console.log('\n  ' + `✓ ${chalk.bold(allFiles.length)} files changed` + (branch ? chalk.dim(`  on ${branch}`) : '') + chalk.dim('  (split mode)'));
