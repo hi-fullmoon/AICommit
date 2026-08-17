@@ -3,23 +3,41 @@ import { cleanCommitMessage } from './utils.js';
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+// OpenAI's own API strict-validates the request body — unknown params get a
+// 400 ("Unrecognized request argument supplied") — and its reasoning families
+// (o-series, gpt-5*) reject "max_tokens" and a non-default temperature, taking
+// "max_completion_tokens" instead. Other vendors ignore unknown params, so
+// the thinking-disable switches are only sent off OpenAI's endpoint.
+function isOpenAIEndpoint(apiUrl) {
+  try { return new URL(apiUrl).hostname === 'api.openai.com'; } catch { return false; }
+}
+
+function isOpenAIReasoningModel(modelId) {
+  const id = (modelId || '').split('/').pop(); // strip router prefixes like "openai/"
+  return /^(?:o\d|gpt-5)/i.test(id);
+}
+
 export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs) {
   const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
-  const body = JSON.stringify({
-    model: modelId,
-    messages,
-    temperature,
-    max_tokens: maxTokens,
+  const payload = { model: modelId, messages };
+  if (isOpenAIReasoningModel(modelId)) {
+    payload.max_completion_tokens = maxTokens;
+  } else {
+    payload.temperature = temperature;
+    payload.max_tokens = maxTokens;
+  }
+  if (!isOpenAIEndpoint(apiUrl)) {
     // Disable thinking across vendors; unknown params are ignored by
     // APIs that don't support them:
     // - enable_thinking: Qwen-style switch
     // - thinking.type=disabled: MiniMax OpenAI-compatible API (M3)
     // - reasoning_split: MiniMax M2.x can't disable thinking, but this moves
     //   the reasoning out of `content` into `reasoning_details`
-    enable_thinking: false,
-    thinking: { type: 'disabled' },
-    reasoning_split: true,
-  });
+    payload.enable_thinking = false;
+    payload.thinking = { type: 'disabled' };
+    payload.reasoning_split = true;
+  }
+  const body = JSON.stringify(payload);
 
   let response;
   try {
