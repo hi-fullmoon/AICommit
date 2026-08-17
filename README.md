@@ -65,7 +65,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `maxDiffChars` | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`) |
 | `maxFileDiffChars` | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`) |
 | `diffContextLines` | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `3`) |
-| `stripFiles` | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`) |
+| `stripFiles` | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 
 Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
@@ -96,7 +96,7 @@ Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter
 
 ### Split mode
 
-`--split` groups all changes (staged, unstaged, untracked) into logical commits by feature/module. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Splitting is file-level; if a commit fails mid-way, remaining groups are printed for manual completion.
+`--split` groups all changes (staged, unstaged, untracked) into logical commits by feature/module. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Splitting is file-level; if a commit fails mid-way, the remaining groups' files are re-staged and printed so you can finish with plain `git commit`.
 
 ## License
 
