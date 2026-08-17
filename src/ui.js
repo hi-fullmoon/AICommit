@@ -102,10 +102,12 @@ export async function confirmAction(message) {
 }
 
 export async function editMessage(message) {
+  // `postfix` is the temp file's extension (not a help text) — ".md" gives
+  // the editor markdown highlighting; guidance belongs in `message`.
   const edited = await editor({
-    message:   'Edit your commit message',
+    message:   'Edit your commit message (save and close to continue, leave empty to cancel)',
     default:   message,
-    postfix:   'Save and close the editor to continue, or leave empty to cancel.',
+    postfix:   '.md',
     waitForUseInput: false,
   });
 

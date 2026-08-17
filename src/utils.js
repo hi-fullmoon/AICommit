@@ -4,10 +4,15 @@ export async function fileExists(p) {
   try { await access(p); return true; } catch { return false; }
 }
 
+// Plain-object keys merge recursively; scalars are overwritten; arrays are
+// concatenated and deduped rather than replaced, so a project-level
+// "stripFiles" extends the user-level list instead of wiping it.
 export function deepMerge(a, b) {
   const result = { ...a };
   for (const key of Object.keys(b)) {
-    if (
+    if (Array.isArray(a[key]) && Array.isArray(b[key])) {
+      result[key] = [...new Set([...a[key], ...b[key]])];
+    } else if (
       b[key] && typeof b[key] === 'object' && !Array.isArray(b[key]) &&
       a[key] && typeof a[key] === 'object' && !Array.isArray(a[key])
     ) {
@@ -63,12 +68,14 @@ function formatTokens(n) {
 // split, with the total appended. The total is the sum of the *displayed*
 // parts, not the raw total rounded on its own, so in + out always equals it
 // (1.6k + 0.3k = 1.9k, never a mismatch like "1.6k+0.3k (total 2k)").
+// Accepts both OpenAI-style (prompt_tokens/completion_tokens) and
+// Anthropic-style (input_tokens/output_tokens) field names.
 export function formatUsage(usage) {
-  const hasBreakdown =
-    typeof usage.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number';
-  if (hasBreakdown) {
-    const p = roundedK(usage.prompt_tokens);
-    const c = roundedK(usage.completion_tokens);
+  const prompt = usage.prompt_tokens ?? usage.input_tokens;
+  const completion = usage.completion_tokens ?? usage.output_tokens;
+  if (typeof prompt === 'number' && typeof completion === 'number') {
+    const p = roundedK(prompt);
+    const c = roundedK(completion);
     return `${renderK(p)} in + ${renderK(c)} out (total ${renderK(p + c)})`;
   }
   if (typeof usage.total_tokens === 'number') return `${formatTokens(usage.total_tokens)}`;
