@@ -5,13 +5,13 @@ import {
   deepMerge, cleanCommitMessage, formatUsage, formatMs, maskApiKey, indentError,
 } from '../src/utils.js';
 
-test('deepMerge merges nested objects and replaces scalars/arrays', () => {
+test('deepMerge merges nested objects, replaces scalars, concatenates arrays', () => {
   const a = { x: 1, nested: { a: 1, b: 2 }, arr: [1] };
-  const b = { x: 2, nested: { b: 3 }, arr: [2] };
+  const b = { x: 2, nested: { b: 3 }, arr: [2, 1] };
   const r = deepMerge(a, b);
   assert.equal(r.x, 2);
   assert.deepEqual(r.nested, { a: 1, b: 3 });
-  assert.deepEqual(r.arr, [2]); // arrays are replaced, not merged
+  assert.deepEqual(r.arr, [1, 2]); // arrays merge (deduped), not replaced
 });
 
 test('deepMerge does not mutate the inputs', () => {
@@ -45,6 +45,10 @@ test('formatUsage total is the sum of the displayed parts, not the raw total', (
   // The provider's raw total (1950) would round to "2k" on its own, but the
   // displayed parts (1.6k + 0.3k) must add up to the shown total (1.9k).
   assert.equal(formatUsage({ prompt_tokens: 1600, completion_tokens: 300, total_tokens: 1950 }), '1.6k in + 0.3k out (total 1.9k)');
+});
+
+test('formatUsage accepts Anthropic-style input/output token fields', () => {
+  assert.equal(formatUsage({ input_tokens: 6800, output_tokens: 900 }), '6.8k in + 0.9k out (total 7.7k)');
 });
 
 test('formatUsage handles total-only and empty usage objects', () => {

@@ -229,3 +229,34 @@ test('request timeouts are wrapped with a helpful message', async () => {
   };
   await assert.rejects(() => checkConnection(cfg({ timeoutMs: 5000 })), /timed out after 5s/);
 });
+
+test('OpenAI endpoint gets a strict body: no vendor thinking params', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(
+    cfg({ apiUrl: 'https://api.openai.com/v1/chat/completions', modelId: 'gpt-4o' }), diff,
+  );
+  const body = calls[0];
+  assert.equal(body.temperature, 0.3);
+  assert.equal(body.max_tokens, 1024);
+  assert.ok(!('enable_thinking' in body) && !('thinking' in body) && !('reasoning_split' in body));
+});
+
+test('OpenAI reasoning models get max_completion_tokens and no temperature', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(
+    cfg({ apiUrl: 'https://api.openai.com/v1/chat/completions', modelId: 'gpt-5-mini' }), diff,
+  );
+  const body = calls[0];
+  assert.equal(body.max_completion_tokens, 1024);
+  assert.ok(!('max_tokens' in body) && !('temperature' in body));
+});
+
+test('non-OpenAI endpoints keep the thinking-disable switches', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg(), diff);
+  const body = calls[0];
+  assert.equal(body.enable_thinking, false);
+  assert.deepEqual(body.thinking, { type: 'disabled' });
+  assert.equal(body.reasoning_split, true);
+  assert.equal(body.max_tokens, 1024);
+});
