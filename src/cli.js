@@ -44,12 +44,29 @@ function showVersion() {
   console.log(`aicommit v${VERSION}`);
 }
 
+// Read the value for an option like -l/--lang or -p/--provider. The next
+// argument must exist and must not be another flag — otherwise `-l -s`
+// would silently swallow "-s" as the value.
+function takeValue(args, i, arg, hint) {
+  const next = args[i + 1];
+  if (!next || next.startsWith('-')) {
+    console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<${hint}>`));
+    console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+    process.exit(1);
+  }
+  return next;
+}
+
 export function parseArgs() {
   const args = process.argv.slice(2);
 
   // "setup" is a standalone subcommand — it doesn't combine with the
   // commit-flow options, so short-circuit before parsing them.
   if (args[0] === 'setup') {
+    if (args.length > 1) {
+      console.error(chalk.red(`  "setup" takes no arguments — got: ${args.slice(1).join(' ')}`));
+      process.exit(1);
+    }
     return {
       targetPath: null, cliLang: null, cliProvider: null,
       debug: false, split: false, check: false, setup: true,
@@ -93,12 +110,8 @@ export function parseArgs() {
     }
 
     if (arg === '-l' || arg === '--lang') {
-      cliLang = args[++i];
-      if (!cliLang) {
-        console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<zh|en>`));
-        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
-        process.exit(1);
-      }
+      cliLang = takeValue(args, i, arg, 'zh|en');
+      i++;
       continue;
     }
 
@@ -113,12 +126,8 @@ export function parseArgs() {
     }
 
     if (arg === '-p' || arg === '--provider') {
-      cliProvider = args[++i];
-      if (!cliProvider) {
-        console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<name>`));
-        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
-        process.exit(1);
-      }
+      cliProvider = takeValue(args, i, arg, 'name');
+      i++;
       continue;
     }
 
@@ -133,6 +142,11 @@ export function parseArgs() {
     }
 
     if (!arg.startsWith('-')) {
+      if (targetPath) {
+        console.error(chalk.red(`  Unexpected extra argument: ${arg}`));
+        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+        process.exit(1);
+      }
       targetPath = arg;
     } else {
       console.error(chalk.red(`  Unknown option: ${arg}`));
