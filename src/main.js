@@ -188,7 +188,7 @@ export async function main() {
       process.exit(1);
     }
 
-    console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`) + '\n');
+    console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`));
     for (const { status, path } of unstaged) {
       const c = statusColor[status.charAt(0)] || chalk.dim;
       const icon = statusIcon[status.charAt(0)] || status.charAt(0);
