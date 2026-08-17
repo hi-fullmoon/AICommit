@@ -9,7 +9,7 @@ import { loadConfig } from './config.js';
 import {
   getStagedDiff, getChangedFiles, getDiffStats, getBranch, gitCommit,
   stripLockFileContent, condenseDiff, getDiffStat, getUntrackedFiles,
-  getUnstagedFiles, runGit,
+  getUnstagedFiles, runGit, isGitRepo,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
 import { statusColor, statusIcon, confirmAction, editMessage, vimSelect, vimCheckbox } from './ui.js';
@@ -62,13 +62,13 @@ export async function main() {
   // ── CLI language override ─────────────────────────────────────────
   // Apply the -l/--lang override before the summary lines below, so the
   // printed language always reflects the one that will actually be used.
+  // Validate after applying the override, so a bad value is caught whether
+  // it came from the CLI or from a config file.
 
-  if (cliLang) {
-    if (cliLang !== 'zh' && cliLang !== 'en') {
-      console.log('\n  ' + chalk.red(`✗ Invalid language: "${cliLang}". Use "zh" or "en".\n`));
-      process.exit(1);
-    }
-    config.language = cliLang;
+  if (cliLang) config.language = cliLang;
+  if (config.language !== 'zh' && config.language !== 'en') {
+    console.log('\n  ' + chalk.red(`✗ Invalid language: "${config.language}". Use "zh" or "en".\n`));
+    process.exit(1);
   }
 
   if (providerName) {
@@ -147,6 +147,16 @@ export async function main() {
   }
 
   // ── 2. Diff ─────────────────────────────────────────────────────────
+
+  // All git helpers swallow errors and return empty output, so without this
+  // guard a non-repo directory would be misreported as "no changes to
+  // commit". Placed here (not earlier) so -c/--check and --debug still work
+  // outside a repo.
+  if (!isGitRepo(projectRoot)) {
+    console.log('\n  ' + chalk.red(`✗ Not a git repository: ${process.cwd()}`));
+    console.log(chalk.dim('  Run aicommit inside a git working tree.\n'));
+    process.exit(1);
+  }
 
   if (split) {
     const handled = await splitFlow(config, projectRoot);
@@ -245,7 +255,7 @@ export async function main() {
 
   const stats     = getDiffStats(diff);
   const changedFiles = getChangedFiles(projectRoot);
-  const branch    = getBranch();
+  const branch    = getBranch(projectRoot);
   const stageIcon = chalk.green('staged');
   const changeStr = chalk.green(`+${stats.additions}`) + '  ' + chalk.red(`-${stats.deletions}`);
 

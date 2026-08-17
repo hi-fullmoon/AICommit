@@ -195,12 +195,23 @@ export function getUntrackedFiles(cwd) {
   } catch { return []; }
 }
 
-export function getBranch() {
+export function getBranch(cwd) {
   try {
     return execSync('git branch --show-current', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
+      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
     }).trim();
   } catch { return null; }
+}
+
+// Every git helper above swallows errors and returns empty, so without this
+// explicit check a non-repo directory would be misreported as "no changes".
+export function isGitRepo(cwd) {
+  try {
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd, stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    return true;
+  } catch { return false; }
 }
 
 export function gitCommit(message, projectRoot) {
