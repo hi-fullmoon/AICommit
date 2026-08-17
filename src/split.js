@@ -27,11 +27,11 @@ const SPLIT_MAX_DIFF_CHARS = 16000;
 const SPLIT_MAX_PLAN_FILES = 100;
 
 // Condense a changed-file list for the grouping prompt: keep the first `cap`
-// files and note the rest. The model is told it may omit bulk files, so it
-// should never need to enumerate a huge list — this keeps its reply small
-// enough to stay within maxTokens. Files beyond the cap still reach the
-// commit (via the catch-all group in normalizePlan); they just aren't shown
-// to the model.
+// files and note the rest. The model is told the hidden files are collected
+// automatically, so it never needs to enumerate a huge list — this keeps its
+// reply small enough to stay within maxTokens. Files beyond the cap still
+// reach the commit (via the catch-all group in normalizePlan); they just
+// aren't shown to the model.
 export function condenseFileList(files, cap = SPLIT_MAX_PLAN_FILES) {
   const shown = files.slice(0, cap);
   const hidden = files.length - shown.length;
@@ -109,7 +109,7 @@ async function generateSplitPlan(config, files, diff) {
     'Rules:',
     '- Each group must represent ONE logical change and get a conventional commit message (feat, fix, chore, docs, refactor, test, style, perf, ci, build).',
     '- Give every message a short subject line; add a brief body (what changed and why) after a blank line unless the subject alone says it all.',
-    '- List the important files in each group. You may omit bulk files (e.g. vendored assets, build artifacts, lock files) — any file you do not list is collected into a final "chore: update remaining files" commit automatically.',
+    '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
     '- Do not invent files that are not in the "Changed files:" list above.',
     '- Prefer a few coherent groups over many tiny ones; use a single group if the changes are one logical unit.',
     '- ' + langLine,
