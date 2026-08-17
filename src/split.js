@@ -108,12 +108,12 @@ async function generateSplitPlan(config, files, diff) {
     'Group the changed files into logical commits by feature or module.',
     'Rules:',
     '- Each group must represent ONE logical change and get a conventional commit message (feat, fix, chore, docs, refactor, test, style, perf, ci, build).',
-    '- Give every message a short subject line; add a brief body (what changed and why) after a blank line unless the subject alone says it all.',
+    '- Give every message a short subject line; when the subject alone does not say it all, add a body of bullet lines (what changed and why), each starting with "- " — the same format the single-commit flow produces.',
     '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
     '- Do not invent files that are not in the "Changed files:" list above.',
     '- Prefer a few coherent groups over many tiny ones; use a single group if the changes are one logical unit.',
     '- ' + langLine,
-    '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"Add a login form and session handling.","files":["a.js"]}], no markdown fences, no explanation.',
+    '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"- add a login form\\n- add session handling","files":["a.js"]}], no markdown fences, no explanation. Newlines inside "body" are JSON-escaped (\\n).',
   ].join('\n');
 
   const user = `Changed files:\n${condenseFileList(files)}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
