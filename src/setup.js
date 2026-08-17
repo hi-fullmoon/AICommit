@@ -1,5 +1,4 @@
 import { readFile, writeFile, chmod } from 'node:fs/promises';
-import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +9,7 @@ import password from '@inquirer/password';
 import confirm from '@inquirer/confirm';
 
 import { checkConnection } from './api.js';
+import { getProjectRoot } from './config.js';
 import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 
@@ -43,16 +43,6 @@ export function mergeSetupConfig(existing, { providerName, entry, language }) {
   result.defaultProvider = providerName;
   result.language = language;
   return result;
-}
-
-function getProjectRoot() {
-  try {
-    return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
 }
 
 async function readExistingConfig(path) {

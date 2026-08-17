@@ -137,15 +137,20 @@ function configHasApiKey(cfg) {
   return false;
 }
 
-export async function loadConfig(cliProvider = null) {
-  let projectRoot;
+// The git repo root, or cwd when not inside a repo (config files are still
+// looked up relative to cwd in that case). Shared by loadConfig and setup.
+export function getProjectRoot() {
   try {
-    projectRoot = execSync('git rev-parse --show-toplevel', {
+    return execSync('git rev-parse --show-toplevel', {
       encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
     }).trim();
   } catch {
-    projectRoot = process.cwd();
+    return process.cwd();
   }
+}
+
+export async function loadConfig(cliProvider = null) {
+  const projectRoot = getProjectRoot();
 
   const paths = [
     { p: join(homedir(), '.aicommit.config.json'),   label: 'user' },
