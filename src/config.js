@@ -26,16 +26,20 @@ export const DEFAULT_CONFIG = {
   // the whole maxDiffChars budget and pushing every other file out.
   maxFileDiffChars: 3000,
   // Context lines around each diff hunk (git diff --unified=<n>). Fewer lines
-  // means fewer tokens; commit messages rarely need git's default of 3.
-  diffContextLines: 3,
+  // means fewer tokens; 1 is enough for a commit message — git's default of
+  // 3 mostly pays for context the model doesn't need.
+  diffContextLines: 1,
   // Extra files to stub out of the diff like lock files, matched by basename
   // with "*" wildcards (e.g. ["*.min.js", "*.map", "*.snap"]). Generated
   // artifacts carry no commit intent but can be enormous.
   stripFiles: [],
-  // Structured rules + few-shot examples: weaker models follow explicit rules
-  // and mimic concrete examples far more reliably than abstract prose. Both
-  // good and bad examples are given so weak models learn the boundary, not
-  // just the format.
+  // false (default): regenerate rewords the previous message without
+  // re-sending the diff — far cheaper. true: re-send the full diff on every
+  // regenerate, for more varied rewrites at a much higher token cost.
+  regenerateWithDiff: false,
+  // Compact rules + one few-shot example: explicit rules and a concrete
+  // example steer models far more reliably than abstract prose, and the
+  // prompt is sent on every call — every token here is paid per request.
   prompt: [
     'You are a git commit message generator. Write ONE commit message for the git diff the user provides.',
     '',
@@ -51,47 +55,18 @@ export const DEFAULT_CONFIG = {
     '- <change point 1>',
     '- <change point 2>',
     '',
-    '- The subject line is required; after a blank line you may add several bullet points starting with "- ".',
-    '- When the change is simple and the subject says it all, omit the bullet points — output the subject only.',
+    '- Types: feat (new feature), fix (bug fix), chore (build/deps/config), refactor, style, docs, test, perf, ci, build.',
+    '- The subject line is required (max 50 characters); after a blank line you may add bullet points starting with "- ". Omit them when the subject says it all.',
     '- If the diff contains several independent changes: pick the type and subject from the most important change, and list the rest as bullet points.',
-    '',
-    '## Types',
-    '',
-    '| Type | When to use | Example |',
-    '| :--- | :--- | :--- |',
-    '| feat | New feature, page, or module | feat: add organization registration page |',
-    '| fix | Bug fix | fix: table pagination not working |',
-    '| chore | Build, dependency upgrades, config changes | chore: upgrade @xh/base to 6.26.16 |',
-    '| refactor | Restructuring code without changing behavior | refactor: extract shared form logic into a hook |',
-    '| style | Formatting or style adjustments | style: adjust form field alignment |',
-    '| docs | Documentation updates | docs: update menu directory index |',
-    '| test | Test-related changes | test: add unit tests for the login API |',
-    '',
-    '## Wording requirements',
-    '',
-    '- Subject: max 50 characters, summarizing the intent of the change; bullet points describe the concrete changes (what was added, removed, or adjusted).',
     '- Never use empty filler wording like "updated the code" or "made many changes" that carries no information.',
     '',
-    '## Examples',
-    '',
-    '### Good commits',
+    '## Example',
     '',
     'feat: set up system menu routes and page structure',
     '',
     '- add 19 page directories and base components across 7 modules',
     '- configure routes in config/routes.ts',
     '- add src/config/menu.ts menu config, wired into BasicLayout',
-    '',
-    'feat: change the default landing page to organization registration',
-    '',
-    '- redirect the root route / to /org/institution',
-    '- land on /org/institution after successful login',
-    '',
-    '### Bad commits (never output like this)',
-    '',
-    'Updated the code',
-    '',
-    'feat: made many changes',
   ].join('\n'),
 };
 
