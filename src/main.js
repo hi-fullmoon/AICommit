@@ -379,7 +379,9 @@ export async function main() {
     process.on('SIGINT', cancelOnSigint);
 
     try {
-      ({ message, elapsed, usage } = await generateCommitMessage(config, modelDiff, regenerateCount));
+      // Pass the previous message so a regenerate can ask for a rewording
+      // instead of re-sending the full diff (see generateCommitMessage).
+      ({ message, elapsed, usage } = await generateCommitMessage(config, modelDiff, regenerateCount, message));
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
       spinner.succeed(done);
