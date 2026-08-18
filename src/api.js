@@ -129,6 +129,23 @@ function correctivePrompt(badReply) {
   ].join('\n');
 }
 
+// Prompt for a regenerate request: the model already saw the diff on the
+// first call and produced a message for it, so the diff is NOT re-sent —
+// rewording its own previous reply is enough, and far cheaper than resending
+// what can be tens of thousands of tokens (same trade-off as correctivePrompt).
+function regeneratePrompt(previousMessage) {
+  return [
+    'You previously generated this commit message for the change:',
+    '',
+    previousMessage.slice(0, 1000),
+    '',
+    'Generate a DIFFERENT commit message for the same change — different wording or emphasis. ' +
+    'Keep the conventional commit format: first line "<type>: <subject>", ' +
+    'then an optional body after a blank line. ' +
+    'Output ONLY the new message — no explanation, no quotes, no code fences.',
+  ].join('\n');
+}
+
 // Read the assistant text from either OpenAI format
 // (choices[0].message.content, possibly an array of parts) or Anthropic
 // format (content[0].text).
@@ -221,8 +238,13 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
   return { text, data, reasoning, usage: sumUsage(...usages) };
 }
 
-export async function generateCommitMessage(config, diff, regenerateCount = 0) {
-  const { prompt, temperature, language, maxTokens } = config;
+// `previousMessage` is the message from the last generation, when there is
+// one. On regenerate it lets the model reword its own reply instead of
+// re-reading the diff — the diff is only sent on the first attempt. Setting
+// "regenerateWithDiff" in the config opts back into re-sending the diff on
+// every attempt (more variety, much higher token cost).
+export async function generateCommitMessage(config, diff, regenerateCount = 0, previousMessage = '') {
+  const { prompt, temperature, language, maxTokens, regenerateWithDiff } = config;
   const t0 = performance.now();
 
   // Build the language directive — appended after the (possibly custom)
@@ -240,15 +262,26 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0) {
   // constraint after the diff where it can't be drowned out by the prompt.
   const langReminder = `\n\n(Remember: the commit message must be in ${targetLang}.)`;
 
-  // On regenerate, vary the prompt and temperature to get a different result
-  const variationHint = regenerateCount > 0
-    ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
-    : '';
+  // On regenerate, raise the temperature to get a different result — and skip
+  // the diff entirely: re-sending it on every regenerate would be the biggest
+  // token cost of the whole flow, while the previous message already captures
+  // the change. The model rewords its own reply instead (same cheap pattern
+  // as the corrective retry). "regenerateWithDiff" opts back into the old
+  // behavior: the full diff plus an attempt hint, for more varied rewrites.
   const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
+  let userContent;
+  if (regenerateCount > 0 && previousMessage && !regenerateWithDiff) {
+    userContent = regeneratePrompt(previousMessage) + langReminder;
+  } else {
+    const variationHint = regenerateCount > 0
+      ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
+      : '';
+    userContent = `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder;
+  }
 
   const messages = [
     { role: 'system', content: prompt + langHint },
-    { role: 'user',    content: `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder },
+    { role: 'user',    content: userContent },
   ];
 
   const { text, data, reasoning, usage: firstUsage } = await getResponseText(
