@@ -202,6 +202,32 @@ test('valid conventional reply makes no corrective retry', async () => {
   assert.equal(calls.length, 1);
 });
 
+test('regenerate does not re-send the diff — it asks for a rewording of the previous message', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: rework login page' } }] }]);
+  const { message } = await generateCommitMessage(cfg(), diff, 1, 'feat: add login page');
+  assert.equal(message, 'feat: rework login page');
+  const user = calls[0].messages.find(m => m.role === 'user').content;
+  assert.ok(!user.includes('Here is the git diff'), 'diff not re-sent');
+  assert.match(user, /feat: add login page/, 'previous message fed back');
+  assert.match(user, /DIFFERENT commit message/);
+  assert.match(user, /\(Remember: the commit message must be in English\.\)$/, 'language reminder kept');
+});
+
+test('regenerate without a previous message still sends the full diff', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg(), diff, 1); // no previousMessage
+  const user = calls[0].messages.find(m => m.role === 'user').content;
+  assert.ok(user.includes('Here is the git diff'));
+});
+
+test('regenerateWithDiff opts back into re-sending the diff on regenerate', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: y' } }] }]);
+  await generateCommitMessage(cfg({ regenerateWithDiff: true }), diff, 2, 'feat: add login page');
+  const user = calls[0].messages.find(m => m.role === 'user').content;
+  assert.ok(user.includes('Here is the git diff'), 'diff re-sent');
+  assert.match(user, /Attempt #3: please produce a DIFFERENT commit message/, 'attempt hint kept');
+});
+
 test('empty response throws a helpful error mentioning maxTokens', async () => {
   stubFetch([{ choices: [{ message: { content: null } }] }]);
   await assert.rejects(() => generateCommitMessage(cfg(), diff), /maxTokens/);

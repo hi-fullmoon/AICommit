@@ -122,14 +122,14 @@ test('matchStripPattern matches basenames with * and ? wildcards, case-insensiti
   assert.equal(matchStripPattern('src/app.js', ['', 42]), false);
 });
 
-test('unifiedArg builds --unified=<n> and falls back to 3 for bad input', () => {
+test('unifiedArg builds --unified=<n> and falls back to 1 for bad input', () => {
   assert.equal(unifiedArg(0), '--unified=0');
   assert.equal(unifiedArg(1), '--unified=1');
   assert.equal(unifiedArg(3), '--unified=3');
-  assert.equal(unifiedArg(undefined), '--unified=3');
-  assert.equal(unifiedArg(-1), '--unified=3');
-  assert.equal(unifiedArg(1.5), '--unified=3');
-  assert.equal(unifiedArg('1'), '--unified=3');
+  assert.equal(unifiedArg(undefined), '--unified=1');
+  assert.equal(unifiedArg(-1), '--unified=1');
+  assert.equal(unifiedArg(1.5), '--unified=1');
+  assert.equal(unifiedArg('1'), '--unified=1');
 });
 
 test('stripLockFileContent also stubs sections matched by stripFiles globs', () => {
