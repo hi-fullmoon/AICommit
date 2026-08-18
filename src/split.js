@@ -482,7 +482,7 @@ export async function splitFlow(config, projectRoot) {
         process.on('SIGINT', cancelRegenOnSigint);
         try {
           regenCounts[idx]++;
-          const { message, elapsed, usage } = await generateCommitMessage(config, groupDiff, regenCounts[idx]);
+          const { message, elapsed, usage } = await generateCommitMessage(config, groupDiff, regenCounts[idx], groups[idx].message);
           let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`;
           if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
           rspinner.succeed(done);

@@ -5,10 +5,11 @@ import { execSync, execFileSync } from 'node:child_process';
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 // git diff context lines around each hunk (--unified=<n>). Fewer context
-// lines = fewer tokens for the model; commit messages rarely need the full
-// default of 3. Falls back to 3 for anything that isn't a non-negative int.
+// lines = fewer tokens for the model; commit messages rarely need git's
+// default of 3. Falls back to 1 (the configured default) for anything that
+// isn't a non-negative int.
 export function unifiedArg(contextLines) {
-  const n = Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
+  const n = Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 1;
   return `--unified=${n}`;
 }
 
