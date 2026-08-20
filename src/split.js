@@ -100,8 +100,9 @@ async function generateSplitPlan(config, files, diff) {
   const langLine = language === 'zh' ? 'Write each commit message in Chinese (Simplified Chinese).' : 'Write each commit message in English.';
 
   const stripped = stripLockFileContent(diff, config.stripFiles);
-  const truncated = stripped.length > SPLIT_MAX_DIFF_CHARS;
-  const diffPart = truncated ? stripped.slice(0, SPLIT_MAX_DIFF_CHARS) + '\n... (diff truncated)' : stripped;
+  const maxDiffChars = config.splitMaxDiffChars || SPLIT_MAX_DIFF_CHARS;
+  const truncated = stripped.length > maxDiffChars;
+  const diffPart = truncated ? stripped.slice(0, maxDiffChars) + '\n... (diff truncated)' : stripped;
 
   const system = [
     'You are an expert at organizing git changes into small, atomic commits.',
@@ -116,7 +117,8 @@ async function generateSplitPlan(config, files, diff) {
     '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"- add a login form\\n- add session handling","files":["a.js"]}], no markdown fences, no explanation. Newlines inside "body" are JSON-escaped (\\n).',
   ].join('\n');
 
-  const user = `Changed files:\n${condenseFileList(files)}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
+  const maxPlanFiles = config.splitMaxPlanFiles || SPLIT_MAX_PLAN_FILES;
+  const user = `Changed files:\n${condenseFileList(files, maxPlanFiles)}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
 
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return

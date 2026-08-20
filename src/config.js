@@ -25,6 +25,11 @@ export const DEFAULT_CONFIG = {
   // asset) is truncated to its header and leading hunks instead of eating
   // the whole maxDiffChars budget and pushing every other file out.
   maxFileDiffChars: 3000,
+  // Split-mode planning has its own tighter prompt budget: it needs enough
+  // context to group files, not the full detail needed to write the final
+  // message for one commit.
+  splitMaxDiffChars: 16000,
+  splitMaxPlanFiles: 100,
   // Context lines around each diff hunk (git diff --unified=<n>). Fewer lines
   // means fewer tokens; 1 is enough for a commit message — git's default of
   // 3 mostly pays for context the model doesn't need.
@@ -102,6 +107,66 @@ function resolveProvider(config, cliProvider) {
   return { config: resolved, providerName: name };
 }
 
+function assertString(config, key) {
+  if (typeof config[key] !== 'string' || !config[key].trim()) {
+    throw new Error(`Invalid config "${key}": expected a non-empty string.`);
+  }
+}
+
+function assertUrl(config, key) {
+  assertString(config, key);
+  try {
+    const u = new URL(config[key]);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error();
+  } catch {
+    throw new Error(`Invalid config "${key}": expected an http(s) URL.`);
+  }
+}
+
+function assertNumber(config, key, { integer = false, min = -Infinity, max = Infinity } = {}) {
+  const value = config[key];
+  const ok = typeof value === 'number'
+    && Number.isFinite(value)
+    && (!integer || Number.isInteger(value))
+    && value >= min
+    && value <= max;
+  if (!ok) {
+    const kind = integer ? 'integer' : 'number';
+    const range = Number.isFinite(max) ? ` between ${min} and ${max}` : ` >= ${min}`;
+    throw new Error(`Invalid config "${key}": expected a ${kind}${range}.`);
+  }
+}
+
+export function validateConfig(config) {
+  assertUrl(config, 'apiUrl');
+  assertString(config, 'modelId');
+  assertString(config, 'prompt');
+
+  if (typeof config.apiKey !== 'string') {
+    throw new Error('Invalid config "apiKey": expected a string. Use "" for keyless local endpoints.');
+  }
+  if (config.language !== 'zh' && config.language !== 'en') {
+    throw new Error(`Invalid config "language": expected "zh" or "en", got "${config.language}".`);
+  }
+  if (typeof config.regenerateWithDiff !== 'boolean') {
+    throw new Error('Invalid config "regenerateWithDiff": expected a boolean.');
+  }
+  if (!Array.isArray(config.stripFiles) || config.stripFiles.some((p) => typeof p !== 'string')) {
+    throw new Error('Invalid config "stripFiles": expected an array of strings.');
+  }
+
+  assertNumber(config, 'temperature', { min: 0, max: 2 });
+  assertNumber(config, 'maxTokens', { integer: true, min: 1 });
+  assertNumber(config, 'timeoutMs', { integer: true, min: 1 });
+  assertNumber(config, 'maxDiffChars', { integer: true, min: 1 });
+  assertNumber(config, 'maxFileDiffChars', { integer: true, min: 1 });
+  assertNumber(config, 'splitMaxDiffChars', { integer: true, min: 1 });
+  assertNumber(config, 'splitMaxPlanFiles', { integer: true, min: 1 });
+  assertNumber(config, 'diffContextLines', { integer: true, min: 0 });
+
+  return config;
+}
+
 // Whether a raw config (or any of its providers) carries a plaintext API key.
 function configHasApiKey(cfg) {
   if (cfg && typeof cfg.apiKey === 'string' && cfg.apiKey) return true;
@@ -153,5 +218,5 @@ export async function loadConfig(cliProvider = null) {
 
   const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
-  return { config: resolvedConfig, projectRoot, loaded, providerName };
+  return { config: validateConfig(resolvedConfig), projectRoot, loaded, providerName };
 }

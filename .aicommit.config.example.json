@@ -23,6 +23,8 @@
   "timeoutMs": 120000,
   "maxDiffChars": 30000,
   "maxFileDiffChars": 3000,
+  "splitMaxDiffChars": 16000,
+  "splitMaxPlanFiles": 100,
   "diffContextLines": 1,
   "regenerateWithDiff": false,
   "stripFiles": [

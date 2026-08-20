@@ -70,6 +70,18 @@ test('usage aggregates across the reasoning follow-up call', async () => {
   assert.deepEqual(usage, { prompt_tokens: 110, completion_tokens: 55, total_tokens: 165 });
 });
 
+test('usage aggregates Anthropic-style input/output token fields', async () => {
+  stubFetch([
+    { choices: [{ message: { content: '"feat: add x"' } }],
+      usage: { input_tokens: 100, output_tokens: 10 } },
+    { choices: [{ message: { content: 'feat: add x' } }],
+      usage: { input_tokens: 20, output_tokens: 5 } },
+  ]);
+  const { message, usage } = await generateCommitMessage(cfg(), diff);
+  assert.equal(message, 'feat: add x');
+  assert.deepEqual(usage, { input_tokens: 120, output_tokens: 15 });
+});
+
 test('usage is reported from a single call when no follow-up is needed', async () => {
   stubFetch([
     { choices: [{ message: { content: 'refactor: simplify' } }],

@@ -194,7 +194,7 @@ function sumUsage(...usages) {
   const total = {};
   for (const u of usages) {
     if (!u) continue;
-    for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens']) {
+    for (const key of ['prompt_tokens', 'completion_tokens', 'input_tokens', 'output_tokens', 'total_tokens']) {
       if (typeof u[key] === 'number') total[key] = (total[key] || 0) + u[key];
     }
   }
