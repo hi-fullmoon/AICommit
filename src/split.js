@@ -94,7 +94,7 @@ export function getSplitDiff(projectRoot, head, contextLines) {
 
 // Ask the model to partition the changed files into logical commits.
 // Returns the raw response text; parsing happens in parsePlan/normalizePlan.
-async function generateSplitPlan(config, files, diff, projectRoot, stream = null) {
+export async function generateSplitPlan(config, files, diff, projectRoot, stream = null) {
   const { temperature, language, maxTokens, reasoning } = config;
   const t0 = performance.now();
 
@@ -120,7 +120,8 @@ async function generateSplitPlan(config, files, diff, projectRoot, stream = null
   ].join('\n');
 
   const maxPlanFiles = config.splitMaxPlanFiles || SPLIT_MAX_PLAN_FILES;
-  const user = `Changed files:\n${condenseFileList(files, maxPlanFiles)}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
+  const changedFiles = condenseFileList(files, maxPlanFiles);
+  const user = `Changed files:\n${changedFiles}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
 
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
@@ -137,8 +138,18 @@ async function generateSplitPlan(config, files, diff, projectRoot, stream = null
       : Math.max(maxTokens, 4096),
     'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
       'Do not include any other text, explanation, or code fences. ' +
-      'If this is a recovery after truncation, omit optional body fields and output only subject and files.',
+      'If this is a recovery after truncation, omit optional body fields and output only subject and files. ' +
+      'Use the following list as the source of truth and assign every shown file exactly once:\n\n' +
+      `Changed files:\n${changedFiles}`,
     stream,
+    (response) => {
+      try {
+        parsePlan(response);
+        return true;
+      } catch {
+        return false;
+      }
+    },
   );
 
   if (!text.trim()) {

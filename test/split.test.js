@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import {
   normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
-  buildSplitPlanningContext, getSplitDiff,
+  buildSplitPlanningContext, getSplitDiff, generateSplitPlan,
 } from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
@@ -103,6 +103,59 @@ test('parsePlan distinguishes prose from a truncated plan', () => {
   assert.throws(() => parsePlan('好的，我来分组。'), /contains no JSON array/);
   const truncated = '[{"subject":"feat: a","files":["a.js","b.js",';
   assert.throws(() => parsePlan(truncated), /truncated before the plan completed/);
+});
+
+test('incomplete split recovery does not depend on finish_reason and resends files without the diff', async (t) => {
+  const realFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = realFetch; });
+  const calls = [];
+  const replies = [
+    {
+      choices: [{
+        finish_reason: 'stop',
+        message: {
+          content: '[{"subject":"feat: partial"',
+          reasoning_content: 'The tail only mentions late.js.',
+        },
+      }],
+    },
+    {
+      choices: [{
+        finish_reason: 'stop',
+        message: {
+          content: '[{"subject":"feat: group files","files":["early.js","late.js"]}]',
+        },
+      }],
+    },
+  ];
+  let replyIndex = 0;
+  globalThis.fetch = async (_url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    return new Response(JSON.stringify(replies[replyIndex++]));
+  };
+
+  const { raw } = await generateSplitPlan({
+    apiUrl: 'https://example.test/v1/chat/completions',
+    apiKey: '',
+    modelId: 'mock-model',
+    temperature: 0.3,
+    language: 'en',
+    maxTokens: 1024,
+    timeoutMs: 1000,
+    splitMaxDiffChars: 1000,
+    splitMaxPlanFiles: 100,
+    stripFiles: [],
+    extraBody: {},
+    reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+  }, [M('early.js'), M('late.js')], 'SECRET_DIFF_MARKER', process.cwd());
+
+  assert.match(raw, /early\.js/);
+  assert.equal(calls.length, 2);
+  const recovery = calls[1].messages.at(-1).content;
+  assert.match(recovery, /Changed files:\nM early\.js\nM late\.js/);
+  assert.match(recovery, /incomplete or malformed/);
+  assert.ok(!calls[1].messages.some(m => m.content.includes('SECRET_DIFF_MARKER')));
+  assert.equal(calls[1].max_tokens, 4096);
 });
 
 test('split planning context includes bounded previews for untracked text files', (t) => {

@@ -69,6 +69,9 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
   }
 
   if (host === 'api.deepseek.com' || host.endsWith('.deepseek.com')) {
+    // Prefer DeepSeek's native `thinking` object and remove the legacy boolean
+    // switch so extraBody cannot leave contradictory enable/disable controls.
+    delete payload.enable_thinking;
     payload.thinking = { type: enabled ? 'enabled' : 'disabled' };
     if (enabled) {
       // DeepSeek V4 accepts low/high/max. Its documented mapping treats
@@ -96,6 +99,7 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
       delete payload.thinking;
       delete payload.enable_thinking;
     } else {
+      delete payload.enable_thinking;
       payload.thinking = { type: 'disabled' };
     }
     return;
@@ -482,7 +486,10 @@ function sumUsage(...usages) {
 // reasoning tail already carries the model's own analysis of them.
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
-export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt, stream = null) {
+export async function getResponseText(
+  config, messages, temperature, maxTokens, followUpPrompt, stream = null,
+  responseValidator = null,
+) {
   let data = await callAPI(
     config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens,
     config.timeoutMs, config.extraBody, config.reasoning, stream,
@@ -491,15 +498,18 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
   let reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
   const truncatedByLimit = hitTokenLimit(data);
+  const invalidResponse = typeof responseValidator === 'function' && !responseValidator(text);
 
-  if ((!text.trim() && reasoning) || truncatedByLimit) {
+  if ((!text.trim() && reasoning) || truncatedByLimit || invalidResponse) {
     const truncated = (reasoning || '').length > MAX_REASONING_CHARS
       ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
       : (reasoning || '');
 
     const partial = text.trim();
-    const recoveryPrompt = truncatedByLimit
-      ? 'The previous response was cut off by the provider token limit. ' +
+    const recoveryPrompt = truncatedByLimit || invalidResponse
+      ? `The previous response was ${truncatedByLimit
+        ? 'cut off by the provider token limit'
+        : 'incomplete or malformed'}. ` +
         'Reproduce the COMPLETE answer from the beginning; do not continue from the cut-off point. ' +
         'Keep the answer concise.\n\n' + followUpPrompt
       : followUpPrompt;
@@ -526,15 +536,12 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
           { role: 'user', content: recoveryPrompt },
         ];
 
-    // A token-limit retry gets a larger ceiling. This is especially useful for
-    // non-reasoning models, which need the original request again; reasoning
-    // models instead reuse their analysis and avoid re-sending a large diff.
-    const recoveryMaxTokens = truncatedByLimit
-      ? Math.min(Math.max(maxTokens * 2, maxTokens + 1024), 16384)
-      : maxTokens;
+    // Respect the caller's configured ceiling. Known reasoning providers are
+    // switched to formatting-only mode above, and the recovery prompt asks for
+    // a compact answer, so the same budget has substantially more useful room.
     data = await callAPI(
       config.apiUrl, config.apiKey, config.modelId, recoveryMessages,
-      temperature, recoveryMaxTokens, config.timeoutMs, config.extraBody,
+      temperature, maxTokens, config.timeoutMs, config.extraBody,
       reasoningForFollowUp(config), stream,
     );
     usages.push(data?.usage);

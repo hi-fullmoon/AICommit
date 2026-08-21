@@ -197,6 +197,7 @@ test('token-limited reasoning response is retried as a complete compact answer',
     cfg({
       apiUrl: 'https://api.minimaxi.com/v1/chat/completions',
       modelId: 'MiniMax-M3',
+      extraBody: { enable_thinking: true },
       reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
     }),
     [
@@ -210,7 +211,8 @@ test('token-limited reasoning response is retried as a complete compact answer',
 
   assert.equal(text, '[{"subject":"feat: add AI","files":["ai.js"]}]');
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].max_tokens, 8192, 'recovery gets room for the complete answer');
+  assert.equal(calls[1].max_tokens, 4096, 'recovery respects the configured ceiling');
+  assert.ok(!('enable_thinking' in calls[1]), 'recovery removes a conflicting enable switch');
   assert.deepEqual(calls[1].thinking, { type: 'disabled' }, 'recovery does not repeat reasoning');
   assert.ok(!calls[1].messages.some(m => m.content.includes('large diff')), 'reasoning replaces the original diff');
   assert.match(calls[1].messages.at(-1).content, /COMPLETE answer from the beginning/);
@@ -250,7 +252,45 @@ test('streaming preserves a length finish_reason and recovers the response', asy
 
   assert.equal(text, '[{"subject":"fix: x","files":["x.js"]}]');
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].max_tokens, 4096);
+  assert.equal(calls[1].max_tokens, 2048);
+});
+
+test('streaming validator recovers incomplete content when [DONE] has no finish_reason', async () => {
+  const calls = [];
+  const responses = [
+    [
+      { choices: [{ delta: { content: '[{"subject":"fix: partial"' } }] },
+      '[DONE]',
+    ],
+    [
+      { choices: [{ delta: { content: '[{"subject":"fix: complete","files":["x.js"]}]' } }] },
+      '[DONE]',
+    ],
+  ];
+  let responseIndex = 0;
+  globalThis.fetch = async (_url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    const events = responses[Math.min(responseIndex++, responses.length - 1)];
+    const body = events.map(event => `data: ${typeof event === 'string' ? event : JSON.stringify(event)}\n\n`).join('');
+    return new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  };
+
+  const { text } = await getResponseText(
+    cfg(),
+    [{ role: 'user', content: 'plan these files' }],
+    0.3,
+    2048,
+    'Output ONLY the complete JSON array.',
+    { onReasoningDelta() {} },
+    response => response.endsWith(']'),
+  );
+
+  assert.equal(text, '[{"subject":"fix: complete","files":["x.js"]}]');
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.at(-1).content, /incomplete or malformed/);
 });
 
 test('Anthropic-format response (content[0].text) is used without a follow-up', async () => {
@@ -581,9 +621,11 @@ test('DeepSeek reasoning can be explicitly disabled', async () => {
   await generateCommitMessage(cfg({
     apiUrl: 'https://api.deepseek.com/chat/completions',
     modelId: 'deepseek-v4-pro',
+    extraBody: { enable_thinking: true },
     reasoning: { mode: 'off', effort: 'max', maxTokens: 4096 },
   }), diff);
   assert.deepEqual(calls[0].thinking, { type: 'disabled' });
+  assert.ok(!('enable_thinking' in calls[0]));
   assert.ok(!('reasoning_effort' in calls[0]));
   assert.equal(calls[0].temperature, 0.3);
 });
