@@ -218,6 +218,7 @@ async function consumeEventStream(response, onReasoningDelta) {
   let reasoning = '';
   let usage = null;
   let model = null;
+  let finishReason = null;
   let completed = false;
 
   const consumeData = (raw) => {
@@ -241,7 +242,11 @@ async function consumeEventStream(response, onReasoningDelta) {
 
     model ||= event.model || null;
     if (event.usage) usage = event.usage;
-    if (event?.choices?.some(choice => choice?.finish_reason != null)) completed = true;
+    const finishedChoice = event?.choices?.find(choice => choice?.finish_reason != null);
+    if (finishedChoice) {
+      completed = true;
+      finishReason ||= finishedChoice.finish_reason;
+    }
     const delta = event?.choices?.[0]?.delta ?? event?.choices?.[0]?.message;
     if (!delta) return;
 
@@ -284,7 +289,7 @@ async function consumeEventStream(response, onReasoningDelta) {
 
   const message = { content: content || null };
   if (reasoning) message.reasoning_content = reasoning;
-  return { model, choices: [{ message }], usage };
+  return { model, choices: [{ message, finish_reason: finishReason }], usage };
 }
 
 // Minimal "ping" request to verify the endpoint, API key, and model are all
@@ -330,6 +335,38 @@ const COMMIT_TYPE_RE = /\b(?:feat|fix|chore|docs|refactor|test|style|perf|ci|bui
 // the end; re-sending a whole trace (sometimes tens of thousands of tokens)
 // would be slow and expensive for no benefit.
 const MAX_REASONING_CHARS = 8000;
+
+// OpenAI-compatible providers use a few different values when the output
+// budget is exhausted. Treat all known token-limit variants alike, while a
+// normal `stop` (or a provider omitting finish_reason) remains untouched.
+function hitTokenLimit(data) {
+  const reason = data?.choices?.[0]?.finish_reason;
+  return typeof reason === 'string' && /^(?:length|max_tokens|max_output_tokens)$/i.test(reason);
+}
+
+// A formatting follow-up does not need to repeat reasoning that has already
+// happened. Disable it only for providers where we know the switch is valid;
+// unknown compatible endpoints keep their configured behavior.
+function reasoningForFollowUp(config) {
+  const reasoning = config.reasoning;
+  if (reasoning?.mode !== 'on') return reasoning;
+
+  const host = endpointHost(config.apiUrl);
+  if (
+    host.includes('minimax')
+    || host === 'api.deepseek.com'
+    || host.endsWith('.deepseek.com')
+    || host === 'openrouter.ai'
+    || reasoning.disabledBody !== undefined
+  ) {
+    return { ...reasoning, mode: 'off' };
+  }
+  if (host === 'api.openai.com') {
+    const supported = openAIReasoningEfforts(config.modelId);
+    if (supported?.includes('none')) return { ...reasoning, mode: 'off' };
+  }
+  return reasoning;
+}
 
 // Strict first-line check that decides whether a corrective retry is
 // worthwhile: a conventional commit starts with a known type, an optional
@@ -453,22 +490,53 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
   const usages = [data?.usage];
   let reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
+  const truncatedByLimit = hitTokenLimit(data);
 
-  if (!text.trim() && reasoning) {
-    const truncated = reasoning.length > MAX_REASONING_CHARS
+  if ((!text.trim() && reasoning) || truncatedByLimit) {
+    const truncated = (reasoning || '').length > MAX_REASONING_CHARS
       ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
-      : reasoning;
+      : (reasoning || '');
 
-    // Don't re-send the original messages — the user message is the full diff,
-    // which can be tens of thousands of tokens. The reasoning tail already
-    // contains the model's analysis of it; keep only the (cheap) system prompt
-    // for language/format constraints, then the reasoning + the follow-up ask.
+    const partial = text.trim();
+    const recoveryPrompt = truncatedByLimit
+      ? 'The previous response was cut off by the provider token limit. ' +
+        'Reproduce the COMPLETE answer from the beginning; do not continue from the cut-off point. ' +
+        'Keep the answer concise.\n\n' + followUpPrompt
+      : followUpPrompt;
+
+    // With reasoning, its conclusion plus the partial answer is enough to
+    // reconstruct the output without paying to send the original diff again.
+    // A non-reasoning model has no such summary, so retain the original
+    // messages for the rare case where its response itself hit the limit.
     const systemMsg = messages.find(m => m.role === 'system');
-    data = await callAPI(config.apiUrl, config.apiKey, config.modelId, [
-      ...(systemMsg ? [systemMsg] : []),
-      { role: 'assistant', content: truncated },
-      { role: 'user', content: followUpPrompt },
-    ], temperature, maxTokens, config.timeoutMs, config.extraBody, config.reasoning, stream);
+    const recoveryMessages = reasoning
+      ? [
+          ...(systemMsg ? [systemMsg] : []),
+          {
+            role: 'assistant',
+            content: partial
+              ? `${truncated}\n\nPartial response (discard and replace):\n${partial.slice(-MAX_REASONING_CHARS)}`
+              : truncated,
+          },
+          { role: 'user', content: recoveryPrompt },
+        ]
+      : [
+          ...messages,
+          ...(partial ? [{ role: 'assistant', content: partial.slice(-MAX_REASONING_CHARS) }] : []),
+          { role: 'user', content: recoveryPrompt },
+        ];
+
+    // A token-limit retry gets a larger ceiling. This is especially useful for
+    // non-reasoning models, which need the original request again; reasoning
+    // models instead reuse their analysis and avoid re-sending a large diff.
+    const recoveryMaxTokens = truncatedByLimit
+      ? Math.min(Math.max(maxTokens * 2, maxTokens + 1024), 16384)
+      : maxTokens;
+    data = await callAPI(
+      config.apiUrl, config.apiKey, config.modelId, recoveryMessages,
+      temperature, recoveryMaxTokens, config.timeoutMs, config.extraBody,
+      reasoningForFollowUp(config), stream,
+    );
     usages.push(data?.usage);
     const followUpReasoning = extractReasoning(data?.choices?.[0]?.message);
     if (followUpReasoning) {

@@ -174,6 +174,85 @@ test('getResponseText powers the split path: custom follow-up prompt, reasoning 
   assert.match(lastUser.content, /JSON array split plan/);
 });
 
+test('token-limited reasoning response is retried as a complete compact answer', async () => {
+  const calls = stubFetch([
+    {
+      choices: [{
+        finish_reason: 'length',
+        message: {
+          content: '[{"subject":"feat: add AI","body":"- add settings',
+          reasoning_content: 'Group the AI files together and the UI files together.',
+        },
+      }],
+    },
+    {
+      choices: [{
+        finish_reason: 'stop',
+        message: { content: '[{"subject":"feat: add AI","files":["ai.js"]}]' },
+      }],
+    },
+  ]);
+
+  const { text } = await getResponseText(
+    cfg({
+      apiUrl: 'https://api.minimaxi.com/v1/chat/completions',
+      modelId: 'MiniMax-M3',
+      reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+    }),
+    [
+      { role: 'system', content: 'Return a JSON array.' },
+      { role: 'user', content: 'large diff that must not be sent again' },
+    ],
+    0.3,
+    4096,
+    'Output ONLY the JSON array split plan. Omit optional body fields.',
+  );
+
+  assert.equal(text, '[{"subject":"feat: add AI","files":["ai.js"]}]');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].max_tokens, 8192, 'recovery gets room for the complete answer');
+  assert.deepEqual(calls[1].thinking, { type: 'disabled' }, 'recovery does not repeat reasoning');
+  assert.ok(!calls[1].messages.some(m => m.content.includes('large diff')), 'reasoning replaces the original diff');
+  assert.match(calls[1].messages.at(-1).content, /COMPLETE answer from the beginning/);
+});
+
+test('streaming preserves a length finish_reason and recovers the response', async () => {
+  const calls = [];
+  const responses = [
+    [
+      { choices: [{ delta: { content: '[{"subject":"fix: x"' } }] },
+      { choices: [{ delta: {}, finish_reason: 'length' }] },
+    ],
+    [
+      { choices: [{ delta: { content: '[{"subject":"fix: x","files":["x.js"]}]' } }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ],
+  ];
+  let responseIndex = 0;
+  globalThis.fetch = async (_url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    const events = responses[Math.min(responseIndex++, responses.length - 1)];
+    const body = events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('');
+    return new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  };
+
+  const { text } = await getResponseText(
+    cfg(),
+    [{ role: 'user', content: 'plan these files' }],
+    0.3,
+    2048,
+    'Output ONLY the complete JSON array.',
+    { onReasoningDelta() {} },
+  );
+
+  assert.equal(text, '[{"subject":"fix: x","files":["x.js"]}]');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].max_tokens, 4096);
+});
+
 test('Anthropic-format response (content[0].text) is used without a follow-up', async () => {
   const calls = stubFetch([
     { content: [{ type: 'text', text: 'refactor: simplify' }] },

@@ -114,6 +114,7 @@ async function generateSplitPlan(config, files, diff, projectRoot, stream = null
     '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
     '- Do not invent files that are not in the "Changed files:" list above.',
     '- Prefer a few coherent groups over many tiny ones; use a single group if the changes are one logical unit.',
+    '- Keep the JSON compact. The "body" field is optional and, when useful, must contain at most two short bullet lines.',
     '- ' + langLine,
     '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"- add a login form\\n- add session handling","files":["a.js"]}], no markdown fences, no explanation. Newlines inside "body" are JSON-escaped (\\n).',
   ].join('\n');
@@ -135,7 +136,8 @@ async function generateSplitPlan(config, files, diff, projectRoot, stream = null
       ? Math.max(maxTokens, reasoning.maxTokens || 4096)
       : Math.max(maxTokens, 4096),
     'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
-      'Do not include any other text, explanation, or code fences.',
+      'Do not include any other text, explanation, or code fences. ' +
+      'If this is a recovery after truncation, omit optional body fields and output only subject and files.',
     stream,
   );
 
