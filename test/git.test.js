@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff,
-  unifiedArg, getChangedFiles, getUnstagedFiles,
+  unifiedArg, getChangedFiles, getUnstagedFiles, getUntrackedFiles, getStagedDiff,
 } from '../src/git.js';
 
 function makeRepo() {
@@ -51,6 +51,40 @@ test('getUnstagedFiles exposes real paths for staging via addPaths', () => {
     const [file] = getUnstagedFiles(dir);
     assert.equal(file.path, 'b.txt');
     assert.deepEqual(file.addPaths, ['b.txt']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('git file lists preserve Unicode and whitespace paths for selective staging', () => {
+  const dir = makeRepo();
+  try {
+    const tracked = '中文 文件.txt';
+    const untracked = '新 文件.txt';
+    writeFileSync(join(dir, tracked), 'initial\n');
+    execFileSync('git', ['add', '--', tracked], { cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'add unicode path'], { cwd: dir });
+    writeFileSync(join(dir, tracked), 'changed\n');
+    writeFileSync(join(dir, untracked), 'new\n');
+
+    const [modified] = getUnstagedFiles(dir);
+    assert.equal(modified.path, tracked);
+    assert.deepEqual(modified.addPaths, [tracked]);
+    assert.deepEqual(getUntrackedFiles(dir), [untracked]);
+
+    // The values returned by the helpers must be safe to pass directly back
+    // to git, which was the failing path in the interactive picker.
+    execFileSync('git', ['add', '--', ...modified.addPaths, untracked], { cwd: dir });
+    assert.deepEqual(getChangedFiles(dir).map((f) => f.path).sort(), [tracked, untracked].sort());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('git read failures surface command context instead of looking like no changes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aicommit-not-repo-'));
+  try {
+    assert.throws(() => getStagedDiff(dir, 1), /git diff --unified=1 --staged failed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

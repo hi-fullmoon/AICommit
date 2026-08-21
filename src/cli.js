@@ -25,6 +25,9 @@ function showHelp() {
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
     -s, --split           Split changes into multiple logical commits
+    --reasoning=<level>   Enable reasoning: low, medium, high, xhigh, or max
+    --no-reasoning        Explicitly disable reasoning when supported
+    --dry-run             Generate and review without creating commits
     -c, --check           Verify the configured LLM is reachable (ping test)
     --debug               Print debug info (parsed args, final config, etc.)
 
@@ -34,6 +37,8 @@ function showHelp() {
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
     aicommit --split      Group changes into several logical commits
+    aicommit --reasoning=low  Enable low-effort reasoning
+    aicommit --dry-run    Review a generated message without committing
     aicommit -c           Verify the configured (default) provider is reachable
     aicommit -c -p openrouter  Verify the "openrouter" provider is reachable
     aicommit /path/to    Commit changes in the specified directory
@@ -57,8 +62,7 @@ function takeValue(args, i, arg, hint) {
   return next;
 }
 
-export function parseArgs() {
-  const args = process.argv.slice(2);
+export function parseArgs(args = process.argv.slice(2)) {
 
   // "setup" is a standalone subcommand — it doesn't combine with the
   // commit-flow options, so short-circuit before parsing them.
@@ -69,15 +73,17 @@ export function parseArgs() {
     }
     return {
       targetPath: null, cliLang: null, cliProvider: null,
-      debug: false, split: false, check: false, setup: true,
+      cliReasoning: null, debug: false, split: false, dryRun: false, check: false, setup: true,
     };
   }
 
   let targetPath = null;
   let cliLang = null;
   let cliProvider = null;
+  let cliReasoning = null;
   let debug = false;
   let split = false;
+  let dryRun = false;
   let check = false;
   const setup = false;
 
@@ -101,6 +107,31 @@ export function parseArgs() {
 
     if (arg === '-s' || arg === '--split') {
       split = true;
+      continue;
+    }
+
+    if (arg === '--dry-run') {
+      dryRun = true;
+      continue;
+    }
+
+    if (arg === '--reasoning') {
+      cliReasoning = takeValue(args, i, arg, 'low|medium|high|xhigh|max');
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith('--reasoning=')) {
+      cliReasoning = arg.slice('--reasoning='.length);
+      if (!cliReasoning) {
+        console.error(chalk.red('  Missing value for --reasoning.'));
+        process.exit(1);
+      }
+      continue;
+    }
+
+    if (arg === '--no-reasoning') {
+      cliReasoning = 'off';
       continue;
     }
 
@@ -155,5 +186,12 @@ export function parseArgs() {
     }
   }
 
-  return { targetPath, cliLang, cliProvider, debug, split, check, setup };
+  const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max'];
+  if (cliReasoning && !reasoningLevels.includes(cliReasoning)) {
+    console.error(chalk.red(`  Invalid reasoning level: "${cliReasoning}".`));
+    console.error(chalk.dim(`  Use one of: ${reasoningLevels.join(', ')}`));
+    process.exit(1);
+  }
+
+  return { targetPath, cliLang, cliProvider, cliReasoning, debug, split, dryRun, check, setup };
 }

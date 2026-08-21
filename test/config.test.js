@@ -20,10 +20,21 @@ test('validateConfig rejects invalid collection and boolean config values', () =
   assert.throws(() => validateConfig(cfg({ stripFiles: '*.map' })), /stripFiles/);
   assert.throws(() => validateConfig(cfg({ stripFiles: ['*.map', 42] })), /stripFiles/);
   assert.throws(() => validateConfig(cfg({ regenerateWithDiff: 'false' })), /regenerateWithDiff/);
+  assert.throws(() => validateConfig(cfg({ extraBody: [] })), /extraBody/);
+  assert.throws(() => validateConfig(cfg({ extraBody: null })), /extraBody/);
+  assert.throws(() => validateConfig(cfg({ extraBody: { model: 'other' } })), /extraBody/);
 });
 
 test('validateConfig validates split-specific tuning options', () => {
   assert.equal(validateConfig(cfg({ splitMaxDiffChars: 12000, splitMaxPlanFiles: 50 })).splitMaxPlanFiles, 50);
   assert.throws(() => validateConfig(cfg({ splitMaxDiffChars: 0 })), /splitMaxDiffChars/);
   assert.throws(() => validateConfig(cfg({ splitMaxPlanFiles: 1.5 })), /splitMaxPlanFiles/);
+});
+
+test('validateConfig validates reasoning settings', () => {
+  assert.equal(validateConfig(cfg()).reasoning.mode, 'auto');
+  assert.equal(validateConfig(cfg({ reasoning: { mode: 'on', effort: 'high', maxTokens: 8192 } })).reasoning.effort, 'high');
+  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'sometimes', effort: 'low', maxTokens: 4096 } })), /reasoning\.mode/);
+  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'extreme', maxTokens: 4096 } })), /reasoning\.effort/);
+  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'low', maxTokens: 0 } })), /maxTokens/);
 });

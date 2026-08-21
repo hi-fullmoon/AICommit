@@ -19,7 +19,10 @@ const PROVIDER_PRESETS = [
   { name: 'openai',     apiUrl: 'https://api.openai.com/v1/chat/completions',       modelId: 'gpt-4o' },
   { name: 'deepseek',   apiUrl: 'https://api.deepseek.com/v1/chat/completions',     modelId: 'deepseek-v4-flash' },
   { name: 'openrouter', apiUrl: 'https://openrouter.ai/api/v1/chat/completions',    modelId: 'openai/gpt-4o-mini' },
-  { name: 'minimax',    apiUrl: 'https://api.minimaxi.com/v1/chat/completions',     modelId: 'MiniMax-M3' },
+  {
+    name: 'minimax', apiUrl: 'https://api.minimaxi.com/v1/chat/completions', modelId: 'MiniMax-M3',
+    extraBody: { thinking: { type: 'disabled' }, reasoning_split: true },
+  },
 ];
 
 // Top-level connection keys from a legacy flat config. When the wizard writes
@@ -90,7 +93,7 @@ export async function runSetup() {
     ],
   });
 
-  let providerName, apiUrl, defaultModel;
+  let providerName, apiUrl, defaultModel, presetExtraBody;
   if (presetName === 'custom') {
     providerName = await input({
       message:  'Provider name (used with aicommit -p <name>)',
@@ -115,6 +118,7 @@ export async function runSetup() {
     providerName = preset.name;
     apiUrl       = preset.apiUrl;
     defaultModel = preset.modelId;
+    presetExtraBody = preset.extraBody;
   }
 
   const existingProvider = existing.providers?.[providerName] || {};
@@ -151,7 +155,13 @@ export async function runSetup() {
     ],
   });
 
-  const entry = { apiUrl, apiKey, modelId };
+  const entry = {
+    ...existingProvider,
+    apiUrl,
+    apiKey,
+    modelId,
+    ...(presetExtraBody && !existingProvider.extraBody ? { extraBody: presetExtraBody } : {}),
+  };
 
   // ── 6. Connection test ──────────────────────────────────────────────
 

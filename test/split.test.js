@@ -5,7 +5,10 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan } from '../src/split.js';
+import {
+  normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
+  buildSplitPlanningContext,
+} from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
 // executeSplit / getAllChangedFiles.
@@ -100,6 +103,32 @@ test('parsePlan distinguishes prose from a truncated plan', () => {
   assert.throws(() => parsePlan('好的，我来分组。'), /contains no JSON array/);
   const truncated = '[{"subject":"feat: a","files":["a.js","b.js",';
   assert.throws(() => parsePlan(truncated), /truncated before the plan completed/);
+});
+
+test('split planning context includes bounded previews for untracked text files', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'new-feature.js'), 'export function newFeature() { return 42; }\n');
+  const files = getAllChangedFiles(repo);
+
+  const context = buildSplitPlanningContext(repo, files, '', 1000, []);
+  assert.match(context, /Untracked file preview: new-feature\.js/);
+  assert.match(context, /newFeature/);
+  assert.ok(context.length <= 1000);
+});
+
+test('split planning context reserves room for tracked and untracked changes', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'new.txt'), 'n'.repeat(2000));
+  const files = getAllChangedFiles(repo);
+  const tracked = 'diff --git a/a.txt b/a.txt\n+tracked change\n' + 't'.repeat(2000);
+
+  const context = buildSplitPlanningContext(repo, files, tracked, 500, []);
+  assert.match(context, /Untracked file preview: new\.txt/);
+  assert.match(context, /Tracked changes:/);
+  assert.match(context, /diff --git/);
+  assert.ok(context.length <= 500);
 });
 
 test('getAllChangedFiles keeps both paths for a rename', (t) => {

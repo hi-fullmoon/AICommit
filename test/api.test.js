@@ -268,7 +268,7 @@ test('request timeouts are wrapped with a helpful message', async () => {
   await assert.rejects(() => checkConnection(cfg({ timeoutMs: 5000 })), /timed out after 5s/);
 });
 
-test('OpenAI endpoint gets a strict body: no vendor thinking params', async () => {
+test('standard request body has no vendor thinking params', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
   await generateCommitMessage(
     cfg({ apiUrl: 'https://api.openai.com/v1/chat/completions', modelId: 'gpt-4o' }), diff,
@@ -289,12 +289,82 @@ test('OpenAI reasoning models get max_completion_tokens and no temperature', asy
   assert.ok(!('max_tokens' in body) && !('temperature' in body));
 });
 
-test('non-OpenAI endpoints keep the thinking-disable switches', async () => {
+test('non-OpenAI endpoints also use the standard body by default', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
   await generateCommitMessage(cfg(), diff);
+  const body = calls[0];
+  assert.ok(!('enable_thinking' in body) && !('thinking' in body) && !('reasoning_split' in body));
+  assert.equal(body.max_tokens, 1024);
+});
+
+test('extraBody explicitly adds provider-specific request fields', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    extraBody: { enable_thinking: false, thinking: { type: 'disabled' }, reasoning_split: true },
+  }), diff);
   const body = calls[0];
   assert.equal(body.enable_thinking, false);
   assert.deepEqual(body.thinking, { type: 'disabled' });
   assert.equal(body.reasoning_split, true);
-  assert.equal(body.max_tokens, 1024);
+});
+
+test('extraBody cannot replace the selected model or messages', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    extraBody: { model: 'injected-model', messages: [], seed: 7 },
+  }), diff);
+  assert.equal(calls[0].model, 'mock-model');
+  assert.ok(calls[0].messages.length > 0);
+  assert.equal(calls[0].seed, 7);
+});
+
+test('OpenAI reasoning CLI config maps to reasoning_effort and raises the output budget', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    modelId: 'gpt-5-mini',
+    reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+  }), diff);
+  assert.equal(calls[0].reasoning_effort, 'low');
+  assert.equal(calls[0].max_completion_tokens, 4096);
+});
+
+test('OpenRouter reasoning uses the normalized reasoning object', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+  }), diff);
+  assert.deepEqual(calls[0].reasoning, { effort: 'medium' });
+  assert.equal(calls[0].max_tokens, 4096);
+});
+
+test('MiniMax reasoning removes the disabling switch and keeps reasoning split', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.minimaxi.com/v1/chat/completions',
+    modelId: 'MiniMax-M3',
+    extraBody: { thinking: { type: 'disabled' }, reasoning_split: true },
+    reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+  }), diff);
+  assert.ok(!('thinking' in calls[0]));
+  assert.equal(calls[0].reasoning_split, true);
+});
+
+test('custom endpoints require an explicit enabledBody for reasoning', async () => {
+  await assert.rejects(
+    () => generateCommitMessage(cfg({
+      reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+    }), diff),
+    /reasoning\.enabledBody/,
+  );
+
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    reasoning: {
+      mode: 'on', effort: 'low', maxTokens: 4096,
+      enabledBody: { enable_thinking: true },
+    },
+  }), diff);
+  assert.equal(calls[0].enable_thinking, true);
 });

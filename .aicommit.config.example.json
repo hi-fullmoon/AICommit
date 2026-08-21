@@ -4,7 +4,13 @@
     "minimax": {
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKey": "sk-your-minimax-key-here",
-      "modelId": "MiniMax-M3"
+      "modelId": "MiniMax-M3",
+      "extraBody": {
+        "thinking": {
+          "type": "disabled"
+        },
+        "reasoning_split": true
+      }
     },
     "deepseek": {
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
@@ -27,6 +33,11 @@
   "splitMaxPlanFiles": 100,
   "diffContextLines": 1,
   "regenerateWithDiff": false,
+  "reasoning": {
+    "mode": "auto",
+    "effort": "low",
+    "maxTokens": 4096
+  },
   "stripFiles": [
     "*.min.js",
     "*.map",

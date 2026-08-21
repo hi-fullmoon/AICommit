@@ -20,7 +20,9 @@ import { runSetup } from './setup.js';
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
-  const { targetPath, cliLang, cliProvider, debug, split, check, setup } = parseArgs();
+  const {
+    targetPath, cliLang, cliProvider, cliReasoning, debug, split, dryRun, check, setup,
+  } = parseArgs();
 
   // The setup wizard is a standalone flow — no git repo, diff, or loaded
   // config required.
@@ -71,6 +73,12 @@ export async function main() {
     process.exit(1);
   }
 
+  if (cliReasoning === 'off') {
+    config.reasoning = { ...config.reasoning, mode: 'off' };
+  } else if (cliReasoning) {
+    config.reasoning = { ...config.reasoning, mode: 'on', effort: cliReasoning };
+  }
+
   if (providerName) {
     const viaCli = cliProvider ? chalk.dim(' (via CLI)') : '';
     console.log('  ' + chalk.green('✓') + chalk.dim(` Model: ${providerName} (${config.modelId})${viaCli}`));
@@ -79,6 +87,11 @@ export async function main() {
   const langLabel = config.language === 'zh' ? '中文' : 'English';
   const langViaCli = cliLang ? chalk.dim(' (via CLI)') : '';
   console.log('  ' + chalk.green('✓') + chalk.dim(` Language: ${langLabel}${langViaCli}`));
+  if (config.reasoning.mode === 'on') {
+    console.log('  ' + chalk.green('✓') + chalk.dim(` Reasoning: ${config.reasoning.effort}${cliReasoning ? ' (via CLI)' : ''}`));
+  } else if (config.reasoning.mode === 'off' && cliReasoning) {
+    console.log('  ' + chalk.green('✓') + chalk.dim(' Reasoning: off (via CLI)'));
+  }
 
   // ── 1.5. Connection check ───────────────────────────────────────────
 
@@ -134,8 +147,10 @@ export async function main() {
     console.log(chalk.dim(`  config files: ${loaded.join(', ') || '(none — defaults only)'}`));
     console.log(chalk.dim(`  cliLang:      ${cliLang || '(not set)'}`));
     console.log(chalk.dim(`  cliProvider:  ${cliProvider || '(not set)'}`));
+    console.log(chalk.dim(`  reasoning:    ${config.reasoning.mode === 'on' ? config.reasoning.effort : config.reasoning.mode}${cliReasoning ? ' (via CLI)' : ''}`));
     console.log(chalk.dim(`  providerName: ${providerName || '(not set)'}`));
     console.log(chalk.dim(`  split:        ${split}`));
+    console.log(chalk.dim(`  dryRun:       ${dryRun}`));
     console.log(chalk.dim('  final config:'));
     for (const [key, value] of Object.entries(config)) {
       const display = key === 'apiKey'
@@ -159,7 +174,7 @@ export async function main() {
   }
 
   if (split) {
-    const handled = await splitFlow(config, projectRoot);
+    const handled = await splitFlow(config, projectRoot, { dryRun });
     if (handled) return;
     // Only one changed file — continue with the normal single-commit flow.
   }
@@ -444,6 +459,11 @@ export async function main() {
   // ── 5. Commit ────────────────────────────────────────────────────────
 
   console.log('');
+
+  if (dryRun) {
+    console.log('  ' + chalk.green.bold('✓ Dry run complete — no commit was created.\n'));
+    return;
+  }
 
   const success = gitCommit(message, projectRoot);
 

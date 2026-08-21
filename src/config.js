@@ -42,6 +42,17 @@ export const DEFAULT_CONFIG = {
   // re-sending the diff — far cheaper. true: re-send the full diff on every
   // regenerate, for more varied rewrites at a much higher token cost.
   regenerateWithDiff: false,
+  // Provider-specific request fields are opt-in. Keeping this empty by
+  // default preserves compatibility with strict OpenAI-compatible servers.
+  extraBody: {},
+  // Cross-provider reasoning controls. "auto" preserves the provider/model
+  // default; CLI --reasoning=<level> switches mode to "on" and
+  // --no-reasoning switches it to "off".
+  reasoning: {
+    mode: 'auto',
+    effort: 'low',
+    maxTokens: 4096,
+  },
   // Compact rules + one few-shot example: explicit rules and a concrete
   // example steer models far more reliably than abstract prose, and the
   // prompt is sent on every call — every token here is paid per request.
@@ -154,6 +165,27 @@ export function validateConfig(config) {
   if (!Array.isArray(config.stripFiles) || config.stripFiles.some((p) => typeof p !== 'string')) {
     throw new Error('Invalid config "stripFiles": expected an array of strings.');
   }
+  if (!config.extraBody || typeof config.extraBody !== 'object' || Array.isArray(config.extraBody)) {
+    throw new Error('Invalid config "extraBody": expected an object.');
+  }
+  if ('model' in config.extraBody || 'messages' in config.extraBody) {
+    throw new Error('Invalid config "extraBody": "model" and "messages" are managed by aicommit.');
+  }
+  if (!config.reasoning || typeof config.reasoning !== 'object' || Array.isArray(config.reasoning)) {
+    throw new Error('Invalid config "reasoning": expected an object.');
+  }
+  if (!['auto', 'on', 'off'].includes(config.reasoning.mode)) {
+    throw new Error('Invalid config "reasoning.mode": expected "auto", "on", or "off".');
+  }
+  if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoning.effort)) {
+    throw new Error('Invalid config "reasoning.effort": expected low, medium, high, xhigh, or max.');
+  }
+  for (const key of ['enabledBody', 'disabledBody']) {
+    const value = config.reasoning[key];
+    if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) {
+      throw new Error(`Invalid config "reasoning.${key}": expected an object.`);
+    }
+  }
 
   assertNumber(config, 'temperature', { min: 0, max: 2 });
   assertNumber(config, 'maxTokens', { integer: true, min: 1 });
@@ -163,6 +195,7 @@ export function validateConfig(config) {
   assertNumber(config, 'splitMaxDiffChars', { integer: true, min: 1 });
   assertNumber(config, 'splitMaxPlanFiles', { integer: true, min: 1 });
   assertNumber(config, 'diffContextLines', { integer: true, min: 0 });
+  assertNumber(config.reasoning, 'maxTokens', { integer: true, min: 1 });
 
   return config;
 }

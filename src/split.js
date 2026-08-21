@@ -1,5 +1,4 @@
 import { openSync, readSync, closeSync, fstatSync } from 'node:fs';
-import { execSync, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 import chalk from 'chalk';
@@ -7,7 +6,10 @@ import ora from 'ora';
 import editor from '@inquirer/editor';
 
 import { getResponseText, generateCommitMessage } from './api.js';
-import { getBranch, hasHead, runGit, stripLockFileContent, isLockFile, matchStripPattern, unifiedArg } from './git.js';
+import {
+  getBranch, hasHead, runGit, readGit, stripLockFileContent, isLockFile,
+  matchStripPattern, unifiedArg,
+} from './git.js';
 import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
 import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.js';
 
@@ -44,65 +46,48 @@ export function condenseFileList(files, cap = SPLIT_MAX_PLAN_FILES) {
 // issues with special characters in paths). Runs at the repo root so paths
 // are root-relative — executeSplit stages them from projectRoot.
 export function getAllChangedFiles(cwd) {
-  try {
-    const out = execSync('git status --porcelain -z -uall', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-      cwd,
-    });
-    if (!out) return [];
-    const entries = out.split('\0').filter(Boolean);
-    const files = [];
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const status = entry.slice(0, 2);
-      const path = entry.slice(3);
-      // porcelain -z prints renames/copies as "<dest>\0<src>\0". Keep both
-      // paths: committing only the destination would drop the source's
-      // deletion. They are shown as one "src → dest" entry (so the model
-      // groups them together) and carried in addPaths for git add/diff.
-      if (status.includes('R') || status.includes('C')) {
-        const dest = path;
-        const src = entries[++i];
-        files.push({ status: status.trim() || '?', path: `${src} → ${dest}`, addPaths: [src, dest] });
-      } else {
-        files.push({ status: status.trim() || '?', path, addPaths: [path] });
-      }
+  const out = readGit(['status', '--porcelain', '-z', '-uall'], cwd);
+  if (!out) return [];
+  const entries = out.split('\0').filter(Boolean);
+  const files = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const status = entry.slice(0, 2);
+    const path = entry.slice(3);
+    // porcelain -z prints renames/copies as "<dest>\0<src>\0". Keep both
+    // paths: committing only the destination would drop the source's
+    // deletion. They are shown as one "src → dest" entry (so the model
+    // groups them together) and carried in addPaths for git add/diff.
+    if (status.includes('R') || status.includes('C')) {
+      const dest = path;
+      const src = entries[++i];
+      files.push({ status: status.trim() || '?', path: `${src} → ${dest}`, addPaths: [src, dest] });
+    } else {
+      files.push({ status: status.trim() || '?', path, addPaths: [path] });
     }
-    return files;
-  } catch {
-    return [];
   }
+  return files;
 }
 
 // Diff of all tracked changes (staged + unstaged) against HEAD. Before the
 // first commit there is no HEAD, so fall back to the staged diff.
 function getSplitDiff(projectRoot, head, contextLines) {
   const args = head ? ['diff', unifiedArg(contextLines), 'HEAD'] : ['diff', unifiedArg(contextLines), '--cached'];
-  try {
-    return execFileSync('git', args, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-      maxBuffer: 64 * 1024 * 1024,
-    }).trim();
-  } catch {
-    return '';
-  }
+  return readGit(args, projectRoot).trim();
 }
 
 // Ask the model to partition the changed files into logical commits.
 // Returns the raw response text; parsing happens in parsePlan/normalizePlan.
-async function generateSplitPlan(config, files, diff) {
-  const { temperature, language, maxTokens } = config;
+async function generateSplitPlan(config, files, diff, projectRoot) {
+  const { temperature, language, maxTokens, reasoning } = config;
   const t0 = performance.now();
 
   const langLine = language === 'zh' ? 'Write each commit message in Chinese (Simplified Chinese).' : 'Write each commit message in English.';
 
-  const stripped = stripLockFileContent(diff, config.stripFiles);
   const maxDiffChars = config.splitMaxDiffChars || SPLIT_MAX_DIFF_CHARS;
-  const truncated = stripped.length > maxDiffChars;
-  const diffPart = truncated ? stripped.slice(0, maxDiffChars) + '\n... (diff truncated)' : stripped;
+  const diffPart = buildSplitPlanningContext(
+    projectRoot, files, diff, maxDiffChars, config.stripFiles,
+  );
 
   const system = [
     'You are an expert at organizing git changes into small, atomic commits.',
@@ -130,7 +115,9 @@ async function generateSplitPlan(config, files, diff) {
       { role: 'user', content: user },
     ],
     temperature,
-    Math.max(maxTokens, 4096),
+    reasoning?.mode === 'on'
+      ? Math.max(maxTokens, reasoning.maxTokens || 4096)
+      : Math.max(maxTokens, 4096),
     'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
       'Do not include any other text, explanation, or code fences.',
   );
@@ -289,6 +276,38 @@ function readFilePreview(path, maxBytes = 2000) {
   }
 }
 
+function truncateContext(text, budget, marker) {
+  if (text.length <= budget) return text;
+  if (budget <= marker.length) return marker.slice(0, budget);
+  return text.slice(0, budget - marker.length) + marker;
+}
+
+// Build the bounded context used by the split planner. `git diff` never
+// includes untracked files, so include small text previews explicitly. When
+// tracked and untracked changes coexist, reserve up to 40% of the budget for
+// new files so neither side can crowd the other out completely.
+export function buildSplitPlanningContext(projectRoot, files, diff, maxChars, stripGlobs = []) {
+  const tracked = stripLockFileContent(diff, stripGlobs);
+  const previewParts = [];
+
+  for (const file of files) {
+    if (file.status !== '??' && file.status !== '?') continue;
+    const path = file.addPaths?.[0] || file.path;
+    if (isLockFile(path) || matchStripPattern(path, stripGlobs) || BINARY_FILE_RE.test(path)) continue;
+    const preview = readFilePreview(join(projectRoot, path));
+    if (preview) previewParts.push(`Untracked file preview: ${path}\n\`\`\`\n${preview}\n\`\`\``);
+  }
+
+  const rawPreviews = previewParts.join('\n\n');
+  const previewBudget = tracked.trim() ? Math.floor(maxChars * 0.4) : maxChars;
+  const previews = truncateContext(rawPreviews, previewBudget, '\n... (untracked previews truncated)');
+  const separator = previews && tracked ? '\n\nTracked changes:\n' : '';
+  const trackedBudget = Math.max(0, maxChars - previews.length - separator.length);
+  const trackedPart = truncateContext(tracked, trackedBudget, '\n... (diff truncated)');
+
+  return `${previews}${separator}${trackedPart}`;
+}
+
 // Diff limited to one group's files, used when regenerating that group's
 // message. Untracked files never show up in git diff, so when the diff is
 // empty feed the model the file names plus a content preview instead.
@@ -296,17 +315,8 @@ function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlo
   const u = unifiedArg(contextLines);
   const addPaths = expandPaths(group.files, allFiles);
   const args = head ? ['diff', u, 'HEAD', '--', ...addPaths] : ['diff', u, '--cached', '--', ...addPaths];
-  try {
-    const diff = execFileSync('git', args, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-      maxBuffer: 64 * 1024 * 1024,
-    }).trim();
-    if (diff) return stripLockFileContent(diff, stripGlobs);
-  } catch {
-    /* fall through to the file-list preview */
-  }
+  const diff = readGit(args, projectRoot).trim();
+  if (diff) return stripLockFileContent(diff, stripGlobs);
 
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
   const parts = [];
@@ -362,7 +372,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
 
 // Returns true when the split flow ran to completion (or exited); false
 // means "fall back to the normal single-commit flow".
-export async function splitFlow(config, projectRoot) {
+export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   const allFiles = getAllChangedFiles(projectRoot);
 
   if (allFiles.length === 0) {
@@ -404,7 +414,7 @@ export async function splitFlow(config, projectRoot) {
   process.on('SIGINT', cancelOnSigint);
   try {
     let elapsed, usage;
-    ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff));
+    ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff, projectRoot));
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
     if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
     spinner.succeed(done);
@@ -439,7 +449,9 @@ export async function splitFlow(config, projectRoot) {
     const action = await vimSelect({
       message: 'Proceed with this split plan?',
       choices: [
-        { name: 'Commit all groups', value: 'commit', description: `Create ${groups.length} commits as shown` },
+        dryRun
+          ? { name: 'Finish dry run', value: 'finish', description: 'Keep the reviewed plan without creating commits' }
+          : { name: 'Commit all groups', value: 'commit', description: `Create ${groups.length} commits as shown` },
         { name: 'Regenerate a message', value: 'regenerate', description: 'Ask AI for a different message for one group' },
         { name: 'Edit plan', value: 'edit', description: 'Modify the plan (JSON) in your editor' },
         { name: 'Cancel', value: 'cancel', description: 'Abort without committing' },
@@ -500,7 +512,12 @@ export async function splitFlow(config, projectRoot) {
       continue; // show the updated plan again
     }
 
-    break; // commit
+    break; // commit, or finish the dry run
+  }
+
+  if (dryRun) {
+    console.log('\n  ' + chalk.green.bold('✓ Dry run complete — no commits were created.\n'));
+    return true;
   }
 
   console.log('');

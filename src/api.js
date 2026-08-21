@@ -3,21 +3,77 @@ import { cleanCommitMessage } from './utils.js';
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-// OpenAI's own API strict-validates the request body — unknown params get a
-// 400 ("Unrecognized request argument supplied") — and its reasoning families
-// (o-series, gpt-5*) reject "max_tokens" and a non-default temperature, taking
-// "max_completion_tokens" instead. Other vendors ignore unknown params, so
-// the thinking-disable switches are only sent off OpenAI's endpoint.
-function isOpenAIEndpoint(apiUrl) {
-  try { return new URL(apiUrl).hostname === 'api.openai.com'; } catch { return false; }
-}
-
 function isOpenAIReasoningModel(modelId) {
   const id = (modelId || '').split('/').pop(); // strip router prefixes like "openai/"
   return /^(?:o\d|gpt-5)/i.test(id);
 }
 
-export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs) {
+function endpointHost(apiUrl) {
+  try { return new URL(apiUrl).hostname.toLowerCase(); } catch { return ''; }
+}
+
+function mergeRequestExtensions(payload, extensions) {
+  if (!extensions || typeof extensions !== 'object' || Array.isArray(extensions)) return;
+  const { model: _model, messages: _messages, ...safe } = extensions;
+  Object.assign(payload, safe);
+}
+
+// Map the provider-neutral reasoning config onto known Chat Completions
+// dialects. Unknown strict-compatible endpoints stay untouched unless the
+// user supplies enabledBody/disabledBody explicitly.
+function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
+  const mode = reasoning?.mode || 'auto';
+  if (mode === 'auto') return;
+
+  const enabled = mode === 'on';
+  const effort = reasoning?.effort || 'low';
+  const host = endpointHost(apiUrl);
+
+  if (host === 'api.openai.com') {
+    if (!isOpenAIReasoningModel(modelId)) {
+      if (enabled) throw new Error(`Model "${modelId}" is not recognized as an OpenAI reasoning model.`);
+      return;
+    }
+    payload.reasoning_effort = enabled ? effort : 'none';
+    return;
+  }
+
+  if (host === 'openrouter.ai') {
+    payload.reasoning = { effort: enabled ? effort : 'none' };
+    return;
+  }
+
+  if (host.includes('minimax')) {
+    payload.reasoning_split = true;
+    if (enabled) {
+      // MiniMax reasoning models think by default when the disabling switch is
+      // omitted; reasoning_split keeps the trace out of final content.
+      delete payload.thinking;
+      delete payload.enable_thinking;
+    } else {
+      payload.thinking = { type: 'disabled' };
+    }
+    return;
+  }
+
+  const customBody = enabled ? reasoning?.enabledBody : reasoning?.disabledBody;
+  if (customBody !== undefined) {
+    mergeRequestExtensions(payload, customBody);
+    return;
+  }
+
+  if (enabled) {
+    throw new Error(
+      `Reasoning mode is not configured for endpoint "${host || apiUrl}". ` +
+      'Add reasoning.enabledBody to this provider config.',
+    );
+  }
+}
+
+export async function callAPI(
+  apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs,
+  extraBody = {}, reasoning = null,
+) {
   const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
   const payload = { model: modelId, messages };
   if (isOpenAIReasoningModel(modelId)) {
@@ -26,17 +82,11 @@ export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, ma
     payload.temperature = temperature;
     payload.max_tokens = maxTokens;
   }
-  if (!isOpenAIEndpoint(apiUrl)) {
-    // Disable thinking across vendors; unknown params are ignored by
-    // APIs that don't support them:
-    // - enable_thinking: Qwen-style switch
-    // - thinking.type=disabled: MiniMax OpenAI-compatible API (M3)
-    // - reasoning_split: MiniMax M2.x can't disable thinking, but this moves
-    //   the reasoning out of `content` into `reasoning_details`
-    payload.enable_thinking = false;
-    payload.thinking = { type: 'disabled' };
-    payload.reasoning_split = true;
-  }
+  // OpenAI-compatible only describes the common schema; many compatible
+  // servers reject unknown provider-specific fields. Keep the default body
+  // standard and merge extensions only when the config/preset opts into them.
+  mergeRequestExtensions(payload, extraBody);
+  applyReasoningOptions(payload, apiUrl, modelId, reasoning);
   const body = JSON.stringify(payload);
 
   let response;
@@ -75,7 +125,7 @@ export async function callAPI(apiUrl, apiKey, modelId, messages, temperature, ma
 // echoed model id, and a preview of the model's reply. Uses the same request
 // body as a real call, so it validates the actual path a commit would take.
 export async function checkConnection(config) {
-  const { apiUrl, apiKey, modelId, maxTokens, timeoutMs } = config;
+  const { apiUrl, apiKey, modelId, maxTokens, timeoutMs, extraBody, reasoning } = config;
   const t0 = performance.now();
 
   const data = await callAPI(
@@ -84,8 +134,12 @@ export async function checkConnection(config) {
     modelId,
     [{ role: 'user', content: 'Reply with exactly: OK' }],
     0,
-    Math.min(maxTokens || 1024, 64),
+    reasoning?.mode === 'on'
+      ? Math.max(Math.min(maxTokens || 1024, 64), reasoning.maxTokens || 4096)
+      : Math.min(maxTokens || 1024, 64),
     timeoutMs,
+    extraBody,
+    reasoning,
   );
 
   const content = extractMessage(data);
@@ -211,7 +265,10 @@ function sumUsage(...usages) {
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
 export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
-  let data = await callAPI(config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens, config.timeoutMs);
+  let data = await callAPI(
+    config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens,
+    config.timeoutMs, config.extraBody, config.reasoning,
+  );
   const usages = [data?.usage];
   const reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
@@ -230,7 +287,7 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
       ...(systemMsg ? [systemMsg] : []),
       { role: 'assistant', content: truncated },
       { role: 'user', content: followUpPrompt },
-    ], temperature, maxTokens, config.timeoutMs);
+    ], temperature, maxTokens, config.timeoutMs, config.extraBody, config.reasoning);
     usages.push(data?.usage);
     text = extractMessage(data);
   }
@@ -244,8 +301,11 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
 // "regenerateWithDiff" in the config opts back into re-sending the diff on
 // every attempt (more variety, much higher token cost).
 export async function generateCommitMessage(config, diff, regenerateCount = 0, previousMessage = '') {
-  const { prompt, temperature, language, maxTokens, regenerateWithDiff } = config;
+  const { prompt, temperature, language, maxTokens, regenerateWithDiff, reasoning: reasoningConfig } = config;
   const t0 = performance.now();
+  const outputTokenLimit = reasoningConfig?.mode === 'on'
+    ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
+    : maxTokens;
 
   // Build the language directive — appended after the (possibly custom)
   // prompt so it takes priority over conflicting language instructions in it.
@@ -285,7 +345,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
   ];
 
   const { text, data, reasoning, usage: firstUsage } = await getResponseText(
-    config, messages, variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
+    config, messages, variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT,
   );
   let usage = firstUsage;
   let message = text;
@@ -303,7 +363,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
     const retry = await getResponseText(
       config,
       [messages[0], { role: 'user', content: correctivePrompt(message) }],
-      variedTemperature, maxTokens, FOLLOWUP_COMMIT_PROMPT,
+      variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT,
     );
     const fixed = cleanCommitMessage(retry.text);
     // The retry is a real API call that cost tokens regardless of whether it
@@ -321,7 +381,7 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
     throw new Error(
       `API returned an empty commit message.\n` +
       `  The request succeeded but no text came back — the model may have spent ` +
-      `its token budget on reasoning (maxTokens: ${maxTokens}).\n` +
+      `its token budget on reasoning (maxTokens: ${outputTokenLimit}).\n` +
       `  Try raising "maxTokens" in your config.\n\nRaw response:\n${snippet}`,
     );
   }

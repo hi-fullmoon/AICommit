@@ -32,7 +32,11 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
     "minimax": {
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKey": "sk-...",
-      "modelId": "MiniMax-M3"
+      "modelId": "MiniMax-M3",
+      "extraBody": {
+        "thinking": { "type": "disabled" },
+        "reasoning_split": true
+      }
     },
     "deepseek": {
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
@@ -69,6 +73,8 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `diffContextLines` | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `1`)                                                                                                                |
 | `stripFiles`       | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper |
+| `extraBody`         | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured |
+| `reasoning`         | Reasoning controls: `mode` (`auto`/`on`/`off`), `effort` (`low` through `max`), and `maxTokens` (default: `4096`) |
 
 Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
@@ -87,6 +93,10 @@ aicommit setup           # interactive configuration wizard
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
+aicommit --dry-run       # generate and review without creating a commit
+aicommit --split --dry-run # review a split plan without creating commits
+aicommit --reasoning=low # enable low-effort reasoning
+aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
 aicommit -p deepseek     # switch to the "deepseek" provider
 aicommit -c              # verify the configured LLM is reachable
@@ -99,11 +109,30 @@ aicommit -h              # help
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                       |
 | `-p`, `--provider` | Use the named provider from `providers`                                                      |
 | `-s`, `--split`    | Split changes into multiple logical commits                                                  |
+| `--dry-run`        | Generate and review a message or split plan without creating commits                         |
+| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                       |
+| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it                     |
 | `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working (exit 0 on success, 1 on failure) |
 | `-v`, `--version`  | Show version                                                                                 |
 | `-h`, `--help`     | Show help                                                                                    |
 
 Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. If some changes are staged but others are not, aicommit asks whether to include the rest in this commit.
+
+`--dry-run` follows the same review flow but stops before `git commit`. If you choose to stage files interactively, they remain staged after the dry run.
+
+Reasoning defaults to `auto`, which preserves the provider/model default. CLI reasoning is mapped natively for OpenAI, OpenRouter, and MiniMax. For another compatible endpoint, configure provider-specific request fields explicitly:
+
+```json
+{
+  "reasoning": {
+    "mode": "auto",
+    "effort": "low",
+    "maxTokens": 4096,
+    "enabledBody": { "enable_thinking": true },
+    "disabledBody": { "enable_thinking": false }
+  }
+}
+```
 
 ### Split mode
 

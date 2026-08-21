@@ -1,8 +1,52 @@
-import { execSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
-// Big repos can produce multi-MB diffs; the default 1MB execSync buffer would
-// throw and get swallowed by the catch below, silently reporting "no changes".
+// Big repos can produce multi-MB diffs; raise the default 1MB child-process
+// buffer and surface a contextual error if the explicit limit is exceeded.
 const MAX_BUFFER = 64 * 1024 * 1024;
+
+// Run a read-only git command and preserve the distinction between "no
+// output" and "git failed". Returning an empty string for both cases makes an
+// invalid index, a permissions error, or a too-large response look like a
+// clean working tree.
+export function readGit(args, cwd, maxBuffer = MAX_BUFFER) {
+  try {
+    return execFileSync('git', args, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer,
+      cwd,
+    });
+  } catch (err) {
+    const detail = typeof err.stderr === 'string'
+      ? err.stderr.trim()
+      : err.stderr?.toString('utf-8').trim();
+    const suffix = detail ? `: ${detail}` : '';
+    throw new Error(`git ${args.join(' ')} failed${suffix}`, { cause: err });
+  }
+}
+
+// --name-status -z emits status/path fields separated by NUL bytes. Unlike
+// the default line-oriented format, paths are never C-quoted, so Unicode,
+// tabs, newlines, and quotes remain safe to pass back to git as argv values.
+function parseNameStatusZ(output) {
+  const fields = output.split('\0');
+  if (fields.at(-1) === '') fields.pop();
+  const files = [];
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i++];
+    if (!status) continue;
+    const first = fields[i++];
+    if (first === undefined) throw new Error('Unexpected truncated output from git --name-status -z.');
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const second = fields[i++];
+      if (second === undefined) throw new Error('Unexpected truncated rename output from git --name-status -z.');
+      files.push({ status, path: `${first} → ${second}`, addPaths: [first, second] });
+    } else {
+      files.push({ status, path: first, addPaths: [first] });
+    }
+  }
+  return files;
+}
 
 // git diff context lines around each hunk (--unified=<n>). Fewer context
 // lines = fewer tokens for the model; commit messages rarely need git's
@@ -17,21 +61,14 @@ export function unifiedArg(contextLines) {
 // `git commit` will commit (staging happens up front, interactively, when
 // nothing is staged yet). Returns '' when nothing is staged.
 export function getStagedDiff(cwd, contextLines) {
-  const opts = { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAX_BUFFER, cwd };
-  try {
-    return execFileSync('git', ['diff', unifiedArg(contextLines), '--staged'], opts).trim();
-  } catch { return ''; }
+  return readGit(['diff', unifiedArg(contextLines), '--staged'], cwd).trim();
 }
 
 // Compact one-line-per-file summary of the same staged changes getStagedDiff
 // returns. Used to prepend context when a diff is condensed, so the model
 // still sees the full change scope without paying for every hunk.
 export function getDiffStat(cwd) {
-  try {
-    return execSync('git diff --stat --staged', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAX_BUFFER, cwd,
-    }).trim();
-  } catch { return ''; }
+  return readGit(['diff', '--stat', '--staged'], cwd).trim();
 }
 
 // Lock files only record resolved dependency versions — their content carries
@@ -136,19 +173,8 @@ export function condenseDiff(diff, maxChars, stat, maxSectionChars = Infinity) {
 }
 
 export function getChangedFiles(cwd) {
-  try {
-    const out = execSync('git diff --name-status --staged', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
-    }).trim();
-    if (!out) return [];
-    return out.split('\n').map(line => {
-      // Format: "<status>\t<path>" or "<status>\t<old>\t<new>" for renames
-      const parts = line.split('\t');
-      const status = parts[0];
-      const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
-      return { status, path };
-    });
-  } catch { return []; }
+  return parseNameStatusZ(readGit(['diff', '--name-status', '-z', '--staged'], cwd))
+    .map(({ status, path }) => ({ status, path }));
 }
 
 // Working-tree changes vs. the index (git diff without --staged) — same shape
@@ -158,19 +184,7 @@ export function getChangedFiles(cwd) {
 // carries the real path(s) for `git add` — `path` stays a display string
 // ("old → new" for renames), which git cannot add directly.
 export function getUnstagedFiles(cwd) {
-  try {
-    const out = execSync('git diff --name-status', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
-    }).trim();
-    if (!out) return [];
-    return out.split('\n').map(line => {
-      const parts = line.split('\t');
-      const status = parts[0];
-      const path   = parts.length === 3 ? `${parts[1]} → ${parts[2]}` : parts[1];
-      const addPaths = parts.length === 3 ? [parts[1], parts[2]] : [parts[1]];
-      return { status, path, addPaths };
-    });
-  } catch { return []; }
+  return parseNameStatusZ(readGit(['diff', '--name-status', '-z'], cwd));
 }
 
 export function getDiffStats(diff) {
@@ -188,24 +202,18 @@ export function getDiffStats(diff) {
 // Untracked files (respecting .gitignore) — they never show up in git diff,
 // so the "no changes" path uses this to point the user at them.
 export function getUntrackedFiles(cwd) {
-  try {
-    const out = execSync('git ls-files --others --exclude-standard', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
-    }).trim();
-    return out ? out.split('\n') : [];
-  } catch { return []; }
+  const out = readGit(['ls-files', '-z', '--others', '--exclude-standard'], cwd);
+  const paths = out.split('\0');
+  if (paths.at(-1) === '') paths.pop();
+  return paths;
 }
 
 export function getBranch(cwd) {
-  try {
-    return execSync('git branch --show-current', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], cwd,
-    }).trim();
-  } catch { return null; }
+  return readGit(['branch', '--show-current'], cwd).trim();
 }
 
-// Every git helper above swallows errors and returns empty, so without this
-// explicit check a non-repo directory would be misreported as "no changes".
+// Keep the explicit repo check so the CLI can give a targeted error before it
+// starts reading diffs.
 export function isGitRepo(cwd) {
   try {
     execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
