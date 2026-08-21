@@ -35,12 +35,17 @@ test('reasoning preview is limited to two wrapped terminal lines', () => {
 test('reasoning panel advertises Ctrl+O expand and collapse states', () => {
   const reasoning = Array.from({ length: 4 }, (_, i) => `line ${i + 1}`).join('\n');
 
+  assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /◇ Thinking/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /Ctrl\+O expand/);
   assert.doesNotMatch(formatReasoningPanel(reasoning, { columns: 80 }), /line 2/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /line 3/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /line 4/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80, expanded: true }), /Ctrl\+O collapse/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80, expanded: true }), /line 3/);
+});
+
+test('empty reasoning uses the Thinking title', () => {
+  assert.match(formatReasoningPanel(''), /◇ Thinking unavailable/);
 });
 
 test('expanded reasoning is paged to stay within the terminal viewport', () => {

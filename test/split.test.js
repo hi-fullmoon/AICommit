@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import {
   normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
-  buildSplitPlanningContext,
+  buildSplitPlanningContext, getSplitDiff,
 } from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
@@ -144,6 +144,19 @@ test('getAllChangedFiles keeps both paths for a rename', (t) => {
   assert.equal(files[0].status, 'R');
   assert.deepEqual(files[0].addPaths, ['old.txt', 'new.txt']);
   assert.ok(files[0].path.includes('old.txt') && files[0].path.includes('new.txt'));
+});
+
+test('unborn split diff includes edits made after a file was staged', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'new.txt'), 'staged version\n');
+  execFileSync('git', ['add', 'new.txt'], { cwd: repo });
+  writeFileSync(join(repo, 'new.txt'), 'working version\n');
+
+  const diff = getSplitDiff(repo, false, 1);
+  assert.match(diff, /\+staged version/);
+  assert.match(diff, /-staged version/);
+  assert.match(diff, /\+working version/);
 });
 
 test('executeSplit on an unborn branch commits every group without deleting earlier files', (t) => {

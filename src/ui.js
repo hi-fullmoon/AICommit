@@ -110,7 +110,7 @@ export function formatReasoningPanel(reasoning, options = {}) {
   const view = getReasoningView(reasoning, options);
 
   if (!view.text) {
-    return chalk.dim('  ◇ Model reasoning unavailable');
+    return chalk.dim('  ◇ Thinking unavailable');
   }
 
   const page = expanded && view.totalLines > view.text.split('\n').length
@@ -120,7 +120,7 @@ export function formatReasoningPanel(reasoning, options = {}) {
     ? `Ctrl+O collapse${page}`
     : `Ctrl+O expand${view.truncated ? ` · ${view.totalLines} lines` : ''}`;
   const body = view.text.split('\n').map((line) => `  ${chalk.dim(line)}`).join('\n');
-  return `${chalk.yellow('  ◇ Model reasoning')}  ${chalk.dim(`[${state}]`)}\n${body}`;
+  return `${chalk.yellow('  ◇ Thinking')}  ${chalk.dim(`[${state}]`)}\n${body}`;
 }
 
 const CTRL_O_RELEASE_MS = 180;

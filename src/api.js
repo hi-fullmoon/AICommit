@@ -8,6 +8,34 @@ function isOpenAIReasoningModel(modelId) {
   return /^(?:o\d|gpt-5)/i.test(id);
 }
 
+function openAIReasoningEfforts(modelId) {
+  const id = (modelId || '').split('/').pop().toLowerCase();
+
+  // OpenAI adds effort levels by model generation. Keep this table explicit
+  // so a provider-neutral CLI value cannot turn into a vague HTTP 400. Model
+  // snapshots and tier suffixes (for example gpt-5.6-sol) share the same
+  // generation prefix and therefore match these expressions as well.
+  if (/^gpt-5\.6(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+  if (/^gpt-5\.(?:2|3|4|5)(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5\.1(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high'];
+  if (/^gpt-5(?:-|$)/.test(id) || /^o\d(?:-|$)/.test(id)) return ['low', 'medium', 'high'];
+  return null;
+}
+
+function openAIReasoningEffort(modelId, enabled, effort) {
+  const requested = enabled ? effort : 'none';
+  const supported = openAIReasoningEfforts(modelId);
+  if (!supported || supported.includes(requested)) return requested;
+
+  const action = enabled
+    ? `reasoning effort "${requested}"`
+    : 'disabling reasoning';
+  throw new Error(
+    `OpenAI model "${modelId}" does not support ${action}. ` +
+    `Supported reasoning efforts: ${supported.join(', ')}.`,
+  );
+}
+
 function endpointHost(apiUrl) {
   try { return new URL(apiUrl).hostname.toLowerCase(); } catch { return ''; }
 }
@@ -36,7 +64,7 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
       // request untouched instead of making the default configuration fail.
       return;
     }
-    payload.reasoning_effort = enabled ? effort : 'none';
+    payload.reasoning_effort = openAIReasoningEffort(modelId, enabled, effort);
     return;
   }
 
@@ -104,6 +132,13 @@ export async function callAPI(
   applyReasoningOptions(payload, apiUrl, modelId, reasoning);
   if (stream?.onReasoningDelta) {
     payload.stream = true;
+    if (endpointHost(apiUrl) === 'api.openai.com') {
+      const current = payload.stream_options;
+      payload.stream_options = {
+        ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
+        include_usage: true,
+      };
+    }
   }
   const body = JSON.stringify(payload);
 
@@ -183,10 +218,15 @@ async function consumeEventStream(response, onReasoningDelta) {
   let reasoning = '';
   let usage = null;
   let model = null;
+  let completed = false;
 
   const consumeData = (raw) => {
     const payloadText = raw.trim();
-    if (!payloadText || payloadText === '[DONE]') return;
+    if (!payloadText) return;
+    if (payloadText === '[DONE]') {
+      completed = true;
+      return;
+    }
 
     let event;
     try {
@@ -201,6 +241,7 @@ async function consumeEventStream(response, onReasoningDelta) {
 
     model ||= event.model || null;
     if (event.usage) usage = event.usage;
+    if (event?.choices?.some(choice => choice?.finish_reason != null)) completed = true;
     const delta = event?.choices?.[0]?.delta ?? event?.choices?.[0]?.message;
     if (!delta) return;
 
@@ -233,6 +274,13 @@ async function consumeEventStream(response, onReasoningDelta) {
   buffer += decoder.decode();
   if (buffer) consumeLine(buffer);
   if (dataLines.length) consumeData(dataLines.join('\n'));
+
+  if (!completed) {
+    throw new Error(
+      'Streaming response ended before the provider sent [DONE] or a finish_reason. ' +
+      'The partial response was discarded; retry the request.',
+    );
+  }
 
   const message = { content: content || null };
   if (reasoning) message.reasoning_content = reasoning;

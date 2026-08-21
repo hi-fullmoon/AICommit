@@ -310,6 +310,52 @@ test('reasoning mode consumes SSE deltas and streams normalized reasoning', asyn
   assert.deepEqual(result.usage, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
 });
 
+test('streaming rejects a clean EOF that has no completion marker', async () => {
+  stubSSE([
+    { model: 'mock-stream', choices: [{ delta: { content: 'feat: partial' } }] },
+  ]);
+
+  await assert.rejects(
+    () => generateCommitMessage(
+      cfg(), diff, 0, '', { onReasoningDelta() {} },
+    ),
+    /ended before the provider sent \[DONE\] or a finish_reason/,
+  );
+});
+
+test('streaming accepts finish_reason when a compatible provider omits [DONE]', async () => {
+  stubSSE([
+    { model: 'mock-stream', choices: [{ delta: { content: 'feat: complete' } }] },
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+  ]);
+
+  const result = await generateCommitMessage(
+    cfg(), diff, 0, '', { onReasoningDelta() {} },
+  );
+  assert.equal(result.message, 'feat: complete');
+});
+
+test('OpenAI streams request usage while preserving other stream options', async () => {
+  const calls = stubSSE([
+    { model: 'gpt-4o', choices: [{ delta: { content: 'feat: usage' } }] },
+    { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
+    '[DONE]',
+  ]);
+
+  const result = await generateCommitMessage(cfg({
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    modelId: 'gpt-4o',
+    reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+    extraBody: { stream_options: { include_obfuscation: false, include_usage: false } },
+  }), diff, 0, '', { onReasoningDelta() {} });
+
+  assert.deepEqual(calls[0].stream_options, {
+    include_obfuscation: false,
+    include_usage: true,
+  });
+  assert.deepEqual(result.usage, { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 });
+});
+
 test('checkConnection surfaces HTTP errors', async () => {
   globalThis.fetch = async () => new Response('bad key', { status: 401 });
   await assert.rejects(() => checkConnection(cfg()), /HTTP 401/);
@@ -394,6 +440,38 @@ test('OpenAI reasoning CLI config maps to reasoning_effort and raises the output
   }), diff);
   assert.equal(calls[0].reasoning_effort, 'low');
   assert.equal(calls[0].max_completion_tokens, 4096);
+});
+
+test('OpenAI reasoning effort is validated against the model generation', async () => {
+  let calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await assert.rejects(
+    () => generateCommitMessage(cfg({
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      modelId: 'gpt-5.1',
+      reasoning: { mode: 'on', effort: 'max', maxTokens: 4096 },
+    }), diff),
+    /gpt-5\.1.*does not support reasoning effort "max"/,
+  );
+  assert.equal(calls.length, 0, 'invalid effort rejected before fetch');
+
+  calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await assert.rejects(
+    () => generateCommitMessage(cfg({
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      modelId: 'o3',
+      reasoning: { mode: 'off', effort: 'low', maxTokens: 4096 },
+    }), diff),
+    /o3.*does not support disabling reasoning/,
+  );
+  assert.equal(calls.length, 0, 'unsupported disable rejected before fetch');
+
+  calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    modelId: 'gpt-5.6-sol',
+    reasoning: { mode: 'on', effort: 'max', maxTokens: 4096 },
+  }), diff);
+  assert.equal(calls[0].reasoning_effort, 'max');
 });
 
 test('OpenRouter reasoning uses the normalized reasoning object', async () => {

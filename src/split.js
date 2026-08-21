@@ -71,11 +71,25 @@ export function getAllChangedFiles(cwd) {
   return files;
 }
 
-// Diff of all tracked changes (staged + unstaged) against HEAD. Before the
-// first commit there is no HEAD, so fall back to the staged diff.
-function getSplitDiff(projectRoot, head, contextLines) {
-  const args = head ? ['diff', unifiedArg(contextLines), 'HEAD'] : ['diff', unifiedArg(contextLines), '--cached'];
-  return readGit(args, projectRoot).trim();
+// Diff of the final working-tree state. With HEAD, one diff against HEAD
+// naturally includes staged and unstaged edits. On an unborn branch Git has
+// no tree to compare against, so concatenate index-vs-empty and
+// worktree-vs-index. This matters when a newly staged file is edited again:
+// the planner must see the same latest content executeSplit will git add -A.
+function getWorkingTreeDiff(projectRoot, head, contextLines, paths = []) {
+  const u = unifiedArg(contextLines);
+  const pathArgs = paths.length ? ['--', ...paths] : [];
+  if (head) {
+    return readGit(['diff', u, 'HEAD', ...pathArgs], projectRoot).trim();
+  }
+
+  const cached = readGit(['diff', u, '--cached', ...pathArgs], projectRoot).trim();
+  const unstaged = readGit(['diff', u, ...pathArgs], projectRoot).trim();
+  return [cached, unstaged].filter(Boolean).join('\n');
+}
+
+export function getSplitDiff(projectRoot, head, contextLines) {
+  return getWorkingTreeDiff(projectRoot, head, contextLines);
 }
 
 // Ask the model to partition the changed files into logical commits.
@@ -315,10 +329,8 @@ export function buildSplitPlanningContext(projectRoot, files, diff, maxChars, st
 // message. Untracked files never show up in git diff, so when the diff is
 // empty feed the model the file names plus a content preview instead.
 function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlobs) {
-  const u = unifiedArg(contextLines);
   const addPaths = expandPaths(group.files, allFiles);
-  const args = head ? ['diff', u, 'HEAD', '--', ...addPaths] : ['diff', u, '--cached', '--', ...addPaths];
-  const diff = readGit(args, projectRoot).trim();
+  const diff = getWorkingTreeDiff(projectRoot, head, contextLines, addPaths);
   if (diff) return stripLockFileContent(diff, stripGlobs);
 
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
