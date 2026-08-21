@@ -25,7 +25,7 @@ function showHelp() {
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
     -s, --split           Split changes into multiple logical commits
-    --reasoning=<level>   Set reasoning effort (enabled by default: low)
+    --reasoning=<level>   Set reasoning effort (enabled by default: medium)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
     -c, --check           Verify the configured LLM is reachable (ping test)

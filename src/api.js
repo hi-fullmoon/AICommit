@@ -54,7 +54,7 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
   if (mode === 'auto') return;
 
   const enabled = mode === 'on';
-  const effort = reasoning?.effort || 'low';
+  const effort = reasoning?.effort || 'medium';
   const host = endpointHost(apiUrl);
 
   if (host === 'api.openai.com') {

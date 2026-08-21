@@ -51,7 +51,7 @@ export const DEFAULT_CONFIG = {
   // switch.
   reasoning: {
     mode: 'on',
-    effort: 'low',
+    effort: 'medium',
     maxTokens: 4096,
     maxDisplayChars: 12000,
   },

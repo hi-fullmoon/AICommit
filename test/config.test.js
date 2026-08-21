@@ -37,6 +37,7 @@ test('validateConfig validates split-specific tuning options', () => {
 
 test('validateConfig validates reasoning settings', () => {
   assert.equal(validateConfig(cfg()).reasoning.mode, 'on');
+  assert.equal(validateConfig(cfg()).reasoning.effort, 'medium');
   assert.equal(validateConfig(cfg({ reasoning: { mode: 'on', effort: 'high', maxTokens: 8192 } })).reasoning.effort, 'high');
   assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'sometimes', effort: 'low', maxTokens: 4096 } })), /reasoning\.mode/);
   assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'extreme', maxTokens: 4096 } })), /reasoning\.effort/);
