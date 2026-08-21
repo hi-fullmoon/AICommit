@@ -25,7 +25,7 @@ function showHelp() {
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
     -s, --split           Split changes into multiple logical commits
-    --reasoning=<level>   Enable reasoning: low, medium, high, xhigh, or max
+    --reasoning=<level>   Set reasoning effort (enabled by default: low)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
     -c, --check           Verify the configured LLM is reachable (ping test)
@@ -37,7 +37,7 @@ function showHelp() {
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
     aicommit --split      Group changes into several logical commits
-    aicommit --reasoning=low  Enable low-effort reasoning
+    aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit -c           Verify the configured (default) provider is reachable
     aicommit -c -p openrouter  Verify the "openrouter" provider is reachable
@@ -73,7 +73,8 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
     return {
       targetPath: null, cliLang: null, cliProvider: null,
-      cliReasoning: null, debug: false, split: false, dryRun: false, check: false, setup: true,
+      cliReasoning: null,
+      debug: false, split: false, dryRun: false, check: false, setup: true,
     };
   }
 
@@ -193,5 +194,8 @@ export function parseArgs(args = process.argv.slice(2)) {
     process.exit(1);
   }
 
-  return { targetPath, cliLang, cliProvider, cliReasoning, debug, split, dryRun, check, setup };
+  return {
+    targetPath, cliLang, cliProvider, cliReasoning,
+    debug, split, dryRun, check, setup,
+  };
 }

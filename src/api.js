@@ -31,10 +31,27 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
 
   if (host === 'api.openai.com') {
     if (!isOpenAIReasoningModel(modelId)) {
-      if (enabled) throw new Error(`Model "${modelId}" is not recognized as an OpenAI reasoning model.`);
+      // Reasoning is enabled by default at the app level, but classic models
+      // such as GPT-4o do not accept reasoning_effort. Leave their standard
+      // request untouched instead of making the default configuration fail.
       return;
     }
     payload.reasoning_effort = enabled ? effort : 'none';
+    return;
+  }
+
+  if (host === 'api.deepseek.com' || host.endsWith('.deepseek.com')) {
+    payload.thinking = { type: enabled ? 'enabled' : 'disabled' };
+    if (enabled) {
+      // DeepSeek V4 accepts low/high/max. Its documented mapping treats
+      // medium and xhigh as high, so normalize our cross-provider levels.
+      payload.reasoning_effort = effort === 'low' || effort === 'max' ? effort : 'high';
+      // Thinking mode ignores temperature; omit it to keep the wire request
+      // faithful to the native API instead of sending a misleading control.
+      delete payload.temperature;
+    } else {
+      delete payload.reasoning_effort;
+    }
     return;
   }
 
@@ -62,17 +79,15 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
     return;
   }
 
-  if (enabled) {
-    throw new Error(
-      `Reasoning mode is not configured for endpoint "${host || apiUrl}". ` +
-      'Add reasoning.enabledBody to this provider config.',
-    );
-  }
+  // Unknown OpenAI-compatible endpoints may expose reasoning without a
+  // request switch, or may not support it at all. The default-on setting must
+  // remain backwards compatible in both cases: leave the payload standard
+  // unless the provider explicitly supplies enabledBody/disabledBody.
 }
 
 export async function callAPI(
   apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs,
-  extraBody = {}, reasoning = null,
+  extraBody = {}, reasoning = null, stream = null,
 ) {
   const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
   const payload = { model: modelId, messages };
@@ -87,6 +102,9 @@ export async function callAPI(
   // standard and merge extensions only when the config/preset opts into them.
   mergeRequestExtensions(payload, extraBody);
   applyReasoningOptions(payload, apiUrl, modelId, reasoning);
+  if (stream?.onReasoningDelta) {
+    payload.stream = true;
+  }
   const body = JSON.stringify(payload);
 
   let response;
@@ -112,19 +130,120 @@ export async function callAPI(
     throw err;
   }
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
+  try {
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (payload.stream && contentType.includes('text/event-stream')) {
+      return consumeEventStream(response, stream.onReasoningDelta);
+    }
+
+    // A few compatible endpoints ignore stream=true and return regular JSON.
+    // Keep accepting that response and surface its complete reasoning once.
+    const data = await response.json();
+    if (stream?.onReasoningDelta) {
+      const completeReasoning = extractReasoning(data?.choices?.[0]?.message);
+      if (completeReasoning) stream.onReasoningDelta(completeReasoning);
+    }
+    return data;
+  } catch (err) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      throw new Error(
+        `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
+        `Raise "timeoutMs" in your config if this keeps happening.`,
+      );
+    }
+    throw err;
+  }
+}
+
+function streamContent(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(part => part?.text ?? part?.content ?? '').filter(Boolean).join('');
+  }
+  return value?.text ?? '';
+}
+
+// Consume OpenAI-compatible SSE (`data: {...}` / `data: [DONE]`) while
+// assembling a normal Chat Completions-shaped response for the existing
+// parsing and retry pipeline. Reasoning fields differ by provider, so every
+// delta goes through the same normalization used for non-stream responses.
+async function consumeEventStream(response, onReasoningDelta) {
+  if (!response.body) throw new Error('Streaming response did not include a body.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let dataLines = [];
+  let content = '';
+  let reasoning = '';
+  let usage = null;
+  let model = null;
+
+  const consumeData = (raw) => {
+    const payloadText = raw.trim();
+    if (!payloadText || payloadText === '[DONE]') return;
+
+    let event;
+    try {
+      event = JSON.parse(payloadText);
+    } catch {
+      throw new Error(`Invalid JSON in streaming response: ${payloadText.slice(0, 200)}`);
+    }
+    if (event.error) {
+      const message = event.error.message || JSON.stringify(event.error);
+      throw new Error(`Streaming API error: ${message}`);
+    }
+
+    model ||= event.model || null;
+    if (event.usage) usage = event.usage;
+    const delta = event?.choices?.[0]?.delta ?? event?.choices?.[0]?.message;
+    if (!delta) return;
+
+    content += streamContent(delta.content);
+    const reasoningDelta = extractReasoning(delta);
+    if (reasoningDelta) {
+      reasoning += reasoningDelta;
+      onReasoningDelta(reasoningDelta);
+    }
+  };
+
+  const consumeLine = (line) => {
+    if (line === '') {
+      if (dataLines.length) consumeData(dataLines.join('\n'));
+      dataLines = [];
+      return;
+    }
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) consumeLine(line);
   }
 
-  return response.json();
+  buffer += decoder.decode();
+  if (buffer) consumeLine(buffer);
+  if (dataLines.length) consumeData(dataLines.join('\n'));
+
+  const message = { content: content || null };
+  if (reasoning) message.reasoning_content = reasoning;
+  return { model, choices: [{ message }], usage };
 }
 
 // Minimal "ping" request to verify the endpoint, API key, and model are all
 // reachable. Throws on HTTP errors (same as callAPI); returns latency, the
 // echoed model id, and a preview of the model's reply. Uses the same request
 // body as a real call, so it validates the actual path a commit would take.
-export async function checkConnection(config) {
+export async function checkConnection(config, stream = null) {
   const { apiUrl, apiKey, modelId, maxTokens, timeoutMs, extraBody, reasoning } = config;
   const t0 = performance.now();
 
@@ -140,14 +259,17 @@ export async function checkConnection(config) {
     timeoutMs,
     extraBody,
     reasoning,
+    stream,
   );
 
   const content = extractMessage(data);
+  const reasoningContent = extractReasoning(data?.choices?.[0]?.message);
 
   return {
     elapsed: performance.now() - t0,
     model: data?.model || null,
     content: content.trim(),
+    reasoning: reasoningContent,
     usage: data?.usage || null,
   };
 }
@@ -214,10 +336,21 @@ function extractMessage(data) {
 // OpenAI-style `reasoning_content` (DeepSeek), OpenRouter-style `reasoning`,
 // MiniMax/OpenRouter-style `reasoning_details` ([{ type: 'thinking', text }],
 // possibly multiple segments with interleaved thinking).
+function reasoningText(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(reasoningText).filter(Boolean).join('\n');
+  }
+  if (value && typeof value === 'object') {
+    return reasoningText(value.text ?? value.summary ?? value.content);
+  }
+  return '';
+}
+
 function extractReasoning(msg0) {
-  return msg0?.reasoning_content
-    || msg0?.reasoning
-    || msg0?.reasoning_details?.map(d => d?.text).filter(Boolean).join('\n')
+  return reasoningText(msg0?.reasoning_content)
+    || reasoningText(msg0?.reasoning)
+    || reasoningText(msg0?.reasoning_details)
     || null;
 }
 
@@ -255,8 +388,8 @@ function sumUsage(...usages) {
   return Object.keys(total).length ? total : null;
 }
 
-// Make the API call and return the assistant text plus the first response's
-// reasoning. Reasoning models that can't disable thinking (MiniMax M2.x,
+// Make the API call and return the assistant text plus reasoning accumulated
+// across the initial and any follow-up response. Reasoning models that can't disable thinking (MiniMax M2.x,
 // DeepSeek R1, OpenRouter reasoning models) may return empty content with a
 // reasoning trace; in that case a follow-up call feeds the (truncated) tail of
 // the reasoning back as context so the model produces the final answer — the
@@ -264,13 +397,13 @@ function sumUsage(...usages) {
 // reasoning tail already carries the model's own analysis of them.
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
-export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt) {
+export async function getResponseText(config, messages, temperature, maxTokens, followUpPrompt, stream = null) {
   let data = await callAPI(
     config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens,
-    config.timeoutMs, config.extraBody, config.reasoning,
+    config.timeoutMs, config.extraBody, config.reasoning, stream,
   );
   const usages = [data?.usage];
-  const reasoning = extractReasoning(data?.choices?.[0]?.message);
+  let reasoning = extractReasoning(data?.choices?.[0]?.message);
   let text = extractMessage(data);
 
   if (!text.trim() && reasoning) {
@@ -287,8 +420,12 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
       ...(systemMsg ? [systemMsg] : []),
       { role: 'assistant', content: truncated },
       { role: 'user', content: followUpPrompt },
-    ], temperature, maxTokens, config.timeoutMs, config.extraBody, config.reasoning);
+    ], temperature, maxTokens, config.timeoutMs, config.extraBody, config.reasoning, stream);
     usages.push(data?.usage);
+    const followUpReasoning = extractReasoning(data?.choices?.[0]?.message);
+    if (followUpReasoning) {
+      reasoning = [reasoning, followUpReasoning].filter(Boolean).join('\n\n');
+    }
     text = extractMessage(data);
   }
 
@@ -300,7 +437,9 @@ export async function getResponseText(config, messages, temperature, maxTokens, 
 // re-reading the diff — the diff is only sent on the first attempt. Setting
 // "regenerateWithDiff" in the config opts back into re-sending the diff on
 // every attempt (more variety, much higher token cost).
-export async function generateCommitMessage(config, diff, regenerateCount = 0, previousMessage = '') {
+export async function generateCommitMessage(
+  config, diff, regenerateCount = 0, previousMessage = '', stream = null,
+) {
   const { prompt, temperature, language, maxTokens, regenerateWithDiff, reasoning: reasoningConfig } = config;
   const t0 = performance.now();
   const outputTokenLimit = reasoningConfig?.mode === 'on'
@@ -344,10 +483,11 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
     { role: 'user',    content: userContent },
   ];
 
-  const { text, data, reasoning, usage: firstUsage } = await getResponseText(
-    config, messages, variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT,
+  const { text, data, reasoning: initialReasoning, usage: firstUsage } = await getResponseText(
+    config, messages, variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT, stream,
   );
   let usage = firstUsage;
+  let reasoning = initialReasoning;
   let message = text;
 
   // Last resort: extract a message from the reasoning content itself
@@ -363,12 +503,15 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
     const retry = await getResponseText(
       config,
       [messages[0], { role: 'user', content: correctivePrompt(message) }],
-      variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT,
+      variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT, stream,
     );
     const fixed = cleanCommitMessage(retry.text);
     // The retry is a real API call that cost tokens regardless of whether it
     // produced a usable message — count its usage unconditionally.
     usage = sumUsage(usage, retry.usage);
+    if (retry.reasoning) {
+      reasoning = [reasoning, retry.reasoning].filter(Boolean).join('\n\n');
+    }
     if (fixed.trim()) {
       message = fixed;
     }
@@ -386,5 +529,5 @@ export async function generateCommitMessage(config, diff, regenerateCount = 0, p
     );
   }
 
-  return { message: cleanCommitMessage(message), elapsed, usage };
+  return { message: cleanCommitMessage(message), elapsed, usage, reasoning };
 }

@@ -12,7 +12,10 @@ import {
   getUnstagedFiles, runGit, isGitRepo,
 } from './git.js';
 import { generateCommitMessage, checkConnection } from './api.js';
-import { statusColor, statusIcon, confirmAction, editMessage, vimSelect, vimCheckbox } from './ui.js';
+import {
+  statusColor, statusIcon, confirmAction, editMessage, vimSelect, vimCheckbox,
+  startReasoningStream,
+} from './ui.js';
 import { formatMs, maskApiKey, formatUsage, indentError } from './utils.js';
 import { splitFlow } from './split.js';
 import { runSetup } from './setup.js';
@@ -21,7 +24,8 @@ export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
   const {
-    targetPath, cliLang, cliProvider, cliReasoning, debug, split, dryRun, check, setup,
+    targetPath, cliLang, cliProvider, cliReasoning,
+    debug, split, dryRun, check, setup,
   } = parseArgs();
 
   // The setup wizard is a standalone flow — no git repo, diff, or loaded
@@ -78,6 +82,7 @@ export async function main() {
   } else if (cliReasoning) {
     config.reasoning = { ...config.reasoning, mode: 'on', effort: cliReasoning };
   }
+  const reasoningEnabled = config.reasoning.mode === 'on';
 
   if (providerName) {
     const viaCli = cliProvider ? chalk.dim(' (via CLI)') : '';
@@ -101,9 +106,21 @@ export async function main() {
       text:  chalk.dim(`Checking ${chalk.bold(config.modelId)} ...`),
       color: 'cyan',
     }).start();
+    let reasoningStream;
+    const stream = reasoningEnabled ? {
+      onReasoningDelta(chunk) {
+        if (!reasoningStream) {
+          spinner.stop();
+          reasoningStream = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+          return;
+        }
+        reasoningStream.append(chunk);
+      },
+    } : null;
 
     try {
-      const report = await checkConnection(config);
+      const report = await checkConnection(config, stream);
+      if (reasoningStream) await reasoningStream.stop();
       spinner.succeed('Connection OK');
 
       console.log('');
@@ -124,6 +141,7 @@ export async function main() {
       console.log('');
       process.exit(0);
     } catch (err) {
+      if (reasoningStream) await reasoningStream.stop();
       spinner.fail('Connection failed');
       console.log(`\n  ${indentError(err)}\n`);
       process.exit(1);
@@ -374,7 +392,7 @@ export async function main() {
 
   // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
-  let message, elapsed, usage;
+  let message, elapsed, usage, reasoningText;
   let regenerateCount = 0;
 
   while (true) {
@@ -382,6 +400,17 @@ export async function main() {
       text:  chalk.dim(`Calling ${chalk.bold(config.modelId)} ...`),
       color: 'cyan',
     }).start();
+    let liveReasoning;
+    const stream = reasoningEnabled ? {
+      onReasoningDelta(chunk) {
+        if (!liveReasoning) {
+          spinner.stop();
+          liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+          return;
+        }
+        liveReasoning.append(chunk);
+      },
+    } : null;
 
     // Ctrl+C while the model call is in flight cancels the commit cleanly:
     // stop the spinner (restoring the cursor) and exit, instead of dying
@@ -396,11 +425,15 @@ export async function main() {
     try {
       // Pass the previous message so a regenerate can ask for a rewording
       // instead of re-sending the full diff (see generateCommitMessage).
-      ({ message, elapsed, usage } = await generateCommitMessage(config, modelDiff, regenerateCount, message));
+      ({ message, elapsed, usage, reasoning: reasoningText } = await generateCommitMessage(
+        config, modelDiff, regenerateCount, message, stream,
+      ));
+      if (liveReasoning) await liveReasoning.stop();
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
       spinner.succeed(done);
     } catch (err) {
+      if (liveReasoning) await liveReasoning.stop();
       spinner.fail(chalk.red('API call failed'));
       console.log(`\n  ${indentError(err)}\n`);
       // A transient API failure shouldn't kill the session — let the user
@@ -428,7 +461,10 @@ export async function main() {
 
     // ── 4. User action ─────────────────────────────────────────────────
 
-    const action = await confirmAction(message);
+    const action = await confirmAction(message, reasoningEnabled ? {
+      text: reasoningText,
+      maxChars: config.reasoning.maxDisplayChars,
+    } : null);
 
     if (action === 'use') {
       break; // proceed to commit

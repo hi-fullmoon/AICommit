@@ -10,7 +10,9 @@ import {
   getBranch, hasHead, runGit, readGit, stripLockFileContent, isLockFile,
   matchStripPattern, unifiedArg,
 } from './git.js';
-import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
+import {
+  statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox, startReasoningStream,
+} from './ui.js';
 import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,7 +80,7 @@ function getSplitDiff(projectRoot, head, contextLines) {
 
 // Ask the model to partition the changed files into logical commits.
 // Returns the raw response text; parsing happens in parsePlan/normalizePlan.
-async function generateSplitPlan(config, files, diff, projectRoot) {
+async function generateSplitPlan(config, files, diff, projectRoot, stream = null) {
   const { temperature, language, maxTokens, reasoning } = config;
   const t0 = performance.now();
 
@@ -108,7 +110,7 @@ async function generateSplitPlan(config, files, diff, projectRoot) {
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
   // empty content work here just like in the single-commit flow.
-  const { text, usage } = await getResponseText(
+  const { text, usage, reasoning: reasoningContent } = await getResponseText(
     config,
     [
       { role: 'system', content: system },
@@ -120,13 +122,14 @@ async function generateSplitPlan(config, files, diff, projectRoot) {
       : Math.max(maxTokens, 4096),
     'Based on your analysis above, output ONLY the JSON array split plan as requested. ' +
       'Do not include any other text, explanation, or code fences.',
+    stream,
   );
 
   if (!text.trim()) {
     throw new Error('API returned an empty split plan.');
   }
 
-  return { raw: text, elapsed: performance.now() - t0, usage };
+  return { raw: text, elapsed: performance.now() - t0, usage, reasoning: reasoningContent };
 }
 
 // Extract the JSON array from the model's response (tolerates code fences
@@ -373,6 +376,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
 // Returns true when the split flow ran to completion (or exited); false
 // means "fall back to the normal single-commit flow".
 export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
+  const reasoningEnabled = config.reasoning.mode === 'on';
   const allFiles = getAllChangedFiles(projectRoot);
 
   if (allFiles.length === 0) {
@@ -402,8 +406,19 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
     text: chalk.dim(`Calling ${chalk.bold(config.modelId)} to plan commits ...`),
     color: 'cyan',
   }).start();
+  let liveReasoning;
+  const stream = reasoningEnabled ? {
+    onReasoningDelta(chunk) {
+      if (!liveReasoning) {
+        spinner.stop();
+        liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+        return;
+      }
+      liveReasoning.append(chunk);
+    },
+  } : null;
 
-  let raw;
+  let raw, reasoningText;
   // Same Ctrl+C contract as the single-commit flow: interrupting the model
   // call cancels the split cleanly instead of leaving a half-drawn spinner.
   const cancelOnSigint = () => {
@@ -414,11 +429,15 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   process.on('SIGINT', cancelOnSigint);
   try {
     let elapsed, usage;
-    ({ raw, elapsed, usage } = await generateSplitPlan(config, allFiles, diff, projectRoot));
+    ({ raw, elapsed, usage, reasoning: reasoningText } = await generateSplitPlan(
+      config, allFiles, diff, projectRoot, stream,
+    ));
+    if (liveReasoning) await liveReasoning.stop();
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
     if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
     spinner.succeed(done);
   } catch (err) {
+    if (liveReasoning) await liveReasoning.stop();
     spinner.fail(chalk.red('API call failed'));
     console.log(`\n  ${indentError(err)}\n`);
     process.exit(1);
@@ -456,7 +475,10 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
         { name: 'Edit plan', value: 'edit', description: 'Modify the plan (JSON) in your editor' },
         { name: 'Cancel', value: 'cancel', description: 'Abort without committing' },
       ],
-    });
+    }, reasoningEnabled ? {
+      text: reasoningText,
+      maxChars: config.reasoning.maxDisplayChars,
+    } : null);
 
     if (action === 'cancel') {
       console.log(chalk.dim('\n  Split cancelled.\n'));
@@ -488,6 +510,17 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
           text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
           color: 'cyan',
         }).start();
+        let liveGroupReasoning;
+        const groupStream = reasoningEnabled ? {
+          onReasoningDelta(chunk) {
+            if (!liveGroupReasoning) {
+              rspinner.stop();
+              liveGroupReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+              return;
+            }
+            liveGroupReasoning.append(chunk);
+          },
+        } : null;
         const cancelRegenOnSigint = () => {
           rspinner.stop();
           console.log(chalk.dim('\n  Split cancelled.\n'));
@@ -496,12 +529,19 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
         process.on('SIGINT', cancelRegenOnSigint);
         try {
           regenCounts[idx]++;
-          const { message, elapsed, usage } = await generateCommitMessage(config, groupDiff, regenCounts[idx], groups[idx].message);
+          const {
+            message, elapsed, usage, reasoning,
+          } = await generateCommitMessage(
+            config, groupDiff, regenCounts[idx], groups[idx].message, groupStream,
+          );
+          if (liveGroupReasoning) await liveGroupReasoning.stop();
           let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`;
           if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
           rspinner.succeed(done);
+          reasoningText = reasoning;
           groups[idx] = { ...groups[idx], message };
         } catch (err) {
+          if (liveGroupReasoning) await liveGroupReasoning.stop();
           regenCounts[idx]--;
           rspinner.fail(chalk.red(`Group ${idx + 1} regenerate failed`));
           console.log(`\n  ${indentError(err)}\n`);

@@ -20,6 +20,19 @@ function stubFetch(bodies) {
   return calls;
 }
 
+function stubSSE(events) {
+  const calls = [];
+  globalThis.fetch = async (_url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    const body = events.map(event => `data: ${typeof event === 'string' ? event : JSON.stringify(event)}\n\n`).join('');
+    return new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  };
+  return calls;
+}
+
 const cfg = (extra = {}) => ({
   apiUrl: 'https://example.test/v1/chat/completions',
   apiKey: 'sk-test',
@@ -53,8 +66,9 @@ test('reasoning model: empty content + reasoning triggers a follow-up call', asy
     { choices: [{ message: { content: null, reasoning_content: 'think\nconclusion: fix: handle empty diff\n' } }] },
     { choices: [{ message: { content: 'fix: handle empty diff' } }] },
   ]);
-  const { message } = await generateCommitMessage(cfg(), diff);
+  const { message, reasoning } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'fix: handle empty diff');
+  assert.match(reasoning, /conclusion: fix/);
   assert.equal(calls.length, 2); // follow-up was actually made
 });
 
@@ -254,6 +268,48 @@ test('checkConnection extracts array-of-parts content and echoed model', async (
   assert.equal(report.model, 'mock-echo');
 });
 
+test('checkConnection exposes reasoning returned by the provider', async () => {
+  stubFetch([{
+    choices: [{ message: { content: 'OK', reasoning_content: 'checked endpoint and model' } }],
+  }]);
+  const report = await checkConnection(cfg());
+  assert.equal(report.reasoning, 'checked endpoint and model');
+});
+
+test('reasoning arrays and summary objects are normalized for terminal display', async () => {
+  stubFetch([{
+    choices: [{ message: {
+      content: 'OK',
+      reasoning_details: [{ text: 'step one' }, { summary: 'step two' }],
+    } }],
+  }]);
+  const report = await checkConnection(cfg());
+  assert.equal(report.reasoning, 'step one\nstep two');
+});
+
+test('reasoning mode consumes SSE deltas and streams normalized reasoning', async () => {
+  const calls = stubSSE([
+    { model: 'mock-stream', choices: [{ delta: { reasoning_content: 'step one\n' } }] },
+    { choices: [{ delta: { reasoning_details: [{ text: 'step two\n' }] } }] },
+    { choices: [{ delta: { content: 'feat: stream reasoning' } }] },
+    { choices: [], usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 } },
+    '[DONE]',
+  ]);
+  const deltas = [];
+  const result = await generateCommitMessage(cfg({
+    reasoning: {
+      mode: 'on', effort: 'low', maxTokens: 4096,
+      enabledBody: { enable_thinking: true },
+    },
+  }), diff, 0, '', { onReasoningDelta: chunk => deltas.push(chunk) });
+
+  assert.equal(calls[0].stream, true);
+  assert.equal(result.message, 'feat: stream reasoning');
+  assert.equal(result.reasoning, 'step one\nstep two\n');
+  assert.deepEqual(deltas, ['step one\n', 'step two\n']);
+  assert.deepEqual(result.usage, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
+});
+
 test('checkConnection surfaces HTTP errors', async () => {
   globalThis.fetch = async () => new Response('bad key', { status: 401 });
   await assert.rejects(() => checkConnection(cfg()), /HTTP 401/);
@@ -287,6 +343,17 @@ test('OpenAI reasoning models get max_completion_tokens and no temperature', asy
   const body = calls[0];
   assert.equal(body.max_completion_tokens, 1024);
   assert.ok(!('max_tokens' in body) && !('temperature' in body));
+});
+
+test('default-on reasoning stays compatible with non-reasoning OpenAI models', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    modelId: 'gpt-4o',
+    reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+  }), diff);
+  assert.ok(!('reasoning_effort' in calls[0]));
+  assert.equal(calls[0].max_tokens, 4096);
 });
 
 test('non-OpenAI endpoints also use the standard body by default', async () => {
@@ -339,6 +406,31 @@ test('OpenRouter reasoning uses the normalized reasoning object', async () => {
   assert.equal(calls[0].max_tokens, 4096);
 });
 
+test('DeepSeek V4 enables native thinking and normalizes reasoning effort', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.deepseek.com/v1/chat/completions',
+    modelId: 'deepseek-v4-flash',
+    reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+  }), diff);
+  assert.deepEqual(calls[0].thinking, { type: 'enabled' });
+  assert.equal(calls[0].reasoning_effort, 'high');
+  assert.equal(calls[0].max_tokens, 4096);
+  assert.ok(!('temperature' in calls[0]));
+});
+
+test('DeepSeek reasoning can be explicitly disabled', async () => {
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    apiUrl: 'https://api.deepseek.com/chat/completions',
+    modelId: 'deepseek-v4-pro',
+    reasoning: { mode: 'off', effort: 'max', maxTokens: 4096 },
+  }), diff);
+  assert.deepEqual(calls[0].thinking, { type: 'disabled' });
+  assert.ok(!('reasoning_effort' in calls[0]));
+  assert.equal(calls[0].temperature, 0.3);
+});
+
 test('MiniMax reasoning removes the disabling switch and keeps reasoning split', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
   await generateCommitMessage(cfg({
@@ -351,20 +443,18 @@ test('MiniMax reasoning removes the disabling switch and keeps reasoning split',
   assert.equal(calls[0].reasoning_split, true);
 });
 
-test('custom endpoints require an explicit enabledBody for reasoning', async () => {
-  await assert.rejects(
-    () => generateCommitMessage(cfg({
-      reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
-    }), diff),
-    /reasoning\.enabledBody/,
-  );
-
+test('custom endpoints stay standard by default and accept explicit enabledBody', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  await generateCommitMessage(cfg({
+    reasoning: { mode: 'on', effort: 'low', maxTokens: 4096 },
+  }), diff);
+  assert.ok(!('enable_thinking' in calls[0]));
+
   await generateCommitMessage(cfg({
     reasoning: {
       mode: 'on', effort: 'low', maxTokens: 4096,
       enabledBody: { enable_thinking: true },
     },
   }), diff);
-  assert.equal(calls[0].enable_thinking, true);
+  assert.equal(calls[1].enable_thinking, true);
 });

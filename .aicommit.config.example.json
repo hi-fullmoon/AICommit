@@ -15,8 +15,7 @@
     "deepseek": {
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKey": "sk-your-deepseek-key-here",
-      "modelId": "deepseek-v4-flash",
-      "temperature": 0.3
+      "modelId": "deepseek-v4-flash"
     },
     "openrouter": {
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
@@ -34,9 +33,10 @@
   "diffContextLines": 1,
   "regenerateWithDiff": false,
   "reasoning": {
-    "mode": "auto",
+    "mode": "on",
     "effort": "low",
-    "maxTokens": 4096
+    "maxTokens": 4096,
+    "maxDisplayChars": 12000
   },
   "stripFiles": [
     "*.min.js",

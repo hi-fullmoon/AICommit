@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@inquirer/checkbox": "^4.3.2",
+    "@inquirer/core": "^10.3.2",
     "@inquirer/confirm": "^5.1.0",
     "@inquirer/editor": "^4.1.0",
     "@inquirer/input": "^5.1.2",
@@ -24,7 +25,8 @@
     "@inquirer/select": "^4.1.0",
     "boxen": "^8.0.1",
     "chalk": "^5.4.0",
-    "ora": "^8.2.0"
+    "ora": "^8.2.0",
+    "wrap-ansi": "^9.0.2"
   },
   "keywords": [
     "git",

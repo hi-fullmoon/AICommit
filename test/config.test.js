@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 
 import { DEFAULT_CONFIG, validateConfig } from '../src/config.js';
 
-const cfg = (extra = {}) => ({ ...DEFAULT_CONFIG, ...extra });
+const cfg = (extra = {}) => ({
+  ...DEFAULT_CONFIG,
+  ...extra,
+  reasoning: { ...DEFAULT_CONFIG.reasoning, ...extra.reasoning },
+});
 
 test('validateConfig accepts the default config', () => {
   assert.equal(validateConfig(cfg()).modelId, DEFAULT_CONFIG.modelId);
@@ -32,9 +36,10 @@ test('validateConfig validates split-specific tuning options', () => {
 });
 
 test('validateConfig validates reasoning settings', () => {
-  assert.equal(validateConfig(cfg()).reasoning.mode, 'auto');
+  assert.equal(validateConfig(cfg()).reasoning.mode, 'on');
   assert.equal(validateConfig(cfg({ reasoning: { mode: 'on', effort: 'high', maxTokens: 8192 } })).reasoning.effort, 'high');
   assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'sometimes', effort: 'low', maxTokens: 4096 } })), /reasoning\.mode/);
   assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'extreme', maxTokens: 4096 } })), /reasoning\.effort/);
   assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'low', maxTokens: 0 } })), /maxTokens/);
+  assert.throws(() => validateConfig(cfg({ reasoning: { maxDisplayChars: 0 } })), /maxDisplayChars/);
 });

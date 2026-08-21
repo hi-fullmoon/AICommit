@@ -74,7 +74,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `stripFiles`       | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper |
 | `extraBody`         | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured |
-| `reasoning`         | Reasoning controls: `mode` (`auto`/`on`/`off`), `effort` (`low` through `max`), and `maxTokens` (default: `4096`) |
+| `reasoning`         | Reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically |
 
 Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
 
@@ -95,7 +95,7 @@ aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
 aicommit --dry-run       # generate and review without creating a commit
 aicommit --split --dry-run # review a split plan without creating commits
-aicommit --reasoning=low # enable low-effort reasoning
+aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
 aicommit -p deepseek     # switch to the "deepseek" provider
@@ -120,14 +120,17 @@ Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter
 
 `--dry-run` follows the same review flow but stops before `git commit`. If you choose to stage files interactively, they remain staged after the dry run.
 
-Reasoning defaults to `auto`, which preserves the provider/model default. CLI reasoning is mapped natively for OpenAI, OpenRouter, and MiniMax. For another compatible endpoint, configure provider-specific request fields explicitly:
+Reasoning defaults to `on` with `low` effort. It is mapped natively for OpenAI reasoning models, DeepSeek, OpenRouter, and MiniMax; models that do not expose reasoning continue normally and show an unavailable notice instead of failing. DeepSeek's current `deepseek-v4-flash` and `deepseek-v4-pro` models receive `thinking: { "type": "enabled" }` plus `reasoning_effort`; `medium`/`xhigh` are normalized to DeepSeek's `high` level.
+
+When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requests a streaming response and displays reasoning as it arrives. The live view follows the newest two terminal lines by default; press `Ctrl+O` to expand or collapse the accumulated text during generation or review. Long expanded output is kept inside the terminal viewport—use `PageUp`/`PageDown` to read every page. Holding `Ctrl+O` counts as one toggle, so key repeat cannot leave duplicate panels behind. Output is sanitized and capped by `reasoning.maxDisplayChars`; providers that do not expose reasoning show a short unavailable notice.
 
 ```json
 {
   "reasoning": {
-    "mode": "auto",
+    "mode": "on",
     "effort": "low",
     "maxTokens": 4096,
+    "maxDisplayChars": 12000,
     "enabledBody": { "enable_thinking": true },
     "disabledBody": { "enable_thinking": false }
   }

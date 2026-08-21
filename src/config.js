@@ -45,13 +45,15 @@ export const DEFAULT_CONFIG = {
   // Provider-specific request fields are opt-in. Keeping this empty by
   // default preserves compatibility with strict OpenAI-compatible servers.
   extraBody: {},
-  // Cross-provider reasoning controls. "auto" preserves the provider/model
-  // default; CLI --reasoning=<level> switches mode to "on" and
-  // --no-reasoning switches it to "off".
+  // Cross-provider reasoning controls. Reasoning defaults to "on" and is
+  // streamed automatically; "auto" preserves the provider/model default,
+  // while --no-reasoning switches it to "off". There is no separate display
+  // switch.
   reasoning: {
-    mode: 'auto',
+    mode: 'on',
     effort: 'low',
     maxTokens: 4096,
+    maxDisplayChars: 12000,
   },
   // Compact rules + one few-shot example: explicit rules and a concrete
   // example steer models far more reliably than abstract prose, and the
@@ -196,6 +198,7 @@ export function validateConfig(config) {
   assertNumber(config, 'splitMaxPlanFiles', { integer: true, min: 1 });
   assertNumber(config, 'diffContextLines', { integer: true, min: 0 });
   assertNumber(config.reasoning, 'maxTokens', { integer: true, min: 1 });
+  assertNumber(config.reasoning, 'maxDisplayChars', { integer: true, min: 1 });
 
   return config;
 }
