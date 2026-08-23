@@ -17,6 +17,14 @@ test('parseArgs recognizes dry-run in normal and split modes', () => {
 test('parseArgs keeps dry-run disabled by default and for setup', () => {
   assert.equal(parseArgs([]).dryRun, false);
   assert.equal(parseArgs(['setup']).dryRun, false);
+  assert.equal(parseArgs(['setup']).yes, false);
+});
+
+test('parseArgs recognizes explicit non-interactive confirmation', () => {
+  assert.equal(parseArgs(['--yes']).yes, true);
+  assert.equal(parseArgs(['-y', '--split']).yes, true);
+  assert.equal(parseArgs(['--yes', '--dry-run']).dryRun, true);
+  assert.equal(parseArgs([]).yes, false);
 });
 
 test('parseArgs accepts reasoning levels and the disable alias', () => {

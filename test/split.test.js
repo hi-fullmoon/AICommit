@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import {
   normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
-  buildSplitPlanningContext, getSplitDiff, generateSplitPlan,
+  buildSplitPlanningContext, getSplitDiff, generateSplitPlan, getSplitStateFingerprint,
 } from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
@@ -210,6 +210,18 @@ test('unborn split diff includes edits made after a file was staged', (t) => {
   assert.match(diff, /\+staged version/);
   assert.match(diff, /-staged version/);
   assert.match(diff, /\+working version/);
+});
+
+test('split state fingerprint detects changes to untracked file content', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'new.txt'), 'first version\n');
+  const files = getAllChangedFiles(repo);
+  const before = getSplitStateFingerprint(repo, false, files);
+
+  writeFileSync(join(repo, 'new.txt'), 'second version\n');
+  const after = getSplitStateFingerprint(repo, false, getAllChangedFiles(repo));
+  assert.notEqual(after, before);
 });
 
 test('executeSplit on an unborn branch commits every group without deleting earlier files', (t) => {

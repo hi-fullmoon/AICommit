@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import {
   getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff,
   unifiedArg, getChangedFiles, getUnstagedFiles, getUntrackedFiles, getStagedDiff,
+  getIndexFingerprint, createIndexTransaction, protectSensitiveDiff,
+  isSensitiveFile, gitCommit,
 } from '../src/git.js';
 
 function makeRepo() {
@@ -114,6 +116,78 @@ test('getDiffStats counts files and +/- lines, ignoring headers', () => {
 test('getDiffStats returns zeros for empty input', () => {
   assert.deepEqual(getDiffStats(''), { files: 0, additions: 0, deletions: 0 });
   assert.deepEqual(getDiffStats(null), { files: 0, additions: 0, deletions: 0 });
+});
+
+test('sensitive model input protection omits risky files and redacts credentials', () => {
+  const diff = [
+    'diff --git a/.env b/.env',
+    '--- /dev/null',
+    '+++ b/.env',
+    '@@ -0,0 +1 @@',
+    '+API_KEY=super-secret-value',
+    'diff --git a/src/config.js b/src/config.js',
+    '--- a/src/config.js',
+    '+++ b/src/config.js',
+    '@@ -1 +1 @@',
+    '+const accessToken = "token-value-12345";',
+  ].join('\n');
+
+  const protectedInput = protectSensitiveDiff(diff);
+  assert.match(protectedInput.diff, /sensitive file — content omitted/);
+  assert.doesNotMatch(protectedInput.diff, /super-secret-value/);
+  assert.doesNotMatch(protectedInput.diff, /token-value-12345/);
+  assert.match(protectedInput.diff, /\[REDACTED\]/);
+  assert.ok(protectedInput.findings.length >= 2);
+  assert.equal(isSensitiveFile('.env.production'), true);
+  assert.equal(isSensitiveFile('.env.example'), false);
+  assert.equal(isSensitiveFile('.aicommit.config.json'), true);
+});
+
+test('index fingerprint changes with staged content and transaction restores prior staging', () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(join(dir, 'a.txt'), 'staged first\n');
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir });
+    const before = getIndexFingerprint(dir);
+    const tx = createIndexTransaction(dir);
+
+    writeFileSync(join(dir, 'b.txt'), 'staged second\n');
+    execFileSync('git', ['add', 'b.txt'], { cwd: dir });
+    tx.markOwned();
+    assert.notEqual(getIndexFingerprint(dir), before);
+    assert.equal(tx.restore(), true);
+
+    assert.equal(getIndexFingerprint(dir), before);
+    assert.deepEqual(getChangedFiles(dir).map((file) => file.path), ['a.txt']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('index transaction does not overwrite a concurrent index change', () => {
+  const dir = makeRepo();
+  try {
+    const tx = createIndexTransaction(dir);
+    writeFileSync(join(dir, 'a.txt'), 'tool change\n');
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir });
+    tx.markOwned();
+
+    writeFileSync(join(dir, 'b.txt'), 'external change\n');
+    execFileSync('git', ['add', 'b.txt'], { cwd: dir });
+    assert.equal(tx.restore(), false);
+    assert.deepEqual(getChangedFiles(dir).map((file) => file.path).sort(), ['a.txt', 'b.txt']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('gitCommit propagates Git failures', () => {
+  const dir = makeRepo();
+  try {
+    assert.throws(() => gitCommit('chore: no changes', dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('isLockFile recognizes common lock files by basename, case-insensitively', () => {

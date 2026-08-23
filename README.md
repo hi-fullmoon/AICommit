@@ -18,9 +18,11 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection — then writes the config for you (global or project level, your choice).
+It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection. Provider credentials are written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
 
-To configure by hand instead: config is deep-merged: `./.aicommit.config.json` (project) overrides `~/.aicommit.config.json` (global). See [.aicommit.config.example.json](.aicommit.config.example.json).
+To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `prompt`, `stripFiles`, `temperature`, and the diff/token/timeout limits, but limits may only lower user-configured ceilings. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and oversized prompts are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
+
+To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. The named environment variable must be present when aicommit starts.
 
 Multiple providers can be defined and switched at runtime with `-p` / `--provider`:
 
@@ -60,6 +62,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `defaultProvider`  | Provider used when `-p` is not given (renamed from `default`)                                                                                                                                                                |
 | `apiUrl`           | OpenAI-compatible chat completions endpoint                                                                                                                                                                                  |
 | `apiKey`           | API key (empty string allowed for local models)                                                                                                                                                                              |
+| `apiKeyEnv`        | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                |
 | `modelId`          | Model identifier                                                                                                                                                                                                             |
 | `prompt`           | System prompt (a sensible default is built in)                                                                                                                                                                               |
 | `language`         | Commit message language, `zh` or `en` (default: `zh`)                                                                                                                                                                        |
@@ -76,7 +79,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `extraBody`         | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured |
 | `reasoning`         | Reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically |
 
-Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc.
+Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
 
 ### Saving tokens
 
@@ -95,6 +98,9 @@ aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
 aicommit --dry-run       # generate and review without creating a commit
 aicommit --split --dry-run # review a split plan without creating commits
+aicommit --yes           # non-interactively commit already staged changes
+aicommit --yes --dry-run # non-interactively preview all changes; restores staging
+aicommit --split --yes   # non-interactively plan and commit all working-tree changes
 aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
@@ -110,6 +116,7 @@ aicommit -h              # help
 | `-p`, `--provider` | Use the named provider from `providers`                                                      |
 | `-s`, `--split`    | Split changes into multiple logical commits                                                  |
 | `--dry-run`        | Generate and review a message or split plan without creating commits                         |
+| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes                       |
 | `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                       |
 | `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it                     |
 | `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working (exit 0 on success, 1 on failure) |
@@ -118,7 +125,11 @@ aicommit -h              # help
 
 Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. If some changes are staged but others are not, aicommit asks whether to include the rest in this commit.
 
-`--dry-run` follows the same review flow but stops before `git commit`. If you choose to stage files interactively, they remain staged after the dry run.
+`--dry-run` follows the same review flow but stops before `git commit`. Any staging performed by aicommit is restored before it exits. Cancellation and failures use the same index transaction; if another process changed the index concurrently, aicommit leaves it untouched instead of overwriting that work.
+
+Before repository content is sent, aicommit detects common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments. The default protected request omits sensitive file/private-key sections and redacts detected values; you can cancel or explicitly send the original diff. This is a safety net, not a replacement for a dedicated secret scanner.
+
+The staged index (or complete split-mode working tree, including untracked file bytes) is fingerprinted during generation and checked again immediately before committing. If it changed, the commit is aborted so the generated message cannot describe a different snapshot.
 
 Reasoning defaults to `on` with `medium` effort. It is mapped natively for OpenAI reasoning models, DeepSeek, OpenRouter, and MiniMax; models that do not expose reasoning continue normally and show an unavailable notice instead of failing. Official OpenAI endpoints validate the selected effort against the model generation before sending the request, so unsupported combinations such as `o3 --no-reasoning` or `gpt-5.1 --reasoning=max` fail locally with a clear list of supported levels. DeepSeek's current `deepseek-v4-flash` and `deepseek-v4-pro` models receive `thinking: { "type": "enabled" }` plus `reasoning_effort`; `medium`/`xhigh` are normalized to DeepSeek's `high` level.
 
@@ -139,7 +150,7 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`--split` groups all changes (staged, unstaged, untracked) into logical commits by feature/module. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Splitting is file-level; if a commit fails mid-way, the remaining groups' files are re-staged and printed so you can finish with plain `git commit`.
+`--split` groups all changes (staged, unstaged, untracked) into logical commits by feature/module. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Splitting is file-level; if a commit fails mid-way, the remaining groups' files are re-staged and printed so you can finish with plain `git commit`, and the CLI exits non-zero.
 
 ## License
 

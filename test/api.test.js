@@ -1,7 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { generateCommitMessage, checkConnection, getResponseText } from '../src/api.js';
+import { generateCommitMessage, checkConnection, getResponseText, callAPI } from '../src/api.js';
 
 const realFetch = globalThis.fetch;
 after(() => { globalThis.fetch = realFetch; });
@@ -44,6 +44,13 @@ const cfg = (extra = {}) => ({
   ...extra,
 });
 const diff = '--- a/x\n+++ b/x\n+foo';
+
+test('request layer refuses insecure non-loopback HTTP endpoints', async () => {
+  await assert.rejects(
+    () => callAPI('http://example.test/v1', 'secret', 'model', [], 0, 10, 1000),
+    /Refusing insecure API endpoint/,
+  );
+});
 
 test('system prompt carries the language directive exactly once, appended after the prompt', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
@@ -328,13 +335,15 @@ test('corrective retry usage aggregates with the first call', async () => {
   assert.deepEqual(usage, { prompt_tokens: 120, completion_tokens: 15, total_tokens: 135 });
 });
 
-test('empty corrective retry keeps the original reply', async () => {
+test('empty corrective retry rejects the original invalid reply', async () => {
   const calls = stubFetch([
     { choices: [{ message: { content: 'Updated the login page styling.' } }] },
     { choices: [{ message: { content: null } }] },
   ]);
-  const { message } = await generateCommitMessage(cfg(), diff);
-  assert.equal(message, 'Updated the login page styling.');
+  await assert.rejects(
+    () => generateCommitMessage(cfg(), diff),
+    /invalid conventional commit message/,
+  );
   assert.equal(calls.length, 2);
 });
 

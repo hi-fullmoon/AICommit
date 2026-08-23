@@ -1,4 +1,5 @@
 import { openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 import chalk from 'chalk';
@@ -8,12 +9,15 @@ import editor from '@inquirer/editor';
 import { getResponseText, generateCommitMessage } from './api.js';
 import {
   getBranch, hasHead, runGit, readGit, stripLockFileContent, isLockFile,
-  matchStripPattern, unifiedArg,
+  matchStripPattern, unifiedArg, protectSensitiveDiff, isSensitiveFile,
 } from './git.js';
 import {
   statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox, startReasoningStream,
 } from './ui.js';
-import { cleanCommitMessage, formatMs, formatUsage, indentError } from './utils.js';
+import {
+  cleanCommitMessage, formatMs, formatUsage, indentError, sanitizeTerminalText,
+  isValidCommitMessage,
+} from './utils.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -90,6 +94,43 @@ function getWorkingTreeDiff(projectRoot, head, contextLines, paths = []) {
 
 export function getSplitDiff(projectRoot, head, contextLines) {
   return getWorkingTreeDiff(projectRoot, head, contextLines);
+}
+
+// Fingerprint every tracked patch plus untracked file bytes. Split planning
+// can spend minutes in the model/review loop; before execution we must ensure
+// it still describes the exact worktree state that will be staged.
+export function getSplitStateFingerprint(projectRoot, head, files = getAllChangedFiles(projectRoot)) {
+  const hash = createHash('sha256');
+  hash.update(readGit(['status', '--porcelain', '-z', '-uall'], projectRoot));
+  if (head) {
+    hash.update(readGit(['diff', '--binary', '--full-index', 'HEAD'], projectRoot));
+  } else {
+    hash.update(readGit(['diff', '--binary', '--full-index', '--cached'], projectRoot));
+    hash.update(readGit(['diff', '--binary', '--full-index'], projectRoot));
+  }
+
+  const buffer = Buffer.alloc(64 * 1024);
+  for (const file of files) {
+    if (file.status !== '??' && file.status !== '?') continue;
+    const path = file.addPaths?.[0] || file.path;
+    hash.update(`\0${path}\0`);
+    let fd;
+    try {
+      fd = openSync(join(projectRoot, path), 'r');
+      let offset = 0;
+      while (true) {
+        const count = readSync(fd, buffer, 0, buffer.length, offset);
+        if (!count) break;
+        hash.update(buffer.subarray(0, count));
+        offset += count;
+      }
+    } catch {
+      hash.update('<unreadable>');
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+  return hash.digest('hex');
 }
 
 // Ask the model to partition the changed files into logical commits.
@@ -186,12 +227,14 @@ export function parsePlan(raw) {
 // Returns '' when the group carries no usable message.
 function groupMessage(g) {
   if (typeof g.message === 'string' && g.message.trim()) {
-    return cleanCommitMessage(g.message);
+    const message = cleanCommitMessage(g.message);
+    return isValidCommitMessage(message) ? message : '';
   }
   const subject = typeof g.subject === 'string' ? g.subject.trim() : '';
   const body = typeof g.body === 'string' ? g.body.trim() : '';
   if (!subject) return '';
-  return body ? `${subject}\n\n${body}` : subject;
+  const message = body ? `${subject}\n\n${body}` : subject;
+  return isValidCommitMessage(message) ? message : '';
 }
 
 // Clean up the model's plan: drop unknown/duplicate files, drop empty
@@ -248,13 +291,13 @@ function displayPlan(groups, allFiles) {
     const lines = g.message.split('\n');
     console.log(`\n  ${chalk.bold(`${i + 1}.`)} ${highlightMessage(lines[0])}`);
     for (const line of lines.slice(1)) {
-      if (line.trim()) console.log(chalk.dim(`     ${line}`));
+      if (line.trim()) console.log(chalk.dim(`     ${sanitizeTerminalText(line)}`));
     }
     for (const p of g.files) {
       const status = (byPath.get(p)?.status || '?').charAt(0);
       const c = statusColor[status] || chalk.dim;
       const icon = statusIcon[status] || status;
-      console.log(`     ${c(icon)} ${c(p)}`);
+      console.log(`     ${c(icon)} ${c(sanitizeTerminalText(p))}`);
     }
   });
   console.log('');
@@ -275,7 +318,7 @@ async function editPlan(groups, allFiles, language) {
   try {
     return normalizePlan(JSON.parse(edited), allFiles, language);
   } catch (err) {
-    console.log('\n  ' + chalk.red(`✗ Invalid plan JSON: ${err.message} — keeping the current plan.\n`));
+    console.log('\n  ' + chalk.red(`✗ Invalid plan JSON: ${sanitizeTerminalText(err.message)} — keeping the current plan.\n`));
     return null;
   }
 }
@@ -379,7 +422,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
       else runGit(['rm', '-r', '-q', '--cached', '.'], projectRoot);
       runGit(['add', '--', ...expandPaths(g.files, allFiles)], projectRoot);
       runGit(['commit', '-m', g.message], projectRoot, true);
-    } catch {
+    } catch (err) {
       // Re-stage the remaining groups' files so the user isn't left with an
       // empty index and can finish with plain `git commit` once the issue
       // (usually a hook) is resolved. Best effort — the working tree still
@@ -387,6 +430,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
       const rest = groups.slice(i).flatMap((g) => expandPaths(g.files, allFiles));
       try { runGit(['add', '--', ...rest], projectRoot); } catch { /* best effort */ }
       console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
+      console.log('  ' + chalk.red(sanitizeTerminalText(err.message)));
       console.log(chalk.dim(`  ${i} commit(s) already made. Remaining groups (files re-staged):`));
       for (let j = i; j < groups.length; j++) {
         console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
@@ -400,7 +444,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
 
 // Returns true when the split flow ran to completion (or exited); false
 // means "fall back to the normal single-commit flow".
-export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
+export async function splitFlow(config, projectRoot, { dryRun = false, yes = false } = {}) {
   const reasoningEnabled = config.reasoning.mode === 'on';
   const allFiles = getAllChangedFiles(projectRoot);
 
@@ -422,13 +466,64 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   for (const { status, path } of allFiles) {
     const c = statusColor[status.charAt(0)] || chalk.dim;
     const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-    console.log(`  ${c('  ' + icon)} ${c(path)}`);
+    console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
   }
 
+  const plannedStateFingerprint = getSplitStateFingerprint(projectRoot, head, allFiles);
   const diff = getSplitDiff(projectRoot, head, config.diffContextLines);
+  if (getSplitStateFingerprint(projectRoot, head, allFiles) !== plannedStateFingerprint) {
+    console.log('\n  ' + chalk.red('✗ The working tree is being modified concurrently; split planning aborted.\n'));
+    process.exitCode = 1;
+    return true;
+  }
+
+  const protectedInput = protectSensitiveDiff(diff);
+  const sensitivePaths = allFiles
+    .flatMap((file) => file.addPaths || [file.path])
+    .filter(isSensitiveFile);
+  const sensitiveFindings = [
+    ...protectedInput.findings,
+    ...sensitivePaths.map((path) => `sensitive file: ${path}`),
+  ].filter((item, index, all) => all.indexOf(item) === index);
+  let planningDiff = diff;
+  let planningConfig = config;
+  let protectModelInput = false;
+  if (sensitiveFindings.length) {
+    console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
+    for (const finding of sensitiveFindings) {
+      console.log('    ' + chalk.yellow(sanitizeTerminalText(finding)));
+    }
+    const sensitiveAction = yes ? 'protect' : await vimSelect({
+      message: 'How should aicommit handle the split-planning request?',
+      choices: [
+        {
+          name: 'Send protected diff', value: 'protect',
+          description: 'Omit sensitive files/private keys and redact detected credential values',
+        },
+        { name: 'Cancel', value: 'cancel', description: 'Do not send repository content' },
+        {
+          name: 'Send original diff', value: 'original',
+          description: 'Send the unredacted content to the configured provider',
+        },
+      ],
+    });
+    if (sensitiveAction === 'cancel') {
+      console.log(chalk.dim('\n  Split cancelled.\n'));
+      process.exit(0);
+    }
+    if (sensitiveAction === 'protect') {
+      protectModelInput = true;
+      planningDiff = protectedInput.diff;
+      const sensitiveBasenames = sensitivePaths.map((path) => path.replace(/\\/g, '/').split('/').pop());
+      planningConfig = {
+        ...config,
+        stripFiles: [...new Set([...config.stripFiles, ...sensitiveBasenames])],
+      };
+    }
+  }
 
   const spinner = ora({
-    text: chalk.dim(`Calling ${chalk.bold(config.modelId)} to plan commits ...`),
+    text: chalk.dim(`Calling ${chalk.bold(sanitizeTerminalText(config.modelId))} to plan commits ...`),
     color: 'cyan',
   }).start();
   let liveReasoning;
@@ -455,7 +550,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   try {
     let elapsed, usage;
     ({ raw, elapsed, usage, reasoning: reasoningText } = await generateSplitPlan(
-      config, allFiles, diff, projectRoot, stream,
+      planningConfig, allFiles, planningDiff, projectRoot, stream,
     ));
     if (liveReasoning) await liveReasoning.stop();
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
@@ -474,8 +569,8 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   try {
     groups = normalizePlan(parsePlan(raw), allFiles, config.language);
   } catch (err) {
-    console.log('\n  ' + chalk.red(`✗ Failed to parse the AI's split plan: ${err.message}`));
-    console.log(chalk.dim('  Raw response:\n    ' + raw.slice(0, 400).split('\n').join('\n    ') + '\n'));
+    console.log('\n  ' + chalk.red(`✗ Failed to parse the AI's split plan: ${sanitizeTerminalText(err.message)}`));
+    console.log(chalk.dim('  Raw response:\n    ' + sanitizeTerminalText(raw.slice(0, 400)).split('\n').join('\n    ') + '\n'));
     process.exit(1);
   }
 
@@ -490,7 +585,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
   while (true) {
     displayPlan(groups, allFiles);
 
-    const action = await vimSelect({
+    const action = yes ? (dryRun ? 'finish' : 'commit') : await vimSelect({
       message: 'Proceed with this split plan?',
       choices: [
         dryRun
@@ -530,7 +625,11 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
       });
 
       for (const idx of picked) {
-        const groupDiff = getGroupDiff(projectRoot, head, groups[idx], allFiles, config.diffContextLines, config.stripFiles);
+        const rawGroupDiff = getGroupDiff(
+          projectRoot, head, groups[idx], allFiles,
+          config.diffContextLines, planningConfig.stripFiles,
+        );
+        const groupDiff = protectModelInput ? protectSensitiveDiff(rawGroupDiff).diff : rawGroupDiff;
         const rspinner = ora({
           text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
           color: 'cyan',
@@ -585,10 +684,19 @@ export async function splitFlow(config, projectRoot, { dryRun = false } = {}) {
     return true;
   }
 
+  if (getSplitStateFingerprint(projectRoot, head) !== plannedStateFingerprint) {
+    console.log('\n  ' + chalk.red('✗ The working tree changed after split planning; no commits were created.'));
+    console.log(chalk.dim('  Review the changes and run aicommit --split again.\n'));
+    process.exitCode = 1;
+    return true;
+  }
+
   console.log('');
   const ok = executeSplit(groups, projectRoot, allFiles);
   if (ok) {
     console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${groups.length} commits.\n`));
+  } else {
+    process.exitCode = 1;
   }
   return true;
 }

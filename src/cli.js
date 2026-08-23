@@ -28,6 +28,7 @@ function showHelp() {
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
+    -y, --yes             Non-interactive: accept the generated message/plan
     -c, --check           Verify the configured LLM is reachable (ping test)
     --debug               Print debug info (parsed args, final config, etc.)
 
@@ -39,6 +40,7 @@ function showHelp() {
     aicommit --split      Group changes into several logical commits
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
+    aicommit --yes        Commit already staged changes without prompts
     aicommit -c           Verify the configured (default) provider is reachable
     aicommit -c -p openrouter  Verify the "openrouter" provider is reachable
     aicommit /path/to    Commit changes in the specified directory
@@ -74,7 +76,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     return {
       targetPath: null, cliLang: null, cliProvider: null,
       cliReasoning: null,
-      debug: false, split: false, dryRun: false, check: false, setup: true,
+      debug: false, split: false, dryRun: false, yes: false, check: false, setup: true,
     };
   }
 
@@ -85,6 +87,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let debug = false;
   let split = false;
   let dryRun = false;
+  let yes = false;
   let check = false;
   const setup = false;
 
@@ -113,6 +116,11 @@ export function parseArgs(args = process.argv.slice(2)) {
 
     if (arg === '--dry-run') {
       dryRun = true;
+      continue;
+    }
+
+    if (arg === '-y' || arg === '--yes') {
+      yes = true;
       continue;
     }
 
@@ -196,6 +204,6 @@ export function parseArgs(args = process.argv.slice(2)) {
 
   return {
     targetPath, cliLang, cliProvider, cliReasoning,
-    debug, split, dryRun, check, setup,
+    debug, split, dryRun, yes, check, setup,
   };
 }

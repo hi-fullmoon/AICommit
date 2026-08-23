@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   deepMerge, cleanCommitMessage, formatUsage, formatMs, maskApiKey, indentError,
+  sanitizeTerminalText, stringifyConfigRedacted, isValidCommitMessage,
 } from '../src/utils.js';
 
 test('deepMerge merges nested objects, replaces scalars, concatenates arrays', () => {
@@ -77,4 +78,27 @@ test('maskApiKey masks short keys and summarizes long ones', () => {
 test('indentError indents every line of a multi-line error', () => {
   const err = new Error('line one\nline two');
   assert.equal(indentError(err), 'line one\n  line two');
+});
+
+test('deepMerge ignores prototype-pollution keys from JSON config', () => {
+  const payload = JSON.parse('{"__proto__":{"polluted":true},"constructor":{"x":1},"safe":2}');
+  const result = deepMerge({}, payload);
+  assert.equal(result.safe, 2);
+  assert.equal(result.polluted, undefined);
+  assert.equal({}.polluted, undefined);
+});
+
+test('terminal text sanitizer removes ANSI, OSC, carriage returns, and controls', () => {
+  const unsafe = '\u001b[2Jhello\rforged\u001b]52;c;YQ==\u0007\u0000';
+  assert.equal(sanitizeTerminalText(unsafe), 'hello\nforged');
+  assert.equal(cleanCommitMessage('fix: safe\u001b[2J subject'), 'fix: safe subject');
+});
+
+test('commit validation and recursive config redaction are strict', () => {
+  assert.equal(isValidCommitMessage('feat(core): add safety checks'), true);
+  assert.equal(isValidCommitMessage('updated files'), false);
+  const rendered = stringifyConfigRedacted({
+    extraBody: { authorization: 'Bearer secret-value', nested: { password: 'hunter22!' } },
+  });
+  assert.doesNotMatch(rendered, /secret-value|hunter22/);
 });

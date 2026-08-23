@@ -42,12 +42,14 @@ test('mergeSetupConfig drops flat legacy connection keys', () => {
   const existing = {
     apiUrl: 'https://legacy.example.com/v1/chat/completions',
     apiKey: 'sk-legacy',
+    apiKeyEnv: 'LEGACY_API_KEY',
     modelId: 'legacy-model',
     temperature: 0.5,
   };
   const r = mergeSetupConfig(existing, { providerName: 'deepseek', entry, language: 'zh' });
   assert.equal(r.apiUrl, undefined);
   assert.equal(r.apiKey, undefined);
+  assert.equal(r.apiKeyEnv, undefined);
   assert.equal(r.modelId, undefined);
   // Non-connection top-level settings stay as shared defaults.
   assert.equal(r.temperature, 0.5);

@@ -4,6 +4,7 @@
     "minimax": {
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKey": "sk-your-minimax-key-here",
+      "apiKeyEnv": "",
       "modelId": "MiniMax-M3",
       "extraBody": {
         "thinking": {

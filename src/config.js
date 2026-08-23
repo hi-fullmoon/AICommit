@@ -7,9 +7,59 @@ import chalk from 'chalk';
 
 import { fileExists, deepMerge } from './utils.js';
 
+// Repository-owned config is untrusted input: a cloned repository must never
+// be able to redirect requests while inheriting the API key from the user's
+// global config. Project config may tune generation/display behaviour, but all
+// connection and provider selection fields remain user-owned.
+export const PROJECT_CONNECTION_KEYS = new Set([
+  'apiUrl', 'apiKey', 'apiKeyEnv', 'modelId', 'providers', 'defaultProvider', 'extraBody',
+]);
+
+const PROJECT_SAFE_KEYS = new Set([
+  'language', 'prompt', 'stripFiles', 'temperature',
+  'maxTokens', 'timeoutMs', 'maxDiffChars', 'maxFileDiffChars',
+  'splitMaxDiffChars', 'splitMaxPlanFiles', 'diffContextLines',
+]);
+const PROJECT_CEILING_KEYS = new Set([
+  'maxTokens', 'timeoutMs', 'maxDiffChars', 'maxFileDiffChars',
+  'splitMaxDiffChars', 'splitMaxPlanFiles', 'diffContextLines',
+]);
+const MAX_PROJECT_PROMPT_CHARS = 20_000;
+
+export function filterProjectConfig(projectConfig, baseConfig = DEFAULT_CONFIG) {
+  if (!projectConfig || typeof projectConfig !== 'object' || Array.isArray(projectConfig)) {
+    throw new Error('expected a JSON object');
+  }
+
+  const safe = {};
+  const ignored = [];
+  for (const [key, value] of Object.entries(projectConfig)) {
+    if (PROJECT_CONNECTION_KEYS.has(key) || !PROJECT_SAFE_KEYS.has(key)) {
+      ignored.push(key);
+      continue;
+    }
+    if (key === 'prompt' && (typeof value !== 'string' || value.length > MAX_PROJECT_PROMPT_CHARS)) {
+      ignored.push(key);
+      continue;
+    }
+    if (
+      PROJECT_CEILING_KEYS.has(key)
+      && typeof value === 'number'
+      && typeof baseConfig[key] === 'number'
+      && value > baseConfig[key]
+    ) {
+      ignored.push(key);
+      continue;
+    }
+    safe[key] = value;
+  }
+  return { safe, ignored };
+}
+
 export const DEFAULT_CONFIG = {
   apiUrl: 'https://api.openai.com/v1/chat/completions',
   apiKey: '',
+  apiKeyEnv: '',
   modelId: 'gpt-4o',
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
@@ -126,13 +176,26 @@ function assertString(config, key) {
   }
 }
 
+export function isSecureApiUrl(value) {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const loopback = u.hostname === 'localhost'
+      || u.hostname === '127.0.0.1'
+      || u.hostname.startsWith('127.')
+      || u.hostname === '[::1]';
+    return u.protocol === 'https:' || loopback;
+  } catch {
+    return false;
+  }
+}
+
 function assertUrl(config, key) {
   assertString(config, key);
-  try {
-    const u = new URL(config[key]);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error();
-  } catch {
-    throw new Error(`Invalid config "${key}": expected an http(s) URL.`);
+  if (!isSecureApiUrl(config[key])) {
+    throw new Error(
+      `Invalid config "${key}": expected an HTTPS URL, or HTTP only for localhost/loopback.`,
+    );
   }
 }
 
@@ -157,6 +220,9 @@ export function validateConfig(config) {
 
   if (typeof config.apiKey !== 'string') {
     throw new Error('Invalid config "apiKey": expected a string. Use "" for keyless local endpoints.');
+  }
+  if (typeof config.apiKeyEnv !== 'string' || (config.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.apiKeyEnv))) {
+    throw new Error('Invalid config "apiKeyEnv": expected an environment variable name or "".');
   }
   if (config.language !== 'zh' && config.language !== 'en') {
     throw new Error(`Invalid config "language": expected "zh" or "en", got "${config.language}".`);
@@ -227,32 +293,58 @@ export function getProjectRoot() {
 
 export async function loadConfig(cliProvider = null) {
   const projectRoot = getProjectRoot();
-
-  const paths = [
-    { p: join(homedir(), '.aicommit.config.json'),   label: 'user' },
-    { p: join(projectRoot, '.aicommit.config.json'),  label: 'project' },
-  ];
-
   let config = { ...DEFAULT_CONFIG };
   const loaded = [];
 
-  for (const { p, label } of paths) {
-    if (await fileExists(p)) {
-      try {
-        const raw    = await readFile(p, 'utf-8');
-        const parsed = JSON.parse(raw);
-        config = deepMerge(config, parsed);
-        loaded.push(label);
-        // Tighten loose permissions on config files that actually hold a key
-        // (a hand-created or older 0644 file would otherwise expose it).
-        if (configHasApiKey(parsed)) await chmod(p, 0o600).catch(() => {});
-      } catch (err) {
-        console.error(chalk.red(`  ⚠ Failed to parse ${p}: ${err.message}`));
-      }
+  const userPath = join(homedir(), '.aicommit.config.json');
+  if (await fileExists(userPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(userPath, 'utf-8'));
+    } catch (err) {
+      throw new Error(`Failed to parse user config ${userPath}: ${err.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`Failed to parse user config ${userPath}: expected a JSON object.`);
+    }
+    config = deepMerge(config, parsed);
+    loaded.push('user');
+    // Tighten loose permissions on config files that actually hold a key
+    // (a hand-created or older 0644 file would otherwise expose it).
+    if (configHasApiKey(parsed)) await chmod(userPath, 0o600).catch(() => {});
+  }
+
+  const projectPath = join(projectRoot, '.aicommit.config.json');
+  if (projectPath !== userPath && await fileExists(projectPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(projectPath, 'utf-8'));
+    } catch (err) {
+      throw new Error(`Failed to parse project config ${projectPath}: ${err.message}`);
+    }
+    const { safe, ignored } = filterProjectConfig(parsed, config);
+    config = deepMerge(config, safe);
+    loaded.push('project');
+    if (ignored.length) {
+      console.error(chalk.yellow(
+        `  ⚠ Ignored unsafe settings from untrusted project config: ${ignored.join(', ')}`,
+      ));
+      console.error(chalk.dim('    Put provider credentials and endpoints in ~/.aicommit.config.json.'));
     }
   }
 
   const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
-  return { config: validateConfig(resolvedConfig), projectRoot, loaded, providerName };
+  validateConfig(resolvedConfig);
+  if (resolvedConfig.apiKeyEnv) {
+    const value = process.env[resolvedConfig.apiKeyEnv];
+    if (!value) {
+      throw new Error(
+        `Environment variable "${resolvedConfig.apiKeyEnv}" configured by apiKeyEnv is not set.`,
+      );
+    }
+    resolvedConfig.apiKey = value;
+  }
+
+  return { config: resolvedConfig, projectRoot, loaded, providerName };
 }

@@ -9,6 +9,8 @@ import checkbox from '@inquirer/checkbox';
 import editor from '@inquirer/editor';
 import wrapAnsi from 'wrap-ansi';
 
+import { sanitizeTerminalText } from './utils.js';
+
 // Shared status → color/icon maps (A/M/D/R/C/T from git, '?' = untracked)
 export const statusColor = {
   A: chalk.green,   // Added
@@ -22,7 +24,7 @@ export const statusColor = {
 export const statusIcon = { A: '+', M: '~', D: '-', R: '→', C: '©', T: 'Δ', '?': '+' };
 
 export function highlightMessage(msg) {
-  return msg.replace(
+  return sanitizeTerminalText(msg).replace(
     /^(\w[\w-]*)([!:])(\s*)/,
     (_, type, punct, rest) =>
       chalk.cyan.bold(type) + chalk.yellow(punct) + rest,
@@ -30,7 +32,7 @@ export function highlightMessage(msg) {
 }
 
 export function displayMessage(message) {
-  const colored = message.split('\n').map(highlightMessage).join('\n');
+  const colored = sanitizeTerminalText(message).split('\n').map(highlightMessage).join('\n');
   console.log(boxen(colored, {
     title:      'Suggested commit message',
     titleAlignment: 'center',
@@ -45,11 +47,7 @@ export function displayMessage(message) {
 // control sequences before display, then preserve both its beginning and end
 // when applying the configured terminal-output cap.
 export function formatReasoningForTerminal(reasoning, maxChars = 12000) {
-  const cleaned = String(reasoning || '')
-    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
-    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .trim();
+  const cleaned = sanitizeTerminalText(reasoning).trim();
   if (cleaned.length <= maxChars) return cleaned;
 
   const marker = `\n\n... (reasoning truncated — ${cleaned.length} chars total) ...\n\n`;
@@ -443,14 +441,15 @@ export async function editMessage(message) {
     waitForUseInput: false,
   });
 
-  if (!edited.trim()) return null;
+  const cleaned = sanitizeTerminalText(edited).trim();
+  if (!cleaned) return null;
 
-  displayMessage(edited.trim());
+  displayMessage(cleaned);
   const reconfirm = await confirm({
     message: 'Commit with this edited message?',
     default: true,
     theme:   { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
   });
 
-  return reconfirm ? edited.trim() : null;
+  return reconfirm ? cleaned : null;
 }

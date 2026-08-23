@@ -1,4 +1,4 @@
-import { cleanCommitMessage } from './utils.js';
+import { cleanCommitMessage, isValidCommitMessage } from './utils.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -121,6 +121,14 @@ export async function callAPI(
   apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs,
   extraBody = {}, reasoning = null, stream = null,
 ) {
+  const endpoint = new URL(apiUrl);
+  const loopback = endpoint.hostname === 'localhost'
+    || endpoint.hostname === '127.0.0.1'
+    || endpoint.hostname.startsWith('127.')
+    || endpoint.hostname === '[::1]';
+  if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
+    throw new Error('Refusing insecure API endpoint: use HTTPS, or HTTP only for localhost/loopback.');
+  }
   const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
   const payload = { model: modelId, messages };
   if (isOpenAIReasoningModel(modelId)) {
@@ -649,6 +657,13 @@ export async function generateCommitMessage(
       `  The request succeeded but no text came back — the model may have spent ` +
       `its token budget on reasoning (maxTokens: ${outputTokenLimit}).\n` +
       `  Try raising "maxTokens" in your config.\n\nRaw response:\n${snippet}`,
+    );
+  }
+
+  if (!isValidCommitMessage(message)) {
+    throw new Error(
+      'API returned an invalid conventional commit message after the corrective retry. ' +
+      'Retry generation or edit the provider/prompt configuration.',
     );
   }
 

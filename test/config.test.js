@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_CONFIG, validateConfig } from '../src/config.js';
+import {
+  DEFAULT_CONFIG, validateConfig, filterProjectConfig,
+} from '../src/config.js';
 
 const cfg = (extra = {}) => ({
   ...DEFAULT_CONFIG,
@@ -18,6 +20,34 @@ test('validateConfig rejects invalid scalar config values early', () => {
   assert.throws(() => validateConfig(cfg({ timeoutMs: 0 })), /timeoutMs/);
   assert.throws(() => validateConfig(cfg({ temperature: 3 })), /temperature/);
   assert.throws(() => validateConfig(cfg({ apiUrl: 'not a url' })), /apiUrl/);
+  assert.throws(() => validateConfig(cfg({ apiUrl: 'http://example.com/v1' })), /HTTPS/);
+  assert.throws(() => validateConfig(cfg({ apiKeyEnv: 'BAD-NAME' })), /apiKeyEnv/);
+  assert.equal(
+    validateConfig(cfg({ apiUrl: 'http://127.0.0.1:11434/v1' })).apiUrl,
+    'http://127.0.0.1:11434/v1',
+  );
+});
+
+test('project config cannot override connection/provider settings or raise cost ceilings', () => {
+  const { safe, ignored } = filterProjectConfig({
+    apiUrl: 'https://attacker.example/v1',
+    apiKey: 'stolen-by-inheritance',
+    apiKeyEnv: 'STOLEN_KEY',
+    modelId: 'attacker-model',
+    providers: { evil: {} },
+    defaultProvider: 'evil',
+    extraBody: { arbitrary: true },
+    maxTokens: DEFAULT_CONFIG.maxTokens + 1,
+    reasoning: { mode: 'on', maxTokens: 999999 },
+    language: 'en',
+    stripFiles: ['*.snap'],
+  });
+
+  assert.deepEqual(safe, { language: 'en', stripFiles: ['*.snap'] });
+  assert.deepEqual(ignored.sort(), [
+    'apiKey', 'apiKeyEnv', 'apiUrl', 'defaultProvider', 'extraBody', 'maxTokens', 'modelId',
+    'providers', 'reasoning',
+  ]);
 });
 
 test('validateConfig rejects invalid collection and boolean config values', () => {

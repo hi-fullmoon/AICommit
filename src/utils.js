@@ -4,12 +4,27 @@ export async function fileExists(p) {
   try { await access(p); return true; } catch { return false; }
 }
 
+// Treat model output, provider errors, Git paths, and config values as
+// untrusted terminal text. OSC/CSI and other escape/control sequences can
+// clear the screen, forge prompts, or interact with terminal features such as
+// clipboard integration. Preserve only ordinary text, tabs, and newlines.
+export function sanitizeTerminalText(value) {
+  return String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B[P^_][\s\S]*?\x1B\\/g, '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B./g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+}
+
 // Plain-object keys merge recursively; scalars are overwritten; arrays are
 // concatenated and deduped rather than replaced, so a project-level
 // "stripFiles" extends the user-level list instead of wiping it.
 export function deepMerge(a, b) {
   const result = { ...a };
   for (const key of Object.keys(b)) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') continue;
     if (Array.isArray(a[key]) && Array.isArray(b[key])) {
       result[key] = [...new Set([...a[key], ...b[key]])];
     } else if (
@@ -31,12 +46,22 @@ export function deepMerge(a, b) {
 // Also strips inline <think>...</think> blocks — MiniMax embeds thinking
 // this way in `content` when thinking is enabled (M2.x can't disable it).
 export function cleanCommitMessage(msg) {
-  const cleaned = msg.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const cleaned = sanitizeTerminalText(msg).replace(/<think>[\s\S]*?<\/think>/g, '');
   return cleaned
     .trim()
     .replace(/^\s*```[a-zA-Z]*(?:\s+|$)/, '') // opening fence, even with content on the same line
     .replace(/\s*```\s*$/, '')                // closing fence, even with content on the same line
     .trim();
+}
+
+const CONVENTIONAL_COMMIT_RE = /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
+
+export function isValidCommitMessage(message, maxSubjectLength = 100) {
+  const cleaned = cleanCommitMessage(message);
+  const subject = cleaned.split('\n', 1)[0];
+  return Boolean(cleaned)
+    && subject.length <= maxSubjectLength
+    && CONVENTIONAL_COMMIT_RE.test(subject);
 }
 
 export function formatMs(ms) {
@@ -85,11 +110,21 @@ export function formatUsage(usage) {
 // Indent every line of an error message by two spaces, so multi-line API
 // errors align under the surrounding CLI indentation.
 export function indentError(err) {
-  return err.message.split('\n').join('\n  ');
+  return sanitizeTerminalText(err?.message || err).split('\n').join('\n  ');
 }
 
 export function maskApiKey(key) {
   if (!key) return '(not set)';
   if (key.length <= 8) return '****';
-  return `${key.slice(0, 4)}…${key.slice(-4)} (${key.length} chars)`;
+  const safe = sanitizeTerminalText(key);
+  return `${safe.slice(0, 4)}…${safe.slice(-4)} (${key.length} chars)`;
+}
+
+const SENSITIVE_CONFIG_KEY_RE = /^(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)$/i;
+
+export function stringifyConfigRedacted(value) {
+  return JSON.stringify(value, (key, item) => {
+    if (!SENSITIVE_CONFIG_KEY_RE.test(key)) return item;
+    return typeof item === 'string' ? maskApiKey(item) : '[REDACTED]';
+  });
 }

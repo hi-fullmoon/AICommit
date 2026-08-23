@@ -1,4 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 // Big repos can produce multi-MB diffs; raise the default 1MB child-process
 // buffer and surface a contextual error if the explicit limit is exceeded.
@@ -62,6 +68,84 @@ export function unifiedArg(contextLines) {
 // nothing is staged yet). Returns '' when nothing is staged.
 export function getStagedDiff(cwd, contextLines) {
   return readGit(['diff', unifiedArg(contextLines), '--staged'], cwd).trim();
+}
+
+// Hash the complete staged patch (including binary changes and full object
+// ids) so a long-running AI/review step cannot silently commit a different
+// index from the one used to generate the message.
+export function getIndexFingerprint(cwd) {
+  const patch = readGit(
+    ['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'],
+    cwd,
+  );
+  return createHash('sha256').update(patch).digest('hex');
+}
+
+function hashFileOrMissing(path) {
+  if (!existsSync(path)) return '<missing>';
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+// Save and, unless explicitly released, restore the exact Git index around
+// tool-owned staging. The exit hook also covers Ctrl+C and existing
+// process.exit paths. Restoration is skipped if another process changed the
+// index after our last known mutation, avoiding clobbering concurrent work.
+export function createIndexTransaction(projectRoot) {
+  const rawIndexPath = readGit(['rev-parse', '--git-path', 'index'], projectRoot).trim();
+  const indexPath = isAbsolute(rawIndexPath) ? rawIndexPath : resolve(projectRoot, rawIndexPath);
+  const tempDir = mkdtempSync(join(tmpdir(), 'aicommit-index-'));
+  const backupPath = join(tempDir, 'index');
+  const existed = existsSync(indexPath);
+  if (existed) copyFileSync(indexPath, backupPath);
+
+  let active = true;
+  let ownedHash = hashFileOrMissing(indexPath);
+
+  const cleanup = () => {
+    rmSync(tempDir, { recursive: true, force: true });
+  };
+  const release = () => {
+    if (!active) return;
+    active = false;
+    process.removeListener('exit', onExit);
+    cleanup();
+  };
+  const restore = ({ force = false } = {}) => {
+    if (!active) return true;
+    if (!force && hashFileOrMissing(indexPath) !== ownedHash) {
+      release();
+      return false;
+    }
+    try {
+      if (existed) {
+        mkdirSync(dirname(indexPath), { recursive: true });
+        copyFileSync(backupPath, indexPath);
+      } else {
+        rmSync(indexPath, { force: true });
+      }
+      return true;
+    } finally {
+      release();
+    }
+  };
+  const onExit = () => {
+    try {
+      if (!restore()) {
+        process.stderr.write(
+          '\n  ⚠ Git index changed outside aicommit; it was left untouched instead of restoring the snapshot.\n',
+        );
+      }
+    } catch (err) {
+      process.stderr.write(`\n  ⚠ Failed to restore the Git index snapshot: ${err.message}\n`);
+    }
+  };
+
+  process.once('exit', onExit);
+  return {
+    markOwned() { ownedHash = hashFileOrMissing(indexPath); },
+    restore,
+    release,
+  };
 }
 
 // Compact one-line-per-file summary of the same staged changes getStagedDiff
@@ -224,18 +308,86 @@ export function isGitRepo(cwd) {
 }
 
 export function gitCommit(message, projectRoot) {
-  try {
-    // Pass the message as an argv item instead of a shell string — quoting it
-    // for a shell breaks on Windows, where cmd.exe ignores single quotes.
-    execFileSync('git', ['commit', '-m', message], { cwd: projectRoot, stdio: 'inherit' });
-    return true;
-  } catch {
-    return false;
+  // Pass the message as an argv item instead of a shell string — quoting it
+  // for a shell breaks on Windows, where cmd.exe ignores single quotes.
+  // Do not swallow failures: the CLI must return a non-zero exit status when
+  // Git or a commit hook rejects the commit.
+  execFileSync('git', ['commit', '-m', message], { cwd: projectRoot, stdio: 'inherit' });
+  return true;
+}
+
+const SENSITIVE_FILE_RE = /(?:^|\/)(?:\.env(?:\..+)?|\.aicommit\.config\.json|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials?(?:\.[^/]*)?|service[-_]?account(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|key|keystore))$/i;
+const PRIVATE_KEY_RE = /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/i;
+const AWS_KEY_RE = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
+const ASSIGNED_SECRET_RE = /(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\b\s*[:=]\s*["']?)([^\s,"'}]{8,})/gi;
+
+export function isSensitiveFile(path) {
+  const normalized = String(path || '').replace(/\\/g, '/');
+  if (/\.env\.(?:example|sample|template)$/i.test(normalized)) return false;
+  return SENSITIVE_FILE_RE.test(normalized);
+}
+
+// Build a safer model input without changing what Git will commit. Entire
+// sensitive/private-key sections are omitted; common credential assignments
+// and cloud access-key ids in ordinary source diffs are redacted. This is a
+// warning layer, not a substitute for repository secret scanning.
+export function protectSensitiveDiff(diff) {
+  const sections = String(diff || '').split(/(?=^diff --git )/m);
+  const out = [];
+  const findings = [];
+
+  for (const sec of sections) {
+    if (!sec.trim()) continue;
+    const line = sec.split('\n', 1)[0];
+    const paths = diffSectionPaths(line);
+    const sensitivePath = paths.find(isSensitiveFile);
+    if (sensitivePath) {
+      findings.push(`sensitive file: ${sensitivePath}`);
+      out.push(`${line}\n(sensitive file — content omitted)\n`);
+      continue;
+    }
+    if (PRIVATE_KEY_RE.test(sec)) {
+      findings.push(`private-key material in: ${paths.at(-1) || '(unknown file)'}`);
+      out.push(`${line}\n(private key material — content omitted)\n`);
+      continue;
+    }
+
+    let foundAssignedSecret = false;
+    let foundCloudKey = false;
+    const redacted = sec.split('\n').map((diffLine) => {
+      // Inspect both added and deleted content: removed credentials are absent
+      // from the new snapshot but are still present in the outbound diff.
+      const contentLine = diffLine.startsWith('+') || diffLine.startsWith('-');
+      if (!contentLine || diffLine.startsWith('+++') || diffLine.startsWith('---')) return diffLine;
+      let next = diffLine.replace(AWS_KEY_RE, () => {
+        foundCloudKey = true;
+        return '[REDACTED_ACCESS_KEY]';
+      });
+      next = next.replace(ASSIGNED_SECRET_RE, (_m, prefix) => {
+        foundAssignedSecret = true;
+        return `${prefix}[REDACTED]`;
+      });
+      return next;
+    }).join('\n');
+    const displayPath = paths.at(-1) || '(unknown file)';
+    if (foundAssignedSecret) findings.push(`credential-like assignment in: ${displayPath}`);
+    if (foundCloudKey) findings.push(`cloud access key in: ${displayPath}`);
+    out.push(redacted);
   }
+
+  return { diff: out.join(''), findings: [...new Set(findings)] };
 }
 
 export function runGit(args, projectRoot, inherit = false) {
-  execFileSync('git', args, { cwd: projectRoot, stdio: inherit ? 'inherit' : 'pipe' });
+  try {
+    execFileSync('git', args, { cwd: projectRoot, stdio: inherit ? 'inherit' : 'pipe' });
+  } catch (err) {
+    const detail = typeof err.stderr === 'string'
+      ? err.stderr.trim()
+      : err.stderr?.toString('utf-8').trim();
+    const suffix = detail ? `: ${detail}` : '';
+    throw new Error(`git ${args.join(' ')} failed${suffix}`, { cause: err });
+  }
 }
 
 export function hasHead(projectRoot) {
