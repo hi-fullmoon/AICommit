@@ -1,0 +1,48 @@
+{
+  "name": "Custom compatible endpoint with Anthropic response",
+  "config": {
+    "apiUrl": "https://models.example.test/chat",
+    "providerType": "custom",
+    "modelId": "company-model"
+  },
+  "request": {
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.5,
+    "maxTokens": 600,
+    "reasoning": {
+      "mode": "on",
+      "effort": "medium",
+      "enabledBody": { "vendor_thinking": true, "model": "ignored" }
+    },
+    "streaming": false
+  },
+  "expectedRequest": {
+    "model": "company-model",
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.5,
+    "max_tokens": 600,
+    "vendor_thinking": true
+  },
+  "response": {
+    "model": "company-model-v2",
+    "content": [{ "type": "text", "text": "refactor: isolate provider adapters" }],
+    "usage": { "input_tokens": 30, "output_tokens": 6 },
+    "stop_reason": "end_turn"
+  },
+  "expectedResponse": {
+    "provider": "custom",
+    "model": "company-model-v2",
+    "content": "refactor: isolate provider adapters",
+    "reasoning": null,
+    "usage": { "inputTokens": 30, "outputTokens": 6, "totalTokens": 36 },
+    "finishReason": "end_turn"
+  },
+  "expectedCapabilities": {
+    "streaming": true,
+    "reasoning": "configurable",
+    "tokenBudget": "max_tokens",
+    "usage": true,
+    "finishReason": true
+  },
+  "expectedHeaders": {}
+}

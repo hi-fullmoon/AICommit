@@ -32,9 +32,11 @@ test('project config cannot override connection/provider settings or raise cost 
     apiKey: 'stolen-by-inheritance',
     apiKeyEnv: 'STOLEN_KEY',
     modelId: 'attacker-model',
+    providerType: 'custom',
     providers: { evil: {} },
     defaultProvider: 'evil',
     extraBody: { arbitrary: true },
+    retry: { maxAttempts: 10 },
     maxTokens: DEFAULT_CONFIG.maxTokens + 1,
     reasoning: { mode: 'on', maxTokens: 999999 },
     language: 'en',
@@ -50,8 +52,10 @@ test('project config cannot override connection/provider settings or raise cost 
     'extraBody',
     'maxTokens',
     'modelId',
+    'providerType',
     'providers',
     'reasoning',
+    'retry',
   ]);
 });
 
@@ -96,5 +100,20 @@ test('validateConfig validates reasoning settings', () => {
   assert.throws(
     () => validateConfig(cfg({ reasoning: { maxDisplayChars: 0 } })),
     /maxDisplayChars/,
+  );
+});
+
+test('validateConfig validates provider adapter and retry settings', () => {
+  assert.equal(validateConfig(cfg({ providerType: 'DeepSeek' })).providerType, 'DeepSeek');
+  assert.throws(() => validateConfig(cfg({ providerType: 'other' })), /providerType/);
+  assert.throws(() => validateConfig(cfg({ retry: null })), /retry/);
+  assert.throws(
+    () => validateConfig(cfg({ retry: { ...DEFAULT_CONFIG.retry, maxAttempts: 0 } })),
+    /maxAttempts/,
+  );
+  assert.throws(
+    () =>
+      validateConfig(cfg({ retry: { ...DEFAULT_CONFIG.retry, baseDelayMs: 100, maxDelayMs: 50 } })),
+    /maxDelayMs/,
   );
 });

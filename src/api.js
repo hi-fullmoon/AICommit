@@ -1,123 +1,8 @@
 import { cleanCommitMessage, isValidCommitMessage } from './utils.js';
+import { getProviderAdapter, normalizeUsage } from './providers.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
-
-function isOpenAIReasoningModel(modelId) {
-  const id = (modelId || '').split('/').pop(); // strip router prefixes like "openai/"
-  return /^(?:o\d|gpt-5)/i.test(id);
-}
-
-function openAIReasoningEfforts(modelId) {
-  const id = (modelId || '').split('/').pop().toLowerCase();
-
-  // OpenAI adds effort levels by model generation. Keep this table explicit
-  // so a provider-neutral CLI value cannot turn into a vague HTTP 400. Model
-  // snapshots and tier suffixes (for example gpt-5.6-sol) share the same
-  // generation prefix and therefore match these expressions as well.
-  if (/^gpt-5\.6(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
-  if (/^gpt-5\.(?:2|3|4|5)(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh'];
-  if (/^gpt-5\.1(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high'];
-  if (/^gpt-5(?:-|$)/.test(id) || /^o\d(?:-|$)/.test(id)) return ['low', 'medium', 'high'];
-  return null;
-}
-
-function openAIReasoningEffort(modelId, enabled, effort) {
-  const requested = enabled ? effort : 'none';
-  const supported = openAIReasoningEfforts(modelId);
-  if (!supported || supported.includes(requested)) return requested;
-
-  const action = enabled ? `reasoning effort "${requested}"` : 'disabling reasoning';
-  throw new Error(
-    `OpenAI model "${modelId}" does not support ${action}. ` +
-      `Supported reasoning efforts: ${supported.join(', ')}.`,
-  );
-}
-
-function endpointHost(apiUrl) {
-  try {
-    return new URL(apiUrl).hostname.toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function mergeRequestExtensions(payload, extensions) {
-  if (!extensions || typeof extensions !== 'object' || Array.isArray(extensions)) return;
-  const { model: _model, messages: _messages, ...safe } = extensions;
-  Object.assign(payload, safe);
-}
-
-// Map the provider-neutral reasoning config onto known Chat Completions
-// dialects. Unknown strict-compatible endpoints stay untouched unless the
-// user supplies enabledBody/disabledBody explicitly.
-function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
-  const mode = reasoning?.mode || 'auto';
-  if (mode === 'auto') return;
-
-  const enabled = mode === 'on';
-  const effort = reasoning?.effort || 'medium';
-  const host = endpointHost(apiUrl);
-
-  if (host === 'api.openai.com') {
-    if (!isOpenAIReasoningModel(modelId)) {
-      // Reasoning is enabled by default at the app level, but classic models
-      // such as GPT-4o do not accept reasoning_effort. Leave their standard
-      // request untouched instead of making the default configuration fail.
-      return;
-    }
-    payload.reasoning_effort = openAIReasoningEffort(modelId, enabled, effort);
-    return;
-  }
-
-  if (host === 'api.deepseek.com' || host.endsWith('.deepseek.com')) {
-    // Prefer DeepSeek's native `thinking` object and remove the legacy boolean
-    // switch so extraBody cannot leave contradictory enable/disable controls.
-    delete payload.enable_thinking;
-    payload.thinking = { type: enabled ? 'enabled' : 'disabled' };
-    if (enabled) {
-      // DeepSeek V4 accepts low/high/max. Its documented mapping treats
-      // medium and xhigh as high, so normalize our cross-provider levels.
-      payload.reasoning_effort = effort === 'low' || effort === 'max' ? effort : 'high';
-      // Thinking mode ignores temperature; omit it to keep the wire request
-      // faithful to the native API instead of sending a misleading control.
-      delete payload.temperature;
-    } else {
-      delete payload.reasoning_effort;
-    }
-    return;
-  }
-
-  if (host === 'openrouter.ai') {
-    payload.reasoning = { effort: enabled ? effort : 'none' };
-    return;
-  }
-
-  if (host.includes('minimax')) {
-    payload.reasoning_split = true;
-    if (enabled) {
-      // MiniMax reasoning models think by default when the disabling switch is
-      // omitted; reasoning_split keeps the trace out of final content.
-      delete payload.thinking;
-      delete payload.enable_thinking;
-    } else {
-      delete payload.enable_thinking;
-      payload.thinking = { type: 'disabled' };
-    }
-    return;
-  }
-
-  const customBody = enabled ? reasoning?.enabledBody : reasoning?.disabledBody;
-  if (customBody !== undefined) {
-    mergeRequestExtensions(payload, customBody);
-    return;
-  }
-
-  // Unknown OpenAI-compatible endpoints may expose reasoning without a
-  // request switch, or may not support it at all. The default-on setting must
-  // remain backwards compatible in both cases: leave the payload standard
-  // unless the provider explicitly supplies enabledBody/disabledBody.
-}
 
 export async function callAPI(
   apiUrl,
@@ -130,7 +15,41 @@ export async function callAPI(
   extraBody = {},
   reasoning = null,
   stream = null,
+  options = {},
 ) {
+  const result = await requestGeneration(
+    {
+      apiUrl,
+      apiKey,
+      modelId,
+      timeoutMs,
+      extraBody,
+      reasoning,
+      providerType: options.providerType,
+      retry: options.retry,
+    },
+    { messages, temperature, maxTokens, stream },
+  );
+  return result.raw;
+}
+
+const DEFAULT_RETRY_POLICY = Object.freeze({
+  maxAttempts: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 5000,
+});
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function secureEndpoint(apiUrl) {
   const endpoint = new URL(apiUrl);
   const loopback =
     endpoint.hostname === 'localhost' ||
@@ -142,82 +61,149 @@ export async function callAPI(
       'Refusing insecure API endpoint: use HTTPS, or HTTP only for localhost/loopback.',
     );
   }
-  const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
-  const payload = { model: modelId, messages };
-  if (isOpenAIReasoningModel(modelId)) {
-    payload.max_completion_tokens = maxTokens;
-  } else {
-    payload.temperature = temperature;
-    payload.max_tokens = maxTokens;
-  }
-  // OpenAI-compatible only describes the common schema; many compatible
-  // servers reject unknown provider-specific fields. Keep the default body
-  // standard and merge extensions only when the config/preset opts into them.
-  mergeRequestExtensions(payload, extraBody);
-  applyReasoningOptions(payload, apiUrl, modelId, reasoning);
-  if (stream?.onReasoningDelta) {
-    payload.stream = true;
-    if (endpointHost(apiUrl) === 'api.openai.com') {
-      const current = payload.stream_options;
-      payload.stream_options = {
-        ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
-        include_usage: true,
-      };
-    }
-  }
-  const body = JSON.stringify(payload);
+  return endpoint;
+}
 
-  let response;
-  try {
-    response = await fetch(apiUrl, {
+function retryPolicy(value = {}) {
+  return {
+    maxAttempts: value?.maxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts,
+    baseDelayMs: value?.baseDelayMs ?? DEFAULT_RETRY_POLICY.baseDelayMs,
+    maxDelayMs: value?.maxDelayMs ?? DEFAULT_RETRY_POLICY.maxDelayMs,
+    sleep:
+      value?.sleep ??
+      ((delayMs) =>
+        new Promise((resolve) => {
+          globalThis.setTimeout(resolve, delayMs);
+        })),
+    now: value?.now ?? (() => Date.now()),
+  };
+}
+
+function retryAfterMs(value, now) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) return null;
+  return Math.max(0, date - now());
+}
+
+function networkFailure(err) {
+  if (err instanceof TypeError) return true;
+  return RETRYABLE_NETWORK_CODES.has(err?.code) || RETRYABLE_NETWORK_CODES.has(err?.cause?.code);
+}
+
+function timeoutError(err, timeout) {
+  if (err?.name !== 'TimeoutError' && err?.name !== 'AbortError') return null;
+  return new Error(
+    `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
+      `Raise "timeoutMs" in your config if this keeps happening.`,
+  );
+}
+
+async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) {
+  const policy = retryPolicy(configuredPolicy);
+  let attempt = 0;
+
+  while (attempt < policy.maxAttempts) {
+    attempt += 1;
+    let response;
+    try {
+      response = await fetch(apiUrl, {
+        ...init,
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (err) {
+      const wrappedTimeout = timeoutError(err, timeout);
+      if (wrappedTimeout) throw wrappedTimeout;
+      if (!networkFailure(err) || attempt >= policy.maxAttempts) throw err;
+      const delay = Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
+      await policy.sleep(delay);
+      continue;
+    }
+
+    if (response.ok) {
+      try {
+        return { value: await consume(response), attempts: attempt };
+      } catch (err) {
+        const wrappedTimeout = timeoutError(err, timeout);
+        if (wrappedTimeout) throw wrappedTimeout;
+        if (!networkFailure(err) || attempt >= policy.maxAttempts) throw err;
+        const delay = Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
+        await policy.sleep(delay);
+        continue;
+      }
+    }
+    if (RETRYABLE_STATUS.has(response.status) && attempt < policy.maxAttempts) {
+      const requestedDelay = retryAfterMs(response.headers.get('retry-after'), policy.now);
+      const delay = Math.min(
+        requestedDelay ?? policy.baseDelayMs * 2 ** (attempt - 1),
+        policy.maxDelayMs,
+      );
+      await response.body?.cancel().catch(() => {});
+      await policy.sleep(delay);
+      continue;
+    }
+
+    const errText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
+  }
+
+  throw new Error('Provider request exhausted its retry budget.');
+}
+
+// Unified provider request contract. Provider adapters own request dialects
+// and response normalization; callers receive the same shape regardless of
+// whether the endpoint is OpenAI-compatible or native Ollama.
+export async function requestGeneration(config, request) {
+  secureEndpoint(config.apiUrl);
+  const timeout = config.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const adapter = getProviderAdapter(config);
+  const payload = adapter.buildRequest({
+    messages: request.messages,
+    temperature: request.temperature,
+    maxTokens: request.maxTokens,
+    extraBody: config.extraBody,
+    reasoning: request.reasoning ?? config.reasoning,
+    streaming: Boolean(request.stream?.onReasoningDelta),
+  });
+  const startedAt = performance.now();
+  const { value: consumed, attempts } = await fetchWithRetry(
+    config.apiUrl,
+    {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        // Identify the app to OpenRouter (ignored by other providers).
-        'X-Title': 'aicommit',
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+        ...adapter.headers,
       },
-      body,
-      signal: AbortSignal.timeout(timeout),
-    });
-  } catch (err) {
-    if (err.name === 'TimeoutError') {
-      throw new Error(
-        `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
-          `Raise "timeoutMs" in your config if this keeps happening.`,
-      );
-    }
-    throw err;
+      body: JSON.stringify(payload),
+    },
+    timeout,
+    config.retry,
+    async (response) => {
+      const contentType = response.headers.get('content-type') || '';
+      if (payload.stream && contentType.includes('text/event-stream')) {
+        return {
+          data: await consumeEventStream(response, request.stream.onReasoningDelta),
+          eventStream: true,
+        };
+      }
+      return { data: await response.json(), eventStream: false };
+    },
+  );
+
+  const { data, eventStream } = consumed;
+  const normalized = adapter.normalizeResponse(data);
+  if (request.stream?.onReasoningDelta && !eventStream && normalized.reasoning) {
+    request.stream.onReasoningDelta(normalized.reasoning);
   }
-
-  try {
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    if (payload.stream && contentType.includes('text/event-stream')) {
-      return consumeEventStream(response, stream.onReasoningDelta);
-    }
-
-    // A few compatible endpoints ignore stream=true and return regular JSON.
-    // Keep accepting that response and surface its complete reasoning once.
-    const data = await response.json();
-    if (stream?.onReasoningDelta) {
-      const completeReasoning = extractReasoning(data?.choices?.[0]?.message);
-      if (completeReasoning) stream.onReasoningDelta(completeReasoning);
-    }
-    return data;
-  } catch (err) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      throw new Error(
-        `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
-          `Raise "timeoutMs" in your config if this keeps happening.`,
-      );
-    }
-    throw err;
-  }
+  return {
+    ...normalized,
+    capabilities: adapter.capabilities,
+    attempts,
+    latencyMs: performance.now() - startedAt,
+  };
 }
 
 function streamContent(value) {
@@ -325,33 +311,27 @@ async function consumeEventStream(response, onReasoningDelta) {
 // echoed model id, and a preview of the model's reply. Uses the same request
 // body as a real call, so it validates the actual path a commit would take.
 export async function checkConnection(config, stream = null) {
-  const { apiUrl, apiKey, modelId, maxTokens, timeoutMs, extraBody, reasoning } = config;
+  const { maxTokens, reasoning } = config;
   const t0 = performance.now();
 
-  const data = await callAPI(
-    apiUrl,
-    apiKey,
-    modelId,
-    [{ role: 'user', content: 'Reply with exactly: OK' }],
-    0,
-    reasoning?.mode === 'on'
-      ? Math.max(Math.min(maxTokens || 1024, 64), reasoning.maxTokens || 4096)
-      : Math.min(maxTokens || 1024, 64),
-    timeoutMs,
-    extraBody,
-    reasoning,
+  const result = await requestGeneration(config, {
+    messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+    temperature: 0,
+    maxTokens:
+      reasoning?.mode === 'on'
+        ? Math.max(Math.min(maxTokens || 1024, 64), reasoning.maxTokens || 4096)
+        : Math.min(maxTokens || 1024, 64),
     stream,
-  );
-
-  const content = extractMessage(data);
-  const reasoningContent = extractReasoning(data?.choices?.[0]?.message);
+  });
 
   return {
     elapsed: performance.now() - t0,
-    model: data?.model || null,
-    content: content.trim(),
-    reasoning: reasoningContent,
-    usage: data?.usage || null,
+    model: result.model,
+    provider: result.provider,
+    capabilities: result.capabilities,
+    content: result.content.trim(),
+    reasoning: result.reasoning,
+    usage: result.usage,
   };
 }
 
@@ -368,7 +348,7 @@ const MAX_REASONING_CHARS = 8000;
 // budget is exhausted. Treat all known token-limit variants alike, while a
 // normal `stop` (or a provider omitting finish_reason) remains untouched.
 function hitTokenLimit(data) {
-  const reason = data?.choices?.[0]?.finish_reason;
+  const reason = data?.finishReason;
   return typeof reason === 'string' && /^(?:length|max_tokens|max_output_tokens)$/i.test(reason);
 }
 
@@ -376,24 +356,7 @@ function hitTokenLimit(data) {
 // happened. Disable it only for providers where we know the switch is valid;
 // unknown compatible endpoints keep their configured behavior.
 function reasoningForFollowUp(config) {
-  const reasoning = config.reasoning;
-  if (reasoning?.mode !== 'on') return reasoning;
-
-  const host = endpointHost(config.apiUrl);
-  if (
-    host.includes('minimax') ||
-    host === 'api.deepseek.com' ||
-    host.endsWith('.deepseek.com') ||
-    host === 'openrouter.ai' ||
-    reasoning.disabledBody !== undefined
-  ) {
-    return { ...reasoning, mode: 'off' };
-  }
-  if (host === 'api.openai.com') {
-    const supported = openAIReasoningEfforts(config.modelId);
-    if (supported?.includes('none')) return { ...reasoning, mode: 'off' };
-  }
-  return reasoning;
+  return getProviderAdapter(config).reasoningForFollowUp(config.reasoning);
 }
 
 // Strict first-line check that decides whether a corrective retry is
@@ -434,20 +397,6 @@ function regeneratePrompt(previousMessage) {
       'then an optional body after a blank line. ' +
       'Output ONLY the new message — no explanation, no quotes, no code fences.',
   ].join('\n');
-}
-
-// Read the assistant text from either OpenAI format
-// (choices[0].message.content, possibly an array of parts) or Anthropic
-// format (content[0].text).
-function extractMessage(data) {
-  const oai = data?.choices?.[0]?.message?.content;
-  if (typeof oai === 'string') return oai;
-  if (Array.isArray(oai))
-    return oai
-      .map((p) => p?.text ?? '')
-      .filter(Boolean)
-      .join('');
-  return data?.content?.[0]?.text ?? '';
 }
 
 // Normalize reasoning from the vendor-specific fields that can carry it:
@@ -498,20 +447,32 @@ const FOLLOWUP_COMMIT_PROMPT =
 // trigger a follow-up call (see getResponseText); summing both keeps the
 // reported token count honest instead of dropping the reasoning tokens.
 function sumUsage(...usages) {
-  const total = {};
+  const total = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  let hasInput = false;
+  let hasOutput = false;
+  let hasTotal = false;
   for (const u of usages) {
-    if (!u) continue;
-    for (const key of [
-      'prompt_tokens',
-      'completion_tokens',
-      'input_tokens',
-      'output_tokens',
-      'total_tokens',
-    ]) {
-      if (typeof u[key] === 'number') total[key] = (total[key] || 0) + u[key];
+    const normalized = normalizeUsage(u);
+    if (!normalized) continue;
+    if (typeof normalized.inputTokens === 'number') {
+      total.inputTokens += normalized.inputTokens;
+      hasInput = true;
+    }
+    if (typeof normalized.outputTokens === 'number') {
+      total.outputTokens += normalized.outputTokens;
+      hasOutput = true;
+    }
+    if (typeof normalized.totalTokens === 'number') {
+      total.totalTokens += normalized.totalTokens;
+      hasTotal = true;
     }
   }
-  return Object.keys(total).length ? total : null;
+  if (!hasInput && !hasOutput && !hasTotal) return null;
+  return {
+    ...(hasInput ? { inputTokens: total.inputTokens } : {}),
+    ...(hasOutput ? { outputTokens: total.outputTokens } : {}),
+    ...(hasTotal ? { totalTokens: total.totalTokens } : {}),
+  };
 }
 
 // Make the API call and return the assistant text plus reasoning accumulated
@@ -532,22 +493,16 @@ export async function getResponseText(
   stream = null,
   responseValidator = null,
 ) {
-  let data = await callAPI(
-    config.apiUrl,
-    config.apiKey,
-    config.modelId,
+  let response = await requestGeneration(config, {
     messages,
     temperature,
     maxTokens,
-    config.timeoutMs,
-    config.extraBody,
-    config.reasoning,
     stream,
-  );
-  const usages = [data?.usage];
-  let reasoning = extractReasoning(data?.choices?.[0]?.message);
-  let text = extractMessage(data);
-  const truncatedByLimit = hitTokenLimit(data);
+  });
+  const usages = [response.usage];
+  let reasoning = response.reasoning;
+  let text = response.content;
+  const truncatedByLimit = hitTokenLimit(response);
   const invalidResponse = typeof responseValidator === 'function' && !responseValidator(text);
 
   if ((!text.trim() && reasoning) || truncatedByLimit || invalidResponse) {
@@ -592,27 +547,22 @@ export async function getResponseText(
     // Respect the caller's configured ceiling. Known reasoning providers are
     // switched to formatting-only mode above, and the recovery prompt asks for
     // a compact answer, so the same budget has substantially more useful room.
-    data = await callAPI(
-      config.apiUrl,
-      config.apiKey,
-      config.modelId,
-      recoveryMessages,
+    response = await requestGeneration(config, {
+      messages: recoveryMessages,
       temperature,
       maxTokens,
-      config.timeoutMs,
-      config.extraBody,
-      reasoningForFollowUp(config),
+      reasoning: reasoningForFollowUp(config),
       stream,
-    );
-    usages.push(data?.usage);
-    const followUpReasoning = extractReasoning(data?.choices?.[0]?.message);
+    });
+    usages.push(response.usage);
+    const followUpReasoning = response.reasoning;
     if (followUpReasoning) {
       reasoning = [reasoning, followUpReasoning].filter(Boolean).join('\n\n');
     }
-    text = extractMessage(data);
+    text = response.content;
   }
 
-  return { text, data, reasoning, usage: sumUsage(...usages) };
+  return { text, data: response.raw, response, reasoning, usage: sumUsage(...usages) };
 }
 
 // `previousMessage` is the message from the last generation, when there is

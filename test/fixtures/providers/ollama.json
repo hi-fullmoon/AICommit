@@ -1,0 +1,49 @@
+{
+  "name": "Ollama native chat",
+  "config": {
+    "apiUrl": "http://127.0.0.1:11434/api/chat",
+    "modelId": "qwen3:8b"
+  },
+  "request": {
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.1,
+    "maxTokens": 512,
+    "reasoning": { "mode": "off", "effort": "low" },
+    "streaming": true
+  },
+  "expectedRequest": {
+    "model": "qwen3:8b",
+    "messages": [{ "role": "user", "content": "commit" }],
+    "stream": false,
+    "options": { "temperature": 0.1, "num_predict": 512 },
+    "think": false
+  },
+  "response": {
+    "model": "qwen3:8b",
+    "message": {
+      "role": "assistant",
+      "content": "chore: support local Ollama",
+      "thinking": "used local model"
+    },
+    "done": true,
+    "done_reason": "stop",
+    "prompt_eval_count": 22,
+    "eval_count": 7
+  },
+  "expectedResponse": {
+    "provider": "ollama",
+    "model": "qwen3:8b",
+    "content": "chore: support local Ollama",
+    "reasoning": "used local model",
+    "usage": { "inputTokens": 22, "outputTokens": 7, "totalTokens": 29 },
+    "finishReason": "stop"
+  },
+  "expectedCapabilities": {
+    "streaming": false,
+    "reasoning": "native",
+    "tokenBudget": "options.num_predict",
+    "usage": true,
+    "finishReason": true
+  },
+  "expectedHeaders": {}
+}

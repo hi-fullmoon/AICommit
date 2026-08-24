@@ -1,7 +1,13 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { generateCommitMessage, checkConnection, getResponseText, callAPI } from '../src/api.js';
+import {
+  generateCommitMessage,
+  checkConnection,
+  getResponseText,
+  callAPI,
+  requestGeneration,
+} from '../src/api.js';
 
 const realFetch = globalThis.fetch;
 after(() => {
@@ -105,7 +111,7 @@ test('usage aggregates across the reasoning follow-up call', async () => {
   ]);
   const { message, usage } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'fix: x');
-  assert.deepEqual(usage, { prompt_tokens: 110, completion_tokens: 55, total_tokens: 165 });
+  assert.deepEqual(usage, { inputTokens: 110, outputTokens: 55, totalTokens: 165 });
 });
 
 test('usage aggregates Anthropic-style input/output token fields', async () => {
@@ -121,7 +127,7 @@ test('usage aggregates Anthropic-style input/output token fields', async () => {
   ]);
   const { message, usage } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'feat: add x');
-  assert.deepEqual(usage, { input_tokens: 120, output_tokens: 15 });
+  assert.deepEqual(usage, { inputTokens: 120, outputTokens: 15, totalTokens: 135 });
 });
 
 test('usage is reported from a single call when no follow-up is needed', async () => {
@@ -132,7 +138,7 @@ test('usage is reported from a single call when no follow-up is needed', async (
     },
   ]);
   const { usage } = await generateCommitMessage(cfg(), diff);
-  assert.deepEqual(usage, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
+  assert.deepEqual(usage, { inputTokens: 20, outputTokens: 8, totalTokens: 28 });
 });
 
 test('usage is null when the provider reports no token counts', async () => {
@@ -389,7 +395,7 @@ test('corrective retry usage aggregates with the first call', async () => {
   ]);
   const { message, usage } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'feat: add x');
-  assert.deepEqual(usage, { prompt_tokens: 120, completion_tokens: 15, total_tokens: 135 });
+  assert.deepEqual(usage, { inputTokens: 120, outputTokens: 15, totalTokens: 135 });
 });
 
 test('empty corrective retry rejects the original invalid reply', async () => {
@@ -510,7 +516,7 @@ test('reasoning mode consumes SSE deltas and streams normalized reasoning', asyn
   assert.equal(result.message, 'feat: stream reasoning');
   assert.equal(result.reasoning, 'step one\nstep two\n');
   assert.deepEqual(deltas, ['step one\n', 'step two\n']);
-  assert.deepEqual(result.usage, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
+  assert.deepEqual(result.usage, { inputTokens: 20, outputTokens: 8, totalTokens: 28 });
 });
 
 test('streaming rejects a clean EOF that has no completion marker', async () => {
@@ -556,7 +562,7 @@ test('OpenAI streams request usage while preserving other stream options', async
     include_obfuscation: false,
     include_usage: true,
   });
-  assert.deepEqual(result.usage, { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 });
+  assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 3, totalTokens: 15 });
 });
 
 test('checkConnection surfaces HTTP errors', async () => {
@@ -571,6 +577,156 @@ test('request timeouts are wrapped with a helpful message', async () => {
     throw err;
   };
   await assert.rejects(() => checkConnection(cfg({ timeoutMs: 5000 })), /timed out after 5s/);
+});
+
+test('429 retries respect Retry-After and expose the attempt count', async () => {
+  const delays = [];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response('rate limited', { status: 429, headers: { 'Retry-After': '2' } });
+    }
+    return new Response(
+      JSON.stringify({
+        model: 'mock-model',
+        choices: [{ message: { content: 'feat: retry safely' }, finish_reason: 'stop' }],
+      }),
+      { status: 200 },
+    );
+  };
+
+  const result = await requestGeneration(
+    cfg({
+      retry: {
+        maxAttempts: 3,
+        baseDelayMs: 10,
+        maxDelayMs: 5000,
+        sleep: async (delay) => delays.push(delay),
+      },
+    }),
+    { messages: [], temperature: 0, maxTokens: 20 },
+  );
+
+  assert.equal(result.content, 'feat: retry safely');
+  assert.equal(result.attempts, 2);
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [2000]);
+});
+
+test('recoverable 5xx retries use bounded exponential backoff', async () => {
+  const delays = [];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls < 3) return new Response('temporarily unavailable', { status: 503 });
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: 'fix: recover provider call' } }] }),
+      { status: 200 },
+    );
+  };
+
+  const result = await requestGeneration(
+    cfg({
+      retry: {
+        maxAttempts: 3,
+        baseDelayMs: 10,
+        maxDelayMs: 15,
+        sleep: async (delay) => delays.push(delay),
+      },
+    }),
+    { messages: [], temperature: 0, maxTokens: 20 },
+  );
+
+  assert.equal(result.attempts, 3);
+  assert.deepEqual(delays, [10, 15]);
+});
+
+test('network interruption retries, but never exceeds maxAttempts', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) throw new TypeError('socket disconnected');
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: 'fix: survive socket reset' } }] }),
+      { status: 200 },
+    );
+  };
+  const result = await requestGeneration(
+    cfg({
+      retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
+    }),
+    { messages: [], temperature: 0, maxTokens: 20 },
+  );
+  assert.equal(result.attempts, 2);
+
+  calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response('still unavailable', { status: 503 });
+  };
+  await assert.rejects(
+    () =>
+      requestGeneration(
+        cfg({
+          retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
+        }),
+        { messages: [], temperature: 0, maxTokens: 20 },
+      ),
+    /HTTP 503/,
+  );
+  assert.equal(calls, 3);
+});
+
+test('network interruption while consuming a response body is retried', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return {
+        ok: true,
+        headers: new globalThis.Headers(),
+        async json() {
+          throw new TypeError('response body terminated');
+        },
+      };
+    }
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: 'fix: retry interrupted body' } }] }),
+      { status: 200 },
+    );
+  };
+
+  const result = await requestGeneration(
+    cfg({
+      retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
+    }),
+    { messages: [], temperature: 0, maxTokens: 20 },
+  );
+
+  assert.equal(result.content, 'fix: retry interrupted body');
+  assert.equal(result.attempts, 2);
+});
+
+test('authentication, parameter, and content-safety failures are not retried', async () => {
+  for (const status of [400, 401, 403, 422]) {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response('permanent failure', { status });
+    };
+    await assert.rejects(
+      () =>
+        requestGeneration(
+          cfg({
+            retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
+          }),
+          { messages: [], temperature: 0, maxTokens: 20 },
+        ),
+      new RegExp(`HTTP ${status}`),
+    );
+    assert.equal(calls, 1, `HTTP ${status} should fail without a retry`);
+  }
 });
 
 test('standard request body has no vendor thinking params', async () => {

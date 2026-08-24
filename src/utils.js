@@ -103,17 +103,17 @@ function formatTokens(n) {
 // split, with the total appended. The total is the sum of the *displayed*
 // parts, not the raw total rounded on its own, so in + out always equals it
 // (1.6k + 0.3k = 1.9k, never a mismatch like "1.6k+0.3k (total 2k)").
-// Accepts both OpenAI-style (prompt_tokens/completion_tokens) and
-// Anthropic-style (input_tokens/output_tokens) field names.
+// Accepts the internal camelCase contract plus legacy provider field names.
 export function formatUsage(usage) {
-  const prompt = usage.prompt_tokens ?? usage.input_tokens;
-  const completion = usage.completion_tokens ?? usage.output_tokens;
+  const prompt = usage.inputTokens ?? usage.prompt_tokens ?? usage.input_tokens;
+  const completion = usage.outputTokens ?? usage.completion_tokens ?? usage.output_tokens;
   if (typeof prompt === 'number' && typeof completion === 'number') {
     const p = roundedK(prompt);
     const c = roundedK(completion);
     return `${renderK(p)} in + ${renderK(c)} out (total ${renderK(p + c)})`;
   }
-  if (typeof usage.total_tokens === 'number') return `${formatTokens(usage.total_tokens)}`;
+  const total = usage.totalTokens ?? usage.total_tokens;
+  if (typeof total === 'number') return `${formatTokens(total)}`;
   return '';
 }
 

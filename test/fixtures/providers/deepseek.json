@@ -1,0 +1,51 @@
+{
+  "name": "DeepSeek native thinking",
+  "config": {
+    "apiUrl": "https://api.deepseek.com/v1/chat/completions",
+    "modelId": "deepseek-v4-flash"
+  },
+  "request": {
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.3,
+    "maxTokens": 4096,
+    "extraBody": { "enable_thinking": false },
+    "reasoning": { "mode": "on", "effort": "xhigh" },
+    "streaming": false
+  },
+  "expectedRequest": {
+    "model": "deepseek-v4-flash",
+    "messages": [{ "role": "user", "content": "commit" }],
+    "max_tokens": 4096,
+    "thinking": { "type": "enabled" },
+    "reasoning_effort": "high"
+  },
+  "response": {
+    "model": "deepseek-v4-flash",
+    "choices": [
+      {
+        "message": {
+          "content": "feat: normalize provider responses",
+          "reasoning_content": "mapped the response fields"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 50, "completion_tokens": 12, "total_tokens": 62 }
+  },
+  "expectedResponse": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "content": "feat: normalize provider responses",
+    "reasoning": "mapped the response fields",
+    "usage": { "inputTokens": 50, "outputTokens": 12, "totalTokens": 62 },
+    "finishReason": "stop"
+  },
+  "expectedCapabilities": {
+    "streaming": true,
+    "reasoning": "native",
+    "tokenBudget": "max_tokens",
+    "usage": true,
+    "finishReason": true
+  },
+  "expectedHeaders": {}
+}

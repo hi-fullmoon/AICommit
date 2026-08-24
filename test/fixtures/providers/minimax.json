@@ -1,0 +1,54 @@
+{
+  "name": "MiniMax split reasoning",
+  "config": {
+    "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
+    "modelId": "MiniMax-M3"
+  },
+  "request": {
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.4,
+    "maxTokens": 4096,
+    "extraBody": { "thinking": { "type": "disabled" } },
+    "reasoning": { "mode": "on", "effort": "low" },
+    "streaming": false
+  },
+  "expectedRequest": {
+    "model": "MiniMax-M3",
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.4,
+    "max_tokens": 4096,
+    "reasoning_split": true
+  },
+  "response": {
+    "model": "MiniMax-M3",
+    "choices": [
+      {
+        "message": {
+          "content": "test: add provider fixtures",
+          "reasoning_details": [
+            { "type": "thinking", "text": "checked OpenAI" },
+            { "type": "thinking", "text": "checked MiniMax" }
+          ]
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 70, "completion_tokens": 14, "total_tokens": 84 }
+  },
+  "expectedResponse": {
+    "provider": "minimax",
+    "model": "MiniMax-M3",
+    "content": "test: add provider fixtures",
+    "reasoning": "checked OpenAI\nchecked MiniMax",
+    "usage": { "inputTokens": 70, "outputTokens": 14, "totalTokens": 84 },
+    "finishReason": "stop"
+  },
+  "expectedCapabilities": {
+    "streaming": true,
+    "reasoning": "native",
+    "tokenBudget": "max_tokens",
+    "usage": true,
+    "finishReason": true
+  },
+  "expectedHeaders": {}
+}

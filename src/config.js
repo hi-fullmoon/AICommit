@@ -16,9 +16,11 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'apiKey',
   'apiKeyEnv',
   'modelId',
+  'providerType',
   'providers',
   'defaultProvider',
   'extraBody',
+  'retry',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
@@ -83,12 +85,22 @@ export const DEFAULT_CONFIG = {
   apiKey: '',
   apiKeyEnv: '',
   modelId: 'gpt-4o',
+  // Optional explicit adapter selection. An empty value uses endpoint-based
+  // detection; provider presets can set this for custom domains.
+  providerType: '',
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
   maxTokens: 1024,
   // Per-request timeout in milliseconds — a hung endpoint aborts with a clear
   // error instead of leaving the spinner running forever.
   timeoutMs: 120000,
+  // Retry only transient transport failures, rate limits, and recoverable
+  // server errors. Authentication, parameter, and safety errors fail once.
+  retry: {
+    maxAttempts: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 5000,
+  },
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
   // change set doesn't burn tokens on lines the model doesn't need.
@@ -252,6 +264,16 @@ export function validateConfig(config) {
     );
   }
   if (
+    typeof config.providerType !== 'string' ||
+    !['', 'openai', 'openrouter', 'deepseek', 'minimax', 'ollama', 'custom'].includes(
+      config.providerType.toLowerCase(),
+    )
+  ) {
+    throw new Error(
+      'Invalid config "providerType": expected openai, openrouter, deepseek, minimax, ollama, custom, or "".',
+    );
+  }
+  if (
     typeof config.apiKeyEnv !== 'string' ||
     (config.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.apiKeyEnv))
   ) {
@@ -283,6 +305,9 @@ export function validateConfig(config) {
   ) {
     throw new Error('Invalid config "reasoning": expected an object.');
   }
+  if (!config.retry || typeof config.retry !== 'object' || Array.isArray(config.retry)) {
+    throw new Error('Invalid config "retry": expected an object.');
+  }
   if (!['auto', 'on', 'off'].includes(config.reasoning.mode)) {
     throw new Error('Invalid config "reasoning.mode": expected "auto", "on", or "off".');
   }
@@ -301,6 +326,12 @@ export function validateConfig(config) {
   assertNumber(config, 'temperature', { min: 0, max: 2 });
   assertNumber(config, 'maxTokens', { integer: true, min: 1 });
   assertNumber(config, 'timeoutMs', { integer: true, min: 1 });
+  assertNumber(config.retry, 'maxAttempts', { integer: true, min: 1, max: 10 });
+  assertNumber(config.retry, 'baseDelayMs', { integer: true, min: 0, max: 60000 });
+  assertNumber(config.retry, 'maxDelayMs', { integer: true, min: 0, max: 300000 });
+  if (config.retry.maxDelayMs < config.retry.baseDelayMs) {
+    throw new Error('Invalid config "retry.maxDelayMs": must be >= retry.baseDelayMs.');
+  }
   assertNumber(config, 'maxDiffChars', { integer: true, min: 1 });
   assertNumber(config, 'maxFileDiffChars', { integer: true, min: 1 });
   assertNumber(config, 'splitMaxDiffChars', { integer: true, min: 1 });

@@ -1,0 +1,52 @@
+{
+  "name": "OpenAI reasoning chat completion",
+  "config": {
+    "apiUrl": "https://api.openai.com/v1/chat/completions",
+    "modelId": "gpt-5.6-sol"
+  },
+  "request": {
+    "messages": [{ "role": "user", "content": "commit" }],
+    "temperature": 0.2,
+    "maxTokens": 2048,
+    "extraBody": { "stream_options": { "include_obfuscation": false } },
+    "reasoning": { "mode": "on", "effort": "high" },
+    "streaming": true
+  },
+  "expectedRequest": {
+    "model": "gpt-5.6-sol",
+    "messages": [{ "role": "user", "content": "commit" }],
+    "max_completion_tokens": 2048,
+    "stream_options": { "include_obfuscation": false, "include_usage": true },
+    "reasoning_effort": "high",
+    "stream": true
+  },
+  "response": {
+    "model": "gpt-5.6-sol-2026-08-01",
+    "choices": [
+      {
+        "message": {
+          "content": [{ "type": "text", "text": "feat: add provider contract" }],
+          "reasoning": { "summary": "checked the diff" }
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 40, "completion_tokens": 8, "total_tokens": 48 }
+  },
+  "expectedResponse": {
+    "provider": "openai",
+    "model": "gpt-5.6-sol-2026-08-01",
+    "content": "feat: add provider contract",
+    "reasoning": "checked the diff",
+    "usage": { "inputTokens": 40, "outputTokens": 8, "totalTokens": 48 },
+    "finishReason": "stop"
+  },
+  "expectedCapabilities": {
+    "streaming": true,
+    "reasoning": "native",
+    "tokenBudget": "max_completion_tokens",
+    "usage": true,
+    "finishReason": true
+  },
+  "expectedHeaders": {}
+}

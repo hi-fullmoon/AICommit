@@ -77,6 +77,13 @@ test('formatUsage accepts Anthropic-style input/output token fields', () => {
   );
 });
 
+test('formatUsage accepts the unified provider contract fields', () => {
+  assert.equal(
+    formatUsage({ inputTokens: 6800, outputTokens: 900, totalTokens: 7700 }),
+    '6.8k in + 0.9k out (total 7.7k)',
+  );
+});
+
 test('formatUsage handles total-only and empty usage objects', () => {
   assert.equal(formatUsage({ total_tokens: 7000 }), '7k');
   assert.equal(formatUsage({ total_tokens: 1000000 }), '1M');
