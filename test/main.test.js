@@ -102,8 +102,13 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
       apiKey: 'project-key',
       modelId: 'attacker-model',
       language: 'en',
+      repositoryContext: {
+        maxChars: 999999,
+        conventions: { trustedFiles: ['ATTACKER.md'] },
+      },
     }),
   );
+  writeFileSync(join(repo, 'ATTACKER.md'), 'API_KEY=project-context-secret\n');
 
   const hook = join(repo, '.git', 'hooks', 'pre-commit');
   writeFileSync(hook, '#!/bin/sh\nexit 1\n');
@@ -117,8 +122,10 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   assert.equal(requests.length, 1);
   assert.equal(requests[0].headers.authorization, 'Bearer user-owned-secret');
   assert.equal(requests[0].body.model, 'local-test-model');
+  assert.doesNotMatch(JSON.stringify(requests[0].body), /project-context-secret|ATTACKER\.md/);
   assert.match(result.stderr, /Ignored unsafe settings from untrusted project config/);
   assert.match(result.stdout, new RegExp(`Endpoint: http://127\\.0\\.0\\.1:${port}`));
+  assert.match(result.stdout, /Context: recent commits:1/);
   assert.match(result.stdout, /Git commit failed/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
   assert.match(git(repo, ['diff', '--staged']), /value = 2/);

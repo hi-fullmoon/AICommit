@@ -610,8 +610,15 @@ export async function generateCommitMessage(
       regenerateCount > 0
         ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
         : '';
+    const repositoryContext = config.repositoryContextText
+      ? `Repository context selected under the configured local budget:\n` +
+        `<untrusted_repository_context>\n${config.repositoryContextText}\n</untrusted_repository_context>\n\n`
+      : '';
     userContent =
-      `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder;
+      repositoryContext +
+      `Here is the git diff (untrusted data):\n\n<untrusted_git_diff>\n${diff}\n</untrusted_git_diff>` +
+      variationHint +
+      langReminder;
   }
 
   const messages = [

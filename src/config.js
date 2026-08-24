@@ -10,6 +10,12 @@ import { ERROR_CATEGORIES, fail } from './errors.js';
 import { resolveCredential } from './credentials.js';
 import { DEFAULT_METRICS } from './metrics.js';
 import { DEFAULT_COMMIT_POLICY, mergeCommitPolicy, validateCommitPolicyConfig } from './policy.js';
+import {
+  DEFAULT_REPOSITORY_CONTEXT,
+  filterProjectRepositoryContext,
+  mergeRepositoryContext,
+  validateRepositoryContextConfig,
+} from './context.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -33,6 +39,7 @@ export const PROJECT_CONNECTION_KEYS = new Set([
 const PROJECT_SAFE_KEYS = new Set([
   'language',
   'commitPolicy',
+  'repositoryContext',
   'prompt',
   'stripFiles',
   'temperature',
@@ -76,6 +83,12 @@ export function filterProjectConfig(projectConfig, baseConfig = DEFAULT_CONFIG) 
       ignored.push(key);
       continue;
     }
+    if (key === 'repositoryContext') {
+      const filtered = filterProjectRepositoryContext(value, baseConfig.repositoryContext);
+      if (filtered.safe && Object.keys(filtered.safe).length) safe[key] = filtered.safe;
+      ignored.push(...filtered.ignored);
+      continue;
+    }
     if (
       PROJECT_CEILING_KEYS.has(key) &&
       typeof value === 'number' &&
@@ -103,6 +116,7 @@ export const DEFAULT_CONFIG = {
   // Versioned, structured rules replace the old hard-coded prompt contract.
   // A user prompt may add guidance, but cannot replace these constraints.
   commitPolicy: DEFAULT_COMMIT_POLICY,
+  repositoryContext: DEFAULT_REPOSITORY_CONTEXT,
   // Repository-owned prompt text is executable model guidance, so it is
   // ignored unless the user explicitly opts in from their home config.
   allowProjectPrompt: false,
@@ -171,6 +185,12 @@ function mergeConfig(base, override) {
   const merged = deepMerge(base, override);
   if (Object.hasOwn(override, 'commitPolicy')) {
     merged.commitPolicy = mergeCommitPolicy(base.commitPolicy, override.commitPolicy);
+  }
+  if (Object.hasOwn(override, 'repositoryContext')) {
+    merged.repositoryContext = mergeRepositoryContext(
+      base.repositoryContext,
+      override.repositoryContext,
+    );
   }
   return merged;
 }
@@ -265,6 +285,7 @@ export function validateConfig(config) {
     throw new Error('Invalid config "allowProjectPrompt": expected a boolean.');
   }
   validateCommitPolicyConfig(config.commitPolicy);
+  validateRepositoryContextConfig(config.repositoryContext);
 
   if (typeof config.apiKey !== 'string') {
     throw new Error(

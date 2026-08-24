@@ -47,6 +47,11 @@ import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
 import { configureMetrics, runMetricsCommand } from './metrics.js';
+import {
+  applyCommitlintPolicy,
+  collectRepositoryContext,
+  repositoryContextSummary,
+} from './context.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
@@ -566,6 +571,22 @@ export async function main() {
     const icon = statusIcon[status.charAt(0)] || status.charAt(0);
     console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
   }
+
+  const contextReport = collectRepositoryContext(
+    projectRoot,
+    changedFiles,
+    config.repositoryContext,
+  );
+  config.commitPolicy = applyCommitlintPolicy(
+    config.commitPolicy,
+    contextReport.constraints,
+    config.language,
+  );
+  config.repositoryContextText = contextReport.text;
+  warnings.push(...contextReport.warnings);
+  console.log(
+    '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
+  );
 
   // Protect common secrets before any repository content leaves the machine.
   // The protected diff affects only the model request, never the actual index.

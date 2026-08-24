@@ -143,11 +143,11 @@ export function validateCommitPolicyConfig(value) {
   }
   if (
     !Number.isInteger(value.subject.maxLength) ||
-    value.subject.maxLength < 10 ||
+    value.subject.maxLength < 1 ||
     value.subject.maxLength > 200
   ) {
     throw new Error(
-      'Invalid config "commitPolicy.subject.maxLength": expected an integer between 10 and 200.',
+      'Invalid config "commitPolicy.subject.maxLength": expected an integer between 1 and 200.',
     );
   }
 

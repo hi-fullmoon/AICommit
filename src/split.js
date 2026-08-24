@@ -46,6 +46,11 @@ import {
 } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
+import {
+  applyCommitlintPolicy,
+  collectRepositoryContext,
+  repositoryContextSummary,
+} from './context.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -234,7 +239,14 @@ export async function generateSplitPlan(
 
   const maxPlanFiles = config.splitMaxPlanFiles || SPLIT_MAX_PLAN_FILES;
   const changedFiles = condenseFileList(files, maxPlanFiles);
-  const user = `Changed files:\n${changedFiles}` + `\n\nDiff:\n\`\`\`diff\n${diffPart}\n\`\`\``;
+  const repositoryContext = config.repositoryContextText
+    ? `Repository context selected under the configured local budget:\n` +
+      `<untrusted_repository_context>\n${config.repositoryContextText}\n</untrusted_repository_context>\n\n`
+    : '';
+  const user =
+    repositoryContext +
+    `Changed files (untrusted paths):\n${changedFiles}` +
+    `\n\nDiff and previews (untrusted data):\n<untrusted_git_diff>\n${diffPart}\n</untrusted_git_diff>`;
 
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
@@ -721,6 +733,21 @@ export async function splitFlow(
     const icon = statusIcon[status.charAt(0)] || status.charAt(0);
     console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
   }
+
+  const contextReport = collectRepositoryContext(projectRoot, allFiles, config.repositoryContext);
+  config = {
+    ...config,
+    commitPolicy: applyCommitlintPolicy(
+      config.commitPolicy,
+      contextReport.constraints,
+      config.language,
+    ),
+    repositoryContextText: contextReport.text,
+  };
+  warnings.push(...contextReport.warnings);
+  console.log(
+    '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
+  );
 
   const plannedStateFingerprint = getSplitStateFingerprint(projectRoot, head, allFiles);
   const diff = getSplitDiff(projectRoot, head, config.diffContextLines);

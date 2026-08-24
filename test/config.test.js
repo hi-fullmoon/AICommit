@@ -190,3 +190,20 @@ test('validateConfig validates local metric settings', () => {
     /maxEntries/,
   );
 });
+
+test('validateConfig validates repository context budgets', () => {
+  assert.equal(validateConfig(cfg()).repositoryContext.enabled, true);
+  assert.throws(() => validateConfig(cfg({ repositoryContext: null })), /repositoryContext/);
+  assert.throws(
+    () =>
+      validateConfig(
+        cfg({
+          repositoryContext: {
+            ...DEFAULT_CONFIG.repositoryContext,
+            maxChars: 20001,
+          },
+        }),
+      ),
+    /repositoryContext\.maxChars/,
+  );
+});
