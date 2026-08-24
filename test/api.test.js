@@ -62,13 +62,18 @@ test('request layer refuses insecure non-loopback HTTP endpoints', async () => {
   );
 });
 
-test('system prompt carries the language directive exactly once, appended after the prompt', async () => {
+test('system prompt keeps custom guidance and carries the authoritative language exactly once', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
   await generateCommitMessage(cfg({ language: 'zh' }), diff);
   const sys = calls[0].messages.find((m) => m.role === 'system').content;
   const hits = sys.match(/Simplified Chinese/g) || [];
   assert.equal(hits.length, 1);
-  assert.ok(sys.startsWith('generate a commit message'), 'custom prompt first');
+  assert.match(sys, /User-approved custom guidance\ngenerate a commit message/);
+  assert.ok(
+    sys.indexOf('generate a commit message') <
+      sys.indexOf('AICommit authoritative output contract'),
+    'authoritative policy follows custom guidance',
+  );
 });
 
 test('user message repeats the language constraint after the diff', async () => {
@@ -161,7 +166,7 @@ test('reasoning follow-up does not re-send the original diff', async () => {
   assert.equal(followUp.find((m) => m.role === 'assistant').content, 'analyzing…\nfix: x\n');
   assert.ok(!followUp.some((m) => m.content.includes('Here is the git diff')), 'diff not re-sent');
   assert.equal(followUp.at(-1).role, 'user');
-  assert.match(followUp.at(-1).content, /output ONLY the final conventional commit message/);
+  assert.match(followUp.at(-1).content, /output ONLY the final commitPolicy v1 message/);
 });
 
 test('long reasoning trace is truncated to its tail for the follow-up', async () => {
@@ -403,10 +408,7 @@ test('empty corrective retry rejects the original invalid reply', async () => {
     { choices: [{ message: { content: 'Updated the login page styling.' } }] },
     { choices: [{ message: { content: null } }] },
   ]);
-  await assert.rejects(
-    () => generateCommitMessage(cfg(), diff),
-    /invalid conventional commit message/,
-  );
+  await assert.rejects(() => generateCommitMessage(cfg(), diff), /violates commitPolicy/);
   assert.equal(calls.length, 2);
 });
 

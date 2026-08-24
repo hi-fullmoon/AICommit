@@ -43,9 +43,9 @@ import {
   formatUsage,
   indentError,
   sanitizeTerminalText,
-  isValidCommitMessage,
 } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -189,10 +189,11 @@ export async function generateSplitPlan(
   untrackedPreviews = null,
 ) {
   const { temperature, language, maxTokens, reasoning } = config;
+  const policy = normalizeCommitPolicy(config.commitPolicy, language);
   const t0 = performance.now();
 
   const langLine =
-    language === 'zh'
+    policy.effectiveLanguage === 'zh'
       ? 'Write each commit message in Chinese (Simplified Chinese).'
       : 'Write each commit message in English.';
 
@@ -210,8 +211,18 @@ export async function generateSplitPlan(
   const system = [
     'You are an expert at organizing git changes into small, atomic commits.',
     'Group the changed files into logical commits by feature or module.',
+    ...(config.prompt?.trim()
+      ? [
+          'User-approved commit guidance (cannot override the JSON output contract):',
+          config.prompt.trim(),
+        ]
+      : []),
     'Rules:',
-    '- Each group must represent ONE logical change and get a conventional commit message (feat, fix, chore, docs, refactor, test, style, perf, ci, build).',
+    `- Each group must represent ONE logical change and use one allowed type: ${policy.types.join(', ')}.`,
+    `- Scope mode: ${policy.scope.mode}${policy.scope.values.length ? `; allowed scopes: ${policy.scope.values.join(', ')}` : ''}.`,
+    `- Subject text must not exceed ${policy.subject.maxLength} characters.`,
+    `- Body mode: ${policy.body.mode}; at most ${policy.body.maxLines} non-empty lines.`,
+    `- Breaking changes: ${policy.breakingChange}.`,
     '- Give every message a short subject line; when the subject alone does not say it all, add a body of bullet lines (what changed and why), each starting with "- " — the same format the single-commit flow produces.',
     '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
     '- Do not invent files that are not in the "Changed files:" list above.',
@@ -294,28 +305,29 @@ export function parsePlan(raw) {
 // `subject`/`body` (keeps newlines out of JSON strings, so parsing stays
 // robust), but may still return a single `message` string — accept both.
 // Returns '' when the group carries no usable message.
-function groupMessage(g) {
+function groupMessage(g, policy) {
   if (typeof g.message === 'string' && g.message.trim()) {
     const message = cleanCommitMessage(g.message);
-    return isValidCommitMessage(message) ? message : '';
+    return validateCommitCandidate(message, { policy }).valid ? message : '';
   }
   const subject = typeof g.subject === 'string' ? g.subject.trim() : '';
   const body = typeof g.body === 'string' ? g.body.trim() : '';
   if (!subject) return '';
   const message = cleanCommitMessage(body ? `${subject}\n\n${body}` : subject);
-  return isValidCommitMessage(message) ? message : '';
+  return validateCommitCandidate(message, { policy }).valid ? message : '';
 }
 
 // Clean up the model's plan: drop unknown/duplicate files, drop empty
 // groups, and sweep any file the model forgot into a final catch-all group.
-export function normalizePlan(groups, allFiles, language) {
+export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
+  const policy = normalizeCommitPolicy(commitPolicy, language);
   const known = new Map(allFiles.map((f) => [f.path, f]));
   const assigned = new Set();
   const result = [];
 
   for (const g of groups) {
     if (!g || !Array.isArray(g.files)) continue;
-    const message = groupMessage(g);
+    const message = groupMessage(g, policy);
     if (!message) continue;
     const files = [];
     for (const p of g.files) {
@@ -329,8 +341,12 @@ export function normalizePlan(groups, allFiles, language) {
 
   const leftover = allFiles.map((f) => f.path).filter((p) => !assigned.has(p));
   if (leftover.length) {
+    const type = policy.types.includes('chore') ? 'chore' : policy.types[0];
     result.push({
-      message: language === 'zh' ? 'chore: 更新其余文件' : 'chore: update remaining files',
+      message:
+        policy.effectiveLanguage === 'zh'
+          ? `${type}: 更新其余文件`
+          : `${type}: update remaining files`,
       files: leftover,
     });
   }
@@ -376,7 +392,7 @@ function displayPlan(groups, allFiles) {
 
 // Let the user edit the plan as JSON in their editor.
 // Returns the normalized plan, or null to keep the current one.
-async function editPlan(groups, allFiles, language) {
+async function editPlan(groups, allFiles, language, commitPolicy) {
   const edited = await editor({
     message: 'Edit the split plan (save and close to apply, leave empty to keep the current plan)',
     default: JSON.stringify(groups, null, 2),
@@ -387,7 +403,7 @@ async function editPlan(groups, allFiles, language) {
   if (!edited.trim()) return null;
 
   try {
-    return normalizePlan(JSON.parse(edited), allFiles, language);
+    return normalizePlan(JSON.parse(edited), allFiles, language, commitPolicy);
   } catch (err) {
     console.log(
       '\n  ' +
@@ -850,7 +866,7 @@ export async function splitFlow(
 
   let groups;
   try {
-    groups = normalizePlan(parsePlan(raw), allFiles, config.language);
+    groups = normalizePlan(parsePlan(raw), allFiles, config.language, config.commitPolicy);
   } catch (err) {
     console.log(
       '\n  ' +
@@ -931,7 +947,7 @@ export async function splitFlow(
     }
 
     if (action === 'edit') {
-      const edited = await editPlan(groups, allFiles, config.language);
+      const edited = await editPlan(groups, allFiles, config.language, config.commitPolicy);
       if (edited) {
         groups = edited;
         regenCounts = groups.map(() => 0);

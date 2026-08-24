@@ -1,6 +1,12 @@
-import { cleanCommitMessage, isValidCommitMessage } from './utils.js';
+import { cleanCommitMessage } from './utils.js';
 import { getProviderAdapter, normalizeUsage } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import {
+  buildCommitPolicyPrompt,
+  buildPolicyCorrectionPrompt,
+  normalizeCommitPolicy,
+  validateCommitCandidate,
+} from './policy.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -345,10 +351,6 @@ export async function checkConnection(config, stream = null) {
   };
 }
 
-// Conventional-commit prefix, matched anywhere in a line (not just at line
-// start), so "final answer: feat: x" is found as easily as "feat: x".
-const COMMIT_TYPE_RE = /\b(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)[\w]*[!:]/i;
-
 // Tail of reasoning sent back in a follow-up call. The conclusion lives at
 // the end; re-sending a whole trace (sometimes tens of thousands of tokens)
 // would be slow and expensive for no benefit.
@@ -369,41 +371,19 @@ function reasoningForFollowUp(config) {
   return getProviderAdapter(config).reasoningForFollowUp(config.reasoning);
 }
 
-// Strict first-line check that decides whether a corrective retry is
-// worthwhile: a conventional commit starts with a known type, an optional
-// scope, optional "!", then ": ". Weak models often return prose ("Updated
-// the login page") or a quoted message — both fail here and earn one retry.
-const CONVENTIONAL_SUBJECT_RE =
-  /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
-
-// Prompt for the corrective retry: the model already produced the right
-// content in the wrong shape, so the diff is NOT re-sent — reformatting the
-// bad reply is enough, and far cheaper than a second full-diff call.
-function correctivePrompt(badReply) {
-  return [
-    'Your previous reply was not a valid conventional commit message:',
-    '',
-    badReply.slice(0, 1000),
-    '',
-    'Rewrite it as a conventional commit message: first line "<type>: <subject>" ' +
-      '(type one of feat, fix, chore, docs, refactor, test, style, perf, ci, build), ' +
-      'then an optional body after a blank line. ' +
-      'Output ONLY the rewritten message — no explanation, no quotes, no code fences.',
-  ].join('\n');
-}
-
 // Prompt for a regenerate request: the model already saw the diff on the
 // first call and produced a message for it, so the diff is NOT re-sent —
 // rewording its own previous reply is enough, and far cheaper than resending
 // what can be tens of thousands of tokens (same trade-off as correctivePrompt).
-function regeneratePrompt(previousMessage) {
+function regeneratePrompt(previousMessage, policy) {
   return [
     'You previously generated this commit message for the change:',
     '',
     previousMessage.slice(0, 1000),
     '',
     'Generate a DIFFERENT commit message for the same change — different wording or emphasis. ' +
-      'Keep the conventional commit format: first line "<type>: <subject>", ' +
+      `Keep commitPolicy v${policy.version}; allowed types: ${policy.types.join(', ')}. ` +
+      'Use first line "<type>[optional scope][optional !]: <subject>", ' +
       'then an optional body after a blank line. ' +
       'Output ONLY the new message — no explanation, no quotes, no code fences.',
   ].join('\n');
@@ -436,10 +416,14 @@ function extractReasoning(msg0) {
 // Last-ditch extraction from raw reasoning text: prefer the first line that
 // carries a conventional-commit prefix, else fall back to the last non-empty
 // line.
-function extractFromReasoning(reasoning) {
+function extractFromReasoning(reasoning, policy) {
+  const typePattern = policy.types
+    .map((type) => type.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const commitType = new RegExp(`\\b(?:${typePattern})(?:\\([^()\\r\\n]+\\))?!?:\\s+\\S`, 'i');
   const lines = reasoning.split('\n');
   for (const line of lines) {
-    const idx = line.search(COMMIT_TYPE_RE);
+    const idx = line.search(commitType);
     if (idx !== -1) return line.slice(idx).trim();
   }
   const nonEmpty = lines.filter((l) => l.trim());
@@ -448,10 +432,13 @@ function extractFromReasoning(reasoning) {
 
 // Prompt for the follow-up call when a reasoning model returned only a
 // reasoning trace and no content.
-const FOLLOWUP_COMMIT_PROMPT =
-  'Based on your analysis above, output ONLY the final conventional commit message ' +
-  '(e.g. feat:, fix:, chore:, docs:, refactor:, test:, style:, perf:, ci:, build:). ' +
-  'Do not include any other text, explanation, or code fences.';
+function followupCommitPrompt(policy) {
+  return (
+    'Based on your analysis above, output ONLY the final commitPolicy v1 message. ' +
+    `Use one of these types: ${policy.types.join(', ')}. ` +
+    'Do not include any other text, explanation, or code fences.'
+  );
+}
 
 // Combine usage across every API call in one round. Reasoning models can
 // trigger a follow-up call (see getResponseText); summing both keeps the
@@ -595,22 +582,14 @@ export async function generateCommitMessage(
     regenerateWithDiff,
     reasoning: reasoningConfig,
   } = config;
+  const policy = normalizeCommitPolicy(config.commitPolicy, language);
   const t0 = performance.now();
   const outputTokenLimit =
     reasoningConfig?.mode === 'on'
       ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
       : maxTokens;
 
-  // Build the language directive — appended after the (possibly custom)
-  // prompt so it takes priority over conflicting language instructions in it.
-  // It must explicitly override the examples' language too: a custom prompt
-  // full of Chinese few-shot examples makes weak models mimic the examples'
-  // language over an abstract instruction.
-  const targetLang = language === 'zh' ? 'Simplified Chinese' : 'English';
-  const langHint =
-    `\n\nIMPORTANT: Write the ENTIRE commit message (subject AND body) in ${targetLang}, ` +
-    `regardless of the language used in any instructions or examples above — ` +
-    `examples show the format only, never the language.`;
+  const targetLang = policy.effectiveLanguage === 'zh' ? 'Simplified Chinese' : 'English';
 
   // Weak models weigh the end of the request most, so repeat the language
   // constraint after the diff where it can't be drowned out by the prompt.
@@ -625,7 +604,7 @@ export async function generateCommitMessage(
   const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
   let userContent;
   if (regenerateCount > 0 && previousMessage && !regenerateWithDiff) {
-    userContent = regeneratePrompt(previousMessage) + langReminder;
+    userContent = regeneratePrompt(previousMessage, policy) + langReminder;
   } else {
     const variationHint =
       regenerateCount > 0
@@ -636,7 +615,7 @@ export async function generateCommitMessage(
   }
 
   const messages = [
-    { role: 'system', content: prompt + langHint },
+    { role: 'system', content: buildCommitPolicyPrompt(policy, prompt) },
     { role: 'user', content: userContent },
   ];
 
@@ -650,7 +629,7 @@ export async function generateCommitMessage(
     messages,
     variedTemperature,
     outputTokenLimit,
-    FOLLOWUP_COMMIT_PROMPT,
+    followupCommitPrompt(policy),
     stream,
   );
   let usage = firstUsage;
@@ -659,20 +638,27 @@ export async function generateCommitMessage(
 
   // Last resort: extract a message from the reasoning content itself
   if (!message.trim() && reasoning) {
-    message = extractFromReasoning(reasoning);
+    message = extractFromReasoning(reasoning, policy);
   }
   message = cleanCommitMessage(message);
 
-  // Weak models sometimes answer with prose or a quoted message instead of a
-  // conventional commit. Give the model one cheap chance to reformat its own
-  // reply; keep whatever comes back — a non-empty reply beats nothing.
-  if (message.trim() && !CONVENTIONAL_SUBJECT_RE.test(message.split('\n', 1)[0])) {
+  // Validate against the versioned policy and give the provider exactly one
+  // cheap correction attempt. The diff is never re-sent: the prior reply plus
+  // concrete violations are sufficient to repair formatting and constraints.
+  let validation = validateCommitCandidate(message, { policy, diff });
+  if (message.trim() && validation.needsCorrection) {
     const retry = await getResponseText(
       config,
-      [messages[0], { role: 'user', content: correctivePrompt(message) }],
+      [
+        messages[0],
+        {
+          role: 'user',
+          content: buildPolicyCorrectionPrompt(message, validation.errors, policy),
+        },
+      ],
       variedTemperature,
       outputTokenLimit,
-      FOLLOWUP_COMMIT_PROMPT,
+      followupCommitPrompt(policy),
       stream,
     );
     const fixed = cleanCommitMessage(retry.text);
@@ -685,6 +671,7 @@ export async function generateCommitMessage(
     if (fixed.trim()) {
       message = fixed;
     }
+    validation = validateCommitCandidate(message, { policy, diff });
   }
 
   const elapsed = performance.now() - t0;
@@ -699,12 +686,19 @@ export async function generateCommitMessage(
     );
   }
 
-  if (!isValidCommitMessage(message)) {
+  if (!validation.valid) {
+    const details = validation.errors.map((item) => item.message).join(' ');
     throw new Error(
-      'API returned an invalid conventional commit message after the corrective retry. ' +
-        'Retry generation or edit the provider/prompt configuration.',
+      'API returned a commit message that violates commitPolicy after the corrective retry. ' +
+        details,
     );
   }
 
-  return { message: cleanCommitMessage(message), elapsed, usage, reasoning };
+  return {
+    message: cleanCommitMessage(message),
+    elapsed,
+    usage,
+    reasoning,
+    qualityWarnings: validation.warnings.map((item) => item.message),
+  };
 }

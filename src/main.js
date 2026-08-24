@@ -139,6 +139,9 @@ export async function main() {
       `Invalid language: "${config.language}". Use "zh" or "en".`,
     );
   }
+  if (cliLang) {
+    config.commitPolicy = { ...config.commitPolicy, language: cliLang };
+  }
 
   if (cliReasoning === 'off') {
     config.reasoning = { ...config.reasoning, mode: 'off' };
@@ -622,7 +625,7 @@ export async function main() {
   }
   // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
-  let message, elapsed, usage, reasoningText;
+  let message, elapsed, usage, reasoningText, qualityWarnings;
   let regenerateCount = 0;
   let wasEdited = false;
 
@@ -664,11 +667,16 @@ export async function main() {
         elapsed,
         usage,
         reasoning: reasoningText,
+        qualityWarnings,
       } = await generateCommitMessage(config, modelDiff, regenerateCount, message, stream));
       if (liveReasoning) await liveReasoning.stop();
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
       spinner.succeed(done);
+      for (const warning of qualityWarnings || []) {
+        if (!warnings.includes(warning)) warnings.push(warning);
+        console.log('  ' + chalk.yellow(`⚠ Quality check: ${sanitizeTerminalText(warning)}`));
+      }
     } catch (err) {
       if (liveReasoning) await liveReasoning.stop();
       spinner.fail(chalk.red('API call failed'));

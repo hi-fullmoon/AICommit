@@ -9,6 +9,7 @@ import { fileExists, deepMerge } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { resolveCredential } from './credentials.js';
 import { DEFAULT_METRICS } from './metrics.js';
+import { DEFAULT_COMMIT_POLICY, mergeCommitPolicy, validateCommitPolicyConfig } from './policy.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -26,10 +27,12 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'retry',
   'credentialHelper',
   'metrics',
+  'allowProjectPrompt',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
   'language',
+  'commitPolicy',
   'prompt',
   'stripFiles',
   'temperature',
@@ -66,7 +69,9 @@ export function filterProjectConfig(projectConfig, baseConfig = DEFAULT_CONFIG) 
     }
     if (
       key === 'prompt' &&
-      (typeof value !== 'string' || value.length > MAX_PROJECT_PROMPT_CHARS)
+      (!baseConfig.allowProjectPrompt ||
+        typeof value !== 'string' ||
+        value.length > MAX_PROJECT_PROMPT_CHARS)
     ) {
       ignored.push(key);
       continue;
@@ -95,6 +100,12 @@ export const DEFAULT_CONFIG = {
   providerType: '',
   temperature: 0.3,
   language: 'zh', // 'zh' = Chinese, 'en' = English
+  // Versioned, structured rules replace the old hard-coded prompt contract.
+  // A user prompt may add guidance, but cannot replace these constraints.
+  commitPolicy: DEFAULT_COMMIT_POLICY,
+  // Repository-owned prompt text is executable model guidance, so it is
+  // ignored unless the user explicitly opts in from their home config.
+  allowProjectPrompt: false,
   maxTokens: 1024,
   // Per-request timeout in milliseconds — a hung endpoint aborts with a clear
   // error instead of leaving the spinner running forever.
@@ -152,38 +163,17 @@ export const DEFAULT_CONFIG = {
     maxTokens: 4096,
     maxDisplayChars: 12000,
   },
-  // Compact rules + one few-shot example: explicit rules and a concrete
-  // example steer models far more reliably than abstract prose, and the
-  // prompt is sent on every call — every token here is paid per request.
-  prompt: [
-    'You are a git commit message generator. Write ONE commit message for the git diff the user provides.',
-    '',
-    '## Output contract (highest priority)',
-    '',
-    '- Output ONLY the commit message itself: no reasoning, no explanation, no quotes, no markdown code fences.',
-    '- The first character of your reply must be the first letter of the type (e.g. "f" for feat).',
-    '',
-    '## Format',
-    '',
-    '<type>: <short subject>',
-    '',
-    '- <change point 1>',
-    '- <change point 2>',
-    '',
-    '- Types: feat (new feature), fix (bug fix), chore (build/deps/config), refactor, style, docs, test, perf, ci, build.',
-    '- The subject line is required (max 50 characters); after a blank line you may add bullet points starting with "- ". Omit them when the subject says it all.',
-    '- If the diff contains several independent changes: pick the type and subject from the most important change, and list the rest as bullet points.',
-    '- Never use empty filler wording like "updated the code" or "made many changes" that carries no information.',
-    '',
-    '## Example',
-    '',
-    'feat: set up system menu routes and page structure',
-    '',
-    '- add 19 page directories and base components across 7 modules',
-    '- configure routes in config/routes.ts',
-    '- add src/config/menu.ts menu config, wired into BasicLayout',
-  ].join('\n'),
+  // Optional user-approved guidance appended to the structured policy.
+  prompt: '',
 };
+
+function mergeConfig(base, override) {
+  const merged = deepMerge(base, override);
+  if (Object.hasOwn(override, 'commitPolicy')) {
+    merged.commitPolicy = mergeCommitPolicy(base.commitPolicy, override.commitPolicy);
+  }
+  return merged;
+}
 
 // Resolve the final flat config from a merged config that may contain a
 // "providers" map: pick `cliProvider` → config.defaultProvider → first
@@ -214,7 +204,7 @@ function resolveProvider(config, cliProvider) {
     );
   }
 
-  const resolved = deepMerge(config, providers[name]);
+  const resolved = mergeConfig(config, providers[name]);
   delete resolved.providers;
   delete resolved.defaultProvider;
   return { config: resolved, providerName: name };
@@ -268,7 +258,13 @@ function assertNumber(config, key, { integer = false, min = -Infinity, max = Inf
 export function validateConfig(config) {
   assertUrl(config, 'apiUrl');
   assertString(config, 'modelId');
-  assertString(config, 'prompt');
+  if (typeof config.prompt !== 'string' || config.prompt.length > 100_000) {
+    throw new Error('Invalid config "prompt": expected a string of at most 100000 characters.');
+  }
+  if (typeof config.allowProjectPrompt !== 'boolean') {
+    throw new Error('Invalid config "allowProjectPrompt": expected a boolean.');
+  }
+  validateCommitPolicyConfig(config.commitPolicy);
 
   if (typeof config.apiKey !== 'string') {
     throw new Error(
@@ -426,7 +422,7 @@ export async function loadConfig(cliProvider = null) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error(`Failed to parse user config ${userPath}: expected a JSON object.`);
     }
-    config = deepMerge(config, parsed);
+    config = mergeConfig(config, parsed);
     loaded.push('user');
     // Tighten loose permissions on config files that actually hold a key
     // (a hand-created or older 0644 file would otherwise expose it).
@@ -442,7 +438,7 @@ export async function loadConfig(cliProvider = null) {
       throw new Error(`Failed to parse project config ${projectPath}: ${err.message}`);
     }
     const { safe, ignored } = filterProjectConfig(parsed, config);
-    config = deepMerge(config, safe);
+    config = mergeConfig(config, safe);
     loaded.push('project');
     if (ignored.length) {
       console.error(
