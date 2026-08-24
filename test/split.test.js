@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import {
   normalizePlan,
   getAllChangedFiles,
+  getStagedChangedFiles,
   executeSplit,
   condenseFileList,
   parsePlan,
@@ -316,6 +317,31 @@ test('unborn split diff includes edits made after a file was staged', (t) => {
   assert.match(diff, /\+working version/);
 });
 
+test('staged split scope excludes unstaged content and untracked files', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'app.txt'), 'base\n');
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'staged\n');
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'unstaged\n');
+  writeFileSync(join(repo, 'untracked.txt'), 'outside\n');
+
+  assert.deepEqual(getStagedChangedFiles(repo), [
+    { status: 'M', path: 'app.txt', addPaths: ['app.txt'] },
+  ]);
+  const diff = getSplitDiff(repo, true, 1, 'staged');
+  assert.match(diff, /\+staged/);
+  assert.doesNotMatch(diff, /unstaged|untracked/);
+
+  const before = getSplitStateFingerprint(repo, true, undefined, 'staged');
+  writeFileSync(join(repo, 'app.txt'), 'newer unstaged\n');
+  assert.equal(getSplitStateFingerprint(repo, true, undefined, 'staged'), before);
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  assert.notEqual(getSplitStateFingerprint(repo, true, undefined, 'staged'), before);
+});
+
 test('split state fingerprint detects changes to untracked file content', (t) => {
   const repo = makeRepo();
   t.after(() => rmSync(repo, { recursive: true, force: true }));
@@ -381,4 +407,30 @@ test('executeSplit commits a rename as one unit (both paths)', (t) => {
     .split('\n')
     .sort();
   assert.deepEqual(tracked, ['new.txt']);
+});
+
+test('executeSplit staged scope commits index blobs and preserves newer worktree edits', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'app.txt'), 'base\n');
+  writeFileSync(join(repo, 'extra.txt'), 'base\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'staged\n');
+  writeFileSync(join(repo, 'extra.txt'), 'staged extra\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'unstaged\n');
+
+  const files = getStagedChangedFiles(repo);
+  const groups = [
+    { message: 'fix: stage app snapshot', files: ['app.txt'] },
+    { message: 'feat: stage extra snapshot', files: ['extra.txt'] },
+  ];
+  assert.equal(executeSplit(groups, repo, files, false, 'staged'), true);
+  assert.equal(
+    execFileSync('git', ['show', 'HEAD:app.txt'], { cwd: repo, encoding: 'utf8' }),
+    'staged\n',
+  );
+  assert.equal(execFileSync('git', ['diff', '--cached'], { cwd: repo, encoding: 'utf8' }), '');
+  assert.match(execFileSync('git', ['diff'], { cwd: repo, encoding: 'utf8' }), /\+unstaged/);
 });

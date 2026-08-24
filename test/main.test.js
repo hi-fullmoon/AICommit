@@ -266,6 +266,60 @@ test('single-file --split=all --yes keeps split semantics and stages the worktre
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
+test('--split=staged commits the index snapshot and leaves newer worktree edits unstaged', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-staged-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
+  git(repo, ['add', 'extra.js']);
+  writeFileSync(join(repo, 'app.js'), 'export const value = 3;\n');
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  { subject: 'fix: commit staged app snapshot', files: ['app.js'] },
+                  { subject: 'feat: add staged extra module', files: ['extra.js'] },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['--split=staged', '--yes', '--no-reasoning']);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /split scope: staged/);
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '3');
+  assert.equal(git(repo, ['show', 'HEAD:app.js']), 'export const value = 2;\n');
+  assert.equal(readFileSync(join(repo, 'app.js'), 'utf8'), 'export const value = 3;\n');
+  assert.equal(git(repo, ['diff', '--cached']).trim(), '');
+  assert.match(git(repo, ['diff']), /\+export const value = 3/);
+  assert.match(git(repo, ['status', '--porcelain']), /^ M app\.js$/m);
+});
+
 test('--split=all --yes scans complete untracked files before auto-staging', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-sensitive-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

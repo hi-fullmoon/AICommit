@@ -171,12 +171,7 @@ export function getSplitDiff(projectRoot, head, contextLines, scope = 'all', pat
 // Fingerprint every tracked patch plus untracked file bytes. Split planning
 // can spend minutes in the model/review loop; before execution we must ensure
 // it still describes the exact worktree state that will be staged.
-export function getSplitStateFingerprint(
-  projectRoot,
-  head,
-  files,
-  scope = 'all',
-) {
+export function getSplitStateFingerprint(projectRoot, head, files, scope = 'all') {
   const hash = createHash('sha256');
   if (scope === 'staged') {
     hash.update(head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : '<unborn>');
@@ -713,7 +708,12 @@ function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
     execFileSync('git', args, {
       cwd: projectRoot,
       env: { ...process.env, GIT_INDEX_FILE: indexPath },
-      stdio: inherit === 'stderr' ? [process.stdin, process.stderr, process.stderr] : inherit ? 'inherit' : 'pipe',
+      stdio:
+        inherit === 'stderr'
+          ? [process.stdin, process.stderr, process.stderr]
+          : inherit
+            ? 'inherit'
+            : 'pipe',
     });
   } catch (err) {
     const detail = err.stderr?.toString('utf8').trim();
@@ -723,7 +723,8 @@ function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
 
 function resetCommittedPaths(projectRoot, groups, allFiles) {
   const paths = [...new Set(groups.flatMap((group) => expandPaths(group.files, allFiles)))];
-  if (paths.length && hasHead(projectRoot)) runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
+  if (paths.length && hasHead(projectRoot))
+    runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
 }
 
 // Commit the exact index snapshot through a temporary index. This preserves
@@ -745,7 +746,11 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
       );
       try {
         rmSync(indexPath, { force: true });
-        runGitWithIndex(hasHead(projectRoot) ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'], projectRoot, indexPath);
+        runGitWithIndex(
+          hasHead(projectRoot) ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'],
+          projectRoot,
+          indexPath,
+        );
         for (const path of expandPaths(group.files, allFiles)) {
           const entry = snapshot.get(path);
           if (entry) {
@@ -758,17 +763,26 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
             runGitWithIndex(['update-index', '--force-remove', '--', path], projectRoot, indexPath);
           }
         }
-        runGitWithIndex(['commit', '-m', group.message], projectRoot, indexPath, diagnosticsOnly ? 'stderr' : true);
+        runGitWithIndex(
+          ['commit', '-m', group.message],
+          projectRoot,
+          indexPath,
+          diagnosticsOnly ? 'stderr' : true,
+        );
         completed.push(group);
         resetCommittedPaths(projectRoot, [group], allFiles);
       } catch (err) {
         console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
         console.log('  ' + chalk.red(sanitizeTerminalText(err.message)));
-        console.log(chalk.dim(`  ${completed.length} commit(s) already made. Remaining groups stay staged:`));
+        console.log(
+          chalk.dim(`  ${completed.length} commit(s) already made. Remaining groups stay staged:`),
+        );
         for (let j = i; j < groups.length; j++) {
           console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
         }
-        console.log(chalk.dim('  Resolve the issue; checkpoint/resume support arrives in this v1.3 stage.\n'));
+        console.log(
+          chalk.dim('  Resolve the issue; checkpoint/resume support arrives in this v1.3 stage.\n'),
+        );
         return false;
       }
     }
@@ -1172,8 +1186,7 @@ export async function splitFlow(
           ? protectSensitiveDiff(rawGroupDiff).diff
           : rawGroupDiff;
         if (
-          getSplitStateFingerprint(projectRoot, head, undefined, scope) !==
-          plannedStateFingerprint
+          getSplitStateFingerprint(projectRoot, head, undefined, scope) !== plannedStateFingerprint
         ) {
           console.log(
             '\n  ' +
@@ -1181,9 +1194,7 @@ export async function splitFlow(
                 '✗ The working tree changed after split planning; message regeneration aborted.',
               ),
           );
-          console.log(
-            chalk.dim(`  Review the changes and run aicommit --split=${scope} again.\n`),
-          );
+          console.log(chalk.dim(`  Review the changes and run aicommit --split=${scope} again.\n`));
           throw fail(
             ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
             'The working tree changed after split planning; message regeneration aborted.',
@@ -1263,9 +1274,7 @@ export async function splitFlow(
     };
   }
 
-  if (
-    getSplitStateFingerprint(projectRoot, head, undefined, scope) !== plannedStateFingerprint
-  ) {
+  if (getSplitStateFingerprint(projectRoot, head, undefined, scope) !== plannedStateFingerprint) {
     console.log(
       '\n  ' +
         chalk.red('✗ The working tree changed after split planning; no commits were created.'),

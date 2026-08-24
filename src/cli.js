@@ -185,10 +185,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     if (arg.startsWith('--split=')) {
       split = arg.slice('--split='.length);
       if (!['staged', 'all'].includes(split)) {
-        throw fail(
-          ERROR_CATEGORIES.CONFIG,
-          `Invalid split scope: "${split}". Use staged or all.`,
-        );
+        throw fail(ERROR_CATEGORIES.CONFIG, `Invalid split scope: "${split}". Use staged or all.`);
       }
       continue;
     }
