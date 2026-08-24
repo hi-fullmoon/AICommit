@@ -320,6 +320,101 @@ test('--split=staged commits the index snapshot and leaves newer worktree edits 
   assert.match(git(repo, ['status', '--porcelain']), /^ M app\.js$/m);
 });
 
+test('experimental hunk plan/apply creates lossless same-file commits without provider reuse', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-hunks-e2e-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  git(repo, ['reset', '--hard', '-q', 'HEAD']);
+  const original = Array.from(
+    { length: 30 },
+    (_, index) => `export const value${index + 1} = ${index + 1};`,
+  );
+  writeFileSync(join(repo, 'app.js'), original.join('\n') + '\n');
+  git(repo, ['add', 'app.js']);
+  git(repo, ['commit', '-qm', 'build baseline']);
+  const changed = [...original];
+  changed[1] = 'export const firstFeature = true;';
+  changed[26] = 'export const secondFeature = true;';
+  writeFileSync(join(repo, 'app.js'), changed.join('\n') + '\n');
+
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      assert.match(body, /H1/);
+      assert.match(body, /H2/);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  {
+                    subject: 'feat: add first feature',
+                    files: [],
+                    hunks: [{ path: 'app.js', ids: ['H1'] }],
+                  },
+                  {
+                    subject: 'feat: add second feature',
+                    files: [],
+                    hunks: [{ path: 'app.js', ids: ['H2'] }],
+                  },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  const configPath = join(home, '.aicommit.config.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const planPath = join(root, 'hunk-plan.json');
+  const planned = await runCli(repo, home, [
+    'split',
+    'plan',
+    '--scope=all',
+    '--split-hunks',
+    `--file=${planPath}`,
+    '--yes',
+    '--no-reasoning',
+  ]);
+  assert.equal(planned.code, 0, planned.stdout + planned.stderr);
+  assert.match(planned.stdout, /\[H1\]/);
+  assert.match(planned.stdout, /\[H2\]/);
+  const artifact = JSON.parse(readFileSync(planPath, 'utf8'));
+  assert.equal(artifact.hunkMode, true);
+  assert.equal(artifact.groups[0].hunks[0].ids[0], 'H1');
+  assert.doesNotMatch(JSON.stringify(artifact), /firstFeature|secondFeature|diff --git/);
+
+  rmSync(configPath);
+  const applied = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
+  assert.equal(applied.code, 0, applied.stdout + applied.stderr);
+  const firstCommit = git(repo, ['show', 'HEAD~1:app.js']);
+  assert.match(firstCommit, /firstFeature/);
+  assert.doesNotMatch(firstCommit, /secondFeature/);
+  assert.equal(git(repo, ['show', 'HEAD:app.js']), changed.join('\n') + '\n');
+  assert.equal(git(repo, ['status', '--porcelain']), '');
+});
+
 test('split plan exports JSON and split apply commits it without provider configuration', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-apply-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

@@ -88,6 +88,75 @@ test('split plan validation rejects empty, duplicate, unknown, unsafe, and non-p
   );
 });
 
+test('split plan validates complete, unique hunk assignments without storing patch content', () => {
+  const hunk = (id, line, hash) => ({
+    id,
+    hash: hash.repeat(64),
+    oldStart: line,
+    oldLines: 1,
+    newStart: line,
+    newLines: 1,
+  });
+  const plan = validPlan({
+    hunkMode: true,
+    changes: [
+      {
+        status: 'M',
+        path: 'src/app.js',
+        addPaths: ['src/app.js'],
+        hunks: [hunk('H1', 1, 'a'), hunk('H2', 20, 'b')],
+      },
+      { status: 'A', path: 'test/app.test.js', addPaths: ['test/app.test.js'] },
+    ],
+    groups: [
+      {
+        message: 'fix: update first app path',
+        files: [],
+        hunks: [{ path: 'src/app.js', ids: ['H1'] }],
+      },
+      {
+        message: 'feat: update second app path',
+        files: ['test/app.test.js'],
+        hunks: [{ path: 'src/app.js', ids: ['H2'] }],
+      },
+    ],
+  });
+  assert.equal(plan.hunkMode, true);
+  assert.deepEqual(plan.groups[0].hunks[0].ids, ['H1']);
+  assert.doesNotMatch(JSON.stringify(plan), /patch|diff --git/);
+
+  assert.throws(
+    () =>
+      validateSplitPlanArtifact({
+        ...plan,
+        groups: [
+          ...plan.groups,
+          {
+            message: 'fix: duplicate hunk',
+            files: [],
+            hunks: [{ path: 'src/app.js', ids: ['H1'] }],
+          },
+        ],
+      }),
+    /more than once/,
+  );
+  assert.throws(
+    () =>
+      validateSplitPlanArtifact({
+        ...plan,
+        groups: [
+          {
+            message: 'fix: incomplete hunks',
+            files: [],
+            hunks: [{ path: 'src/app.js', ids: ['H1'] }],
+          },
+          { message: 'test: keep tests', files: ['test/app.test.js'] },
+        ],
+      }),
+    /leaves paths unassigned/,
+  );
+});
+
 test('split plan reader rejects symbolic links', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-plan-symlink-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

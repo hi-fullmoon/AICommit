@@ -52,6 +52,29 @@ test('parseArgs recognizes split plan/apply artifact commands', () => {
   );
 });
 
+test('parseArgs keeps experimental hunk splitting opt-in and scoped to planning', () => {
+  assert.equal(parseArgs(['--split=staged']).splitHunks, false);
+  const direct = parseArgs(['--split=all', '--split-hunks']);
+  assert.equal(direct.splitHunks, true);
+  const exported = parseArgs([
+    'split',
+    'plan',
+    '--scope=staged',
+    '--split-hunks',
+    '--file=plan.json',
+  ]);
+  assert.equal(exported.splitHunks, true);
+  assert.throws(() => parseArgs(['--split-hunks']), /requires --split/);
+  assert.throws(
+    () => parseArgs(['split', 'apply', '--file=plan.json', '--split-hunks']),
+    /requires --split/,
+  );
+  assert.throws(
+    () => parseArgs(['split', '--resume', '--split-hunks']),
+    /requires --split|accepts only/,
+  );
+});
+
 test('parseArgs keeps dry-run disabled by default and for setup', () => {
   assert.equal(parseArgs([]).dryRun, false);
   assert.equal(parseArgs(['setup']).dryRun, false);

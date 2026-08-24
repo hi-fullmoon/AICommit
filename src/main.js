@@ -64,6 +64,7 @@ export async function main() {
     output,
     debug,
     split,
+    splitHunks,
     splitCommand,
     splitPlanFile,
     dryRun,
@@ -324,6 +325,7 @@ export async function main() {
       machineOutput,
       provider: selectedProvider,
       exportPlanPath: splitCommand === 'plan' ? splitPlanFile : null,
+      splitHunks,
     });
     if (handled) return handled === true ? { exitReason: 'success' } : handled;
     // Only one changed file — continue with the normal single-commit flow.

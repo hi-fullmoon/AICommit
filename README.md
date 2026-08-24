@@ -180,6 +180,7 @@ aicommit /path/to/repo   # or a target directory
 aicommit --split         # choose staged/all scope, then split logical commits
 aicommit --split=staged  # split only the reviewed index snapshot
 aicommit --split=all     # split the complete working-tree snapshot
+aicommit --split=staged --split-hunks # experimental same-file hunk splitting
 aicommit --dry-run       # generate and review without creating a commit
 aicommit --split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
@@ -203,6 +204,7 @@ aicommit -h              # help
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                               |
 | `-p`, `--provider` | Use the named provider from `providers`                                                              |
 | `-s`, `--split`    | Choose a scope and split changes; use `--split=staged\|all` to select it explicitly                  |
+| `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default                             |
 | `--scope`          | `staged` or `all` scope for `aicommit split plan`                                                    |
 | `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`                                  |
 | `--dry-run`        | Generate and review a message or split plan without creating commits                                 |
@@ -293,7 +295,7 @@ For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<
 
 Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split --resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
 
-Current split behavior is file-level: one file cannot yet be divided across multiple commits.
+Split remains file-level by default. `--split-hunks` opts in to experimental same-file splitting for tracked text modifications with multiple unified-diff hunks. The JSON plan and checkpoint store only hunk IDs, line ranges, and hashes—not patch content. Before the first commit, AICommit applies every selected patch to a temporary index and requires the final tree to reproduce the captured target blobs exactly; parsing, patching, binary/mode-change, or lossless-validation failures fall back to a file-level plan. The worktree is never modified by hunk execution.
 
 ## Development and releases
 

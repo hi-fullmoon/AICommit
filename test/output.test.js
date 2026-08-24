@@ -83,6 +83,27 @@ test('machine plan output exposes only messages and file assignments', () => {
   assert.deepEqual(output.plan, [{ message: 'fix: first', files: ['a.js'] }]);
 });
 
+test('machine plan output exposes hunk identifiers without patch content', () => {
+  const output = successOutput({
+    plan: [
+      {
+        message: 'fix: selected hunk',
+        files: [],
+        hunks: [{ path: 'app.js', ids: ['H1'] }],
+        patch: 'private code',
+      },
+    ],
+  });
+  assert.deepEqual(output.plan, [
+    {
+      message: 'fix: selected hunk',
+      files: [],
+      hunks: [{ path: 'app.js', ids: ['H1'] }],
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(output), /private code|patch/);
+});
+
 test('error classification has stable categories and exit codes', () => {
   const cases = [
     [new Error('Invalid config "apiUrl"'), ERROR_CATEGORIES.CONFIG, 2],

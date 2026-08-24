@@ -67,6 +67,12 @@ import {
   removeSplitCheckpoint,
   writeSplitCheckpoint,
 } from './split-checkpoint.js';
+import {
+  discoverSplitHunks,
+  fallbackHunkGroups,
+  stripHunkCatalog,
+  validateHunkTransaction,
+} from './split-hunks.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -128,7 +134,16 @@ function safeExportPlanPath(projectRoot, path) {
 export function condenseFileList(files, cap = SPLIT_MAX_PLAN_FILES) {
   const shown = files.slice(0, cap);
   const hidden = files.length - shown.length;
-  const list = shown.map((f) => `${f.status} ${f.path}`).join('\n');
+  const list = shown
+    .map((f) => {
+      const hunks = f.hunks?.length
+        ? ` [hunks: ${f.hunks
+            .map((hunk) => `${hunk.id}(-${hunk.oldStart},+${hunk.newStart})`)
+            .join(', ')}]`
+        : '';
+      return `${f.status} ${f.path}${hunks}`;
+    })
+    .join('\n');
   if (hidden <= 0) return list;
   return `${list}\n... and ${hidden} more files (not shown — they will be collected into a final catch-all commit)`;
 }
@@ -291,6 +306,7 @@ export async function generateSplitPlan(
       : 'Write each commit message in English.';
 
   const maxDiffChars = config.splitMaxDiffChars || SPLIT_MAX_DIFF_CHARS;
+  const hunkMode = files.some((file) => file.hunks?.length);
   const diffPart = buildSplitPlanningContext(
     projectRoot,
     files,
@@ -318,11 +334,17 @@ export async function generateSplitPlan(
     `- Breaking changes: ${policy.breakingChange}.`,
     '- Give every message a short subject line; when the subject alone does not say it all, add a body of bullet lines (what changed and why), each starting with "- " — the same format the single-commit flow produces.',
     '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
+    ...(hunkMode
+      ? [
+          '- Experimental hunk mode is enabled. A file annotated with hunk IDs may either stay whole in "files", or its IDs may be assigned across groups with "hunks":[{"path":"app.js","ids":["H1"]}].',
+          '- If a file uses "hunks", assign every listed hunk ID exactly once and do not also put that path in "files".',
+        ]
+      : []),
     '- Do not invent files that are not in the "Changed files:" list above.',
     '- Prefer a few coherent groups over many tiny ones; use a single group if the changes are one logical unit.',
     '- Keep the JSON compact. The "body" field is optional and, when useful, must contain at most two short bullet lines.',
     '- ' + langLine,
-    '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"- add a login form\\n- add session handling","files":["a.js"]}], no markdown fences, no explanation. Newlines inside "body" are JSON-escaped (\\n).',
+    '- Output ONLY a JSON array like [{"subject":"feat: add login","body":"- add a login form\\n- add session handling","files":["a.js"]}], no markdown fences, no explanation. Groups that contain only hunk assignments use an empty "files" array. Newlines inside "body" are JSON-escaped (\\n).',
   ].join('\n');
 
   const maxPlanFiles = config.splitMaxPlanFiles || SPLIT_MAX_PLAN_FILES;
@@ -423,32 +445,72 @@ function groupMessage(g, policy) {
 export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
   const policy = normalizeCommitPolicy(commitPolicy, language);
   const known = new Map(allFiles.map((f) => [f.path, f]));
-  const assigned = new Set();
+  const assignedFiles = new Set();
+  const assignedHunks = new Set();
   const result = [];
 
   for (const g of groups) {
-    if (!g || !Array.isArray(g.files)) continue;
+    if (!g || (!Array.isArray(g.files) && !Array.isArray(g.hunks))) continue;
     const message = groupMessage(g, policy);
     if (!message) continue;
     const files = [];
-    for (const p of g.files) {
-      if (known.has(p) && !assigned.has(p)) {
-        assigned.add(p);
+    for (const p of g.files || []) {
+      if (known.has(p) && !assignedFiles.has(p) && !assignedHunks.has(`${p}\0*`)) {
+        assignedFiles.add(p);
         files.push(p);
       }
     }
-    if (files.length) result.push({ message, files });
+    const hunks = [];
+    for (const assignment of g.hunks || []) {
+      const change = known.get(assignment?.path);
+      if (
+        !change?.hunks?.length ||
+        assignedFiles.has(assignment.path) ||
+        !Array.isArray(assignment.ids)
+      ) {
+        continue;
+      }
+      const allowed = new Set(change.hunks.map((hunk) => hunk.id));
+      const ids = [];
+      for (const id of assignment.ids) {
+        const key = `${assignment.path}\0${id}`;
+        if (allowed.has(id) && !assignedHunks.has(key)) {
+          assignedHunks.add(key);
+          ids.push(id);
+        }
+      }
+      if (ids.length) {
+        assignedHunks.add(`${assignment.path}\0*`);
+        hunks.push({ path: assignment.path, ids });
+      }
+    }
+    if (files.length || hunks.length) {
+      result.push({ message, files, ...(hunks.length ? { hunks } : {}) });
+    }
   }
 
-  const leftover = allFiles.map((f) => f.path).filter((p) => !assigned.has(p));
-  if (leftover.length) {
+  const leftoverFiles = [];
+  const leftoverHunks = [];
+  for (const change of allFiles) {
+    if (assignedFiles.has(change.path)) continue;
+    if (!change.hunks?.length) {
+      leftoverFiles.push(change.path);
+      continue;
+    }
+    const ids = change.hunks
+      .map((hunk) => hunk.id)
+      .filter((id) => !assignedHunks.has(`${change.path}\0${id}`));
+    if (ids.length) leftoverHunks.push({ path: change.path, ids });
+  }
+  if (leftoverFiles.length || leftoverHunks.length) {
     const type = policy.types.includes('chore') ? 'chore' : policy.types[0];
     result.push({
       message:
         policy.effectiveLanguage === 'zh'
           ? `${type}: 更新其余文件`
           : `${type}: update remaining files`,
-      files: leftover,
+      files: leftoverFiles,
+      ...(leftoverHunks.length ? { hunks: leftoverHunks } : {}),
     });
   }
 
@@ -470,6 +532,14 @@ function expandPaths(groupFiles, allFiles) {
   return out;
 }
 
+function groupDisplayPaths(group) {
+  return [...new Set([...group.files, ...(group.hunks || []).map((entry) => entry.path)])];
+}
+
+function expandGroupPaths(group, allFiles) {
+  return expandPaths(groupDisplayPaths(group), allFiles);
+}
+
 export function displayPlan(groups, allFiles) {
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
   console.log(
@@ -486,6 +556,12 @@ export function displayPlan(groups, allFiles) {
       const c = statusColor[status] || chalk.dim;
       const icon = statusIcon[status] || status;
       console.log(`     ${c(icon)} ${c(sanitizeTerminalText(p))}`);
+    }
+    for (const assignment of g.hunks || []) {
+      console.log(
+        `     ${chalk.magenta('≈')} ${chalk.magenta(sanitizeTerminalText(assignment.path))}` +
+          chalk.dim(`  [${assignment.ids.join(', ')}]`),
+      );
     }
   });
   console.log('');
@@ -712,13 +788,13 @@ function getGroupDiff(
   protectPreviews = false,
   untrackedPreviews = null,
 ) {
-  const addPaths = expandPaths(group.files, allFiles);
+  const addPaths = expandGroupPaths(group, allFiles);
   const diff = getSplitDiff(projectRoot, head, contextLines, scope, addPaths);
   if (diff) return stripLockFileContent(diff, stripGlobs);
 
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
   const parts = [];
-  for (const p of group.files) {
+  for (const p of groupDisplayPaths(group)) {
     const status = byPath.get(p)?.status || '?';
     parts.push(`${status} ${p}`);
     if (
@@ -845,20 +921,58 @@ export function preflightSplit(groups, projectRoot, allFiles, scope = 'all') {
     }
   }
 
-  const assigned = new Set();
+  const assignedFiles = new Set();
+  const assignedHunks = new Set();
   for (const [index, group] of groups.entries()) {
     if (!group?.message?.trim()) throw new Error(`Split group ${index + 1} has no message.`);
-    if (!Array.isArray(group.files) || !group.files.length) {
+    if (
+      !Array.isArray(group.files) ||
+      (group.hunks !== undefined && !Array.isArray(group.hunks)) ||
+      (!group.files.length && !group.hunks?.length)
+    ) {
       throw new Error(`Split group ${index + 1} is empty.`);
     }
     for (const path of group.files) {
       if (!known.has(path))
         throw new Error(`Split group ${index + 1} references unknown path: ${path}`);
-      if (assigned.has(path)) throw new Error(`Split path is assigned more than once: ${path}`);
-      assigned.add(path);
+      if (assignedFiles.has(path) || assignedHunks.has(`${path}\0*`)) {
+        throw new Error(`Split path is assigned more than once: ${path}`);
+      }
+      assignedFiles.add(path);
+    }
+    for (const assignment of group.hunks || []) {
+      const change = known.get(assignment?.path);
+      if (!change?.hunks?.length || !Array.isArray(assignment.ids) || !assignment.ids.length) {
+        throw new Error(`Split group ${index + 1} has an invalid hunk assignment.`);
+      }
+      if (assignedFiles.has(assignment.path)) {
+        throw new Error(`Split path is assigned as both file and hunks: ${assignment.path}`);
+      }
+      const allowed = new Set(change.hunks.map((hunk) => hunk.id));
+      for (const id of assignment.ids) {
+        const key = `${assignment.path}\0${id}`;
+        if (!allowed.has(id)) {
+          throw new Error(
+            `Split group ${index + 1} references unknown hunk: ${assignment.path}#${id}`,
+          );
+        }
+        if (assignedHunks.has(key)) {
+          throw new Error(`Split hunk is assigned more than once: ${assignment.path}#${id}`);
+        }
+        assignedHunks.add(key);
+      }
+      assignedHunks.add(`${assignment.path}\0*`);
     }
   }
-  const missing = [...known.keys()].filter((path) => !assigned.has(path));
+  const missing = [...known.values()]
+    .filter((change) => {
+      if (assignedFiles.has(change.path)) return false;
+      return (
+        !change.hunks?.length ||
+        change.hunks.some((hunk) => !assignedHunks.has(`${change.path}\0${hunk.id}`))
+      );
+    })
+    .map((change) => change.path);
   if (missing.length) throw new Error(`Split plan leaves paths unassigned: ${missing.join(', ')}`);
 
   const conflicts = readGit(['ls-files', '-u', '-z'], projectRoot);
@@ -877,7 +991,7 @@ export function preflightSplit(groups, projectRoot, allFiles, scope = 'all') {
 }
 
 function resetCommittedPaths(projectRoot, groups, allFiles) {
-  const paths = [...new Set(groups.flatMap((group) => expandPaths(group.files, allFiles)))];
+  const paths = [...new Set(groups.flatMap((group) => expandGroupPaths(group, allFiles)))];
   if (paths.length && hasHead(projectRoot))
     runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
 }
@@ -964,7 +1078,7 @@ function reconcileCompletedIndex(projectRoot, checkpoint) {
   if (!checkpoint.completed.length) return;
   const groups = completedGroups(checkpoint);
   const paths = [
-    ...new Set(groups.flatMap((group) => expandPaths(group.files, checkpoint.plan.changes))),
+    ...new Set(groups.flatMap((group) => expandGroupPaths(group, checkpoint.plan.changes))),
   ];
   const current = readStageZeroEntries(projectRoot);
   const head = readHeadEntries(projectRoot, paths);
@@ -984,7 +1098,14 @@ function reconcileCompletedIndex(projectRoot, checkpoint) {
 // snapshots captured before the first commit. This keeps both scopes immune to
 // later worktree edits. The real index is reconciled only after Git has
 // successfully created and checkpointed the corresponding commit.
-function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, transaction) {
+function executeTransactionalSplit(
+  groups,
+  projectRoot,
+  allFiles,
+  diagnosticsOnly,
+  transaction,
+  hunkExecution = null,
+) {
   const snapshot = new Map(
     transaction.checkpoint.snapshots.map((entry) => [entry.path, entry.target]),
   );
@@ -1007,17 +1128,25 @@ function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnl
           indexPath,
         );
         const baseTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
-        const paths = expandPaths(group.files, allFiles);
-        for (const path of paths) {
-          const entry = snapshot.get(path);
-          if (entry) {
-            runGitWithIndex(
-              ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
-              projectRoot,
-              indexPath,
-            );
-          } else {
-            runGitWithIndex(['update-index', '--force-remove', '--', path], projectRoot, indexPath);
+        const paths = expandGroupPaths(group, allFiles);
+        if (hunkExecution) {
+          runGitWithIndex(['read-tree', hunkExecution.groupTrees[i]], projectRoot, indexPath);
+        } else {
+          for (const path of paths) {
+            const entry = snapshot.get(path);
+            if (entry) {
+              runGitWithIndex(
+                ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+                projectRoot,
+                indexPath,
+              );
+            } else {
+              runGitWithIndex(
+                ['update-index', '--force-remove', '--', path],
+                projectRoot,
+                indexPath,
+              );
+            }
           }
         }
         const groupTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
@@ -1089,10 +1218,8 @@ function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnl
   }
 }
 
-// Stage everything (so untracked files are included), then commit the
-// groups one by one: unstage all → add the group's files → commit.
-// Note: if a file has both staged and unstaged changes, the whole file is
-// committed in its group — file-level splitting cannot separate hunks.
+// Commit groups from captured object snapshots. Experimental hunk plans pass
+// prevalidated per-group trees; ordinary plans replace complete file entries.
 export function executeSplit(
   groups,
   projectRoot,
@@ -1118,6 +1245,7 @@ export function executeSplit(
       ),
   );
   let transaction = options.transaction || null;
+  let hunkExecution;
   if (!transaction) {
     try {
       const plan =
@@ -1130,8 +1258,10 @@ export function executeSplit(
           commitPolicy: DEFAULT_COMMIT_POLICY,
           changes: allFiles,
           groups,
+          hunkMode: allFiles.some((change) => change.hunks?.length),
         });
       const snapshots = captureCheckpointSnapshots(projectRoot, scope, allFiles);
+      hunkExecution = validateHunkTransaction(projectRoot, plan, snapshots);
       transaction = {
         ...createSplitCheckpoint(projectRoot, plan, snapshots),
         faultInjector: options.faultInjector,
@@ -1141,8 +1271,29 @@ export function executeSplit(
         cause: err,
       });
     }
+  } else {
+    try {
+      hunkExecution = validateHunkTransaction(
+        projectRoot,
+        transaction.checkpoint.plan,
+        transaction.checkpoint.snapshots,
+      );
+    } catch (err) {
+      throw fail(
+        ERROR_CATEGORIES.GIT_STATE,
+        `Split hunk validation failed before execution: ${err.message}`,
+        { cause: err },
+      );
+    }
   }
-  return executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, transaction);
+  return executeTransactionalSplit(
+    groups,
+    projectRoot,
+    allFiles,
+    diagnosticsOnly,
+    transaction,
+    hunkExecution,
+  );
 }
 
 // Returns a structured result when split mode handled the run; false means
@@ -1157,6 +1308,7 @@ export async function splitFlow(
     machineOutput = false,
     provider = null,
     exportPlanPath = null,
+    splitHunks = false,
   } = {},
 ) {
   const reasoningEnabled = config.reasoning.mode === 'on';
@@ -1183,7 +1335,7 @@ export async function splitFlow(
       process.exit(0);
     }
   }
-  const allFiles = getSplitChangedFiles(projectRoot, scope);
+  let allFiles = getSplitChangedFiles(projectRoot, scope);
   const warnings = [];
 
   if (allFiles.length === 0) {
@@ -1194,13 +1346,42 @@ export async function splitFlow(
     throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
   }
 
-  if (allFiles.length === 1 && !yes && !exportPlanPath) {
+  if (allFiles.length === 1 && !yes && !exportPlanPath && !splitHunks) {
     console.log('\n  ' + chalk.dim('Only one changed file — falling back to single-commit mode.'));
     return false;
   }
 
   const branch = getBranch(projectRoot);
   const head = hasHead(projectRoot);
+  const baseHead = head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null;
+  let hunkSnapshots = null;
+  let hunkMode = false;
+  if (splitHunks) {
+    try {
+      hunkSnapshots = captureCheckpointSnapshots(projectRoot, scope, allFiles);
+      const discovered = discoverSplitHunks(projectRoot, baseHead, allFiles, hunkSnapshots);
+      if (discovered.some((change) => change.hunks?.length)) {
+        allFiles = discovered;
+        hunkMode = true;
+      } else {
+        warnings.push('Experimental hunk split found no eligible multi-hunk text modifications.');
+        console.log(
+          '  ' +
+            chalk.yellow(
+              '⚠ Hunk split found no eligible multi-hunk text modifications; using file-level planning.',
+            ),
+        );
+      }
+    } catch (err) {
+      warnings.push(`Experimental hunk discovery fell back to file-level planning: ${err.message}`);
+      console.log(
+        '  ' +
+          chalk.yellow(
+            `⚠ Hunk discovery could not prove a safe patch boundary; using file-level planning (${sanitizeTerminalText(err.message)}).`,
+          ),
+      );
+    }
+  }
 
   console.log(
     '\n  ' +
@@ -1403,6 +1584,35 @@ export async function splitFlow(
     });
   }
 
+  const validateOrFallbackHunks = () => {
+    if (!hunkMode) return;
+    const provisional = createSplitPlanArtifact({
+      scope,
+      baseHead,
+      fingerprint: plannedStateFingerprint,
+      language: config.language,
+      commitPolicy: config.commitPolicy,
+      changes: allFiles,
+      groups,
+      hunkMode: true,
+    });
+    try {
+      validateHunkTransaction(projectRoot, provisional, hunkSnapshots);
+    } catch (err) {
+      warnings.push(`Experimental hunk plan fell back to file-level grouping: ${err.message}`);
+      console.log(
+        '\n  ' +
+          chalk.yellow(
+            `⚠ Hunk plan was not lossless; falling back to file-level grouping (${sanitizeTerminalText(err.message)}).`,
+          ),
+      );
+      groups = fallbackHunkGroups(groups, allFiles);
+      allFiles = stripHunkCatalog(allFiles);
+      hunkMode = false;
+    }
+  };
+  validateOrFallbackHunks();
+
   // Review / edit / regenerate loop
   let regenCounts = groups.map(() => 0);
   let planEdited = false;
@@ -1460,6 +1670,7 @@ export async function splitFlow(
       const edited = await editPlan(groups, allFiles, config.language, config.commitPolicy);
       if (edited) {
         groups = edited;
+        validateOrFallbackHunks();
         regenCounts = groups.map(() => 0);
         planEdited = true;
       }
@@ -1572,6 +1783,7 @@ export async function splitFlow(
     commitPolicy: config.commitPolicy,
     changes: allFiles,
     groups,
+    hunkMode,
   });
   let writtenPlanPath = null;
   if (exportPlanPath) {
@@ -1682,7 +1894,7 @@ function reconcileInFlight(projectRoot, checkpoint) {
 
 function validateRemainingSnapshot(projectRoot, checkpoint) {
   const remainingGroups = checkpoint.plan.groups.slice(checkpoint.completed.length);
-  const remainingDisplays = new Set(remainingGroups.flatMap((group) => group.files));
+  const remainingDisplays = new Set(remainingGroups.flatMap(groupDisplayPaths));
   const remainingChanges = checkpoint.plan.changes.filter((change) =>
     remainingDisplays.has(change.path),
   );
@@ -1817,7 +2029,8 @@ export async function applySplitPlan(
   } catch (err) {
     throw fail(ERROR_CATEGORIES.CONFIG, err.message, { cause: err });
   }
-  const { artifact } = loaded;
+  let { artifact } = loaded;
+  const warnings = [];
   const head = hasHead(projectRoot);
   const currentHead = head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null;
   if (currentHead !== artifact.baseHead) {
@@ -1848,6 +2061,27 @@ export async function applySplitPlan(
       'Split plan fingerprint no longer matches this repository; no commits were created.',
     );
   }
+  if (artifact.hunkMode) {
+    try {
+      const snapshots = captureCheckpointSnapshots(projectRoot, artifact.scope, artifact.changes);
+      validateHunkTransaction(projectRoot, artifact, snapshots);
+    } catch (err) {
+      const warning = `Imported hunk plan was not lossless and fell back to file-level grouping: ${err.message}`;
+      warnings.push(warning);
+      console.log('\n  ' + chalk.yellow(`⚠ ${sanitizeTerminalText(warning)}`));
+      artifact = createSplitPlanArtifact({
+        scope: artifact.scope,
+        baseHead: artifact.baseHead,
+        fingerprint: artifact.fingerprint,
+        language: artifact.language,
+        commitPolicy: artifact.commitPolicy,
+        changes: stripHunkCatalog(artifact.changes),
+        groups: fallbackHunkGroups(artifact.groups, artifact.changes),
+        hunkMode: false,
+        createdAt: artifact.createdAt,
+      });
+    }
+  }
 
   console.log(
     '\n  ' +
@@ -1871,7 +2105,7 @@ export async function applySplitPlan(
       console.log(chalk.dim('\n  Split apply cancelled.\n'));
       return {
         plan: artifact.groups,
-        warnings: [],
+        warnings,
         exitReason: 'cancelled',
         committed: false,
       };
@@ -1908,7 +2142,7 @@ export async function applySplitPlan(
     model: null,
     latencyMs: null,
     usage: null,
-    warnings: [],
+    warnings,
     exitReason: 'success',
     committed: true,
     edited: false,

@@ -8,6 +8,7 @@ export const SPLIT_PLAN_VERSION = 1;
 const MAX_PLAN_BYTES = 1024 * 1024;
 const HASH_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const FINGERPRINT_RE = /^[0-9a-f]{64}$/;
+const HUNK_HASH_RE = /^[0-9a-f]{64}$/;
 
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
@@ -45,7 +46,7 @@ function clonePolicy(policy, language) {
 function normalizeChange(change, index) {
   if (!object(change)) throw new Error(`changes[${index}] must be an object.`);
   const keys = Object.keys(change);
-  if (keys.some((key) => !['status', 'path', 'addPaths'].includes(key))) {
+  if (keys.some((key) => !['status', 'path', 'addPaths', 'hunks'].includes(key))) {
     throw new Error(`changes[${index}] contains an unknown property.`);
   }
   if (typeof change.status !== 'string' || !change.status || change.status.length > 8) {
@@ -61,13 +62,49 @@ function normalizeChange(change, index) {
   if (new Set(addPaths).size !== addPaths.length) {
     throw new Error(`changes[${index}].addPaths contains a duplicate path.`);
   }
-  return { status: change.status, path, addPaths };
+  let hunks;
+  if (change.hunks !== undefined) {
+    if (!Array.isArray(change.hunks) || change.hunks.length < 2 || change.hunks.length > 1000) {
+      throw new Error(`changes[${index}].hunks must contain 2-1000 entries.`);
+    }
+    hunks = change.hunks.map((hunk, hunkIndex) => {
+      if (
+        !object(hunk) ||
+        Object.keys(hunk).some(
+          (key) => !['id', 'hash', 'oldStart', 'oldLines', 'newStart', 'newLines'].includes(key),
+        ) ||
+        typeof hunk.id !== 'string' ||
+        !/^H[1-9]\d*$/.test(hunk.id) ||
+        typeof hunk.hash !== 'string' ||
+        !HUNK_HASH_RE.test(hunk.hash)
+      ) {
+        throw new Error(`changes[${index}].hunks[${hunkIndex}] is invalid.`);
+      }
+      for (const key of ['oldStart', 'oldLines', 'newStart', 'newLines']) {
+        if (!Number.isInteger(hunk[key]) || hunk[key] < 0) {
+          throw new Error(`changes[${index}].hunks[${hunkIndex}].${key} is invalid.`);
+        }
+      }
+      return {
+        id: hunk.id,
+        hash: hunk.hash,
+        oldStart: hunk.oldStart,
+        oldLines: hunk.oldLines,
+        newStart: hunk.newStart,
+        newLines: hunk.newLines,
+      };
+    });
+    if (new Set(hunks.map((hunk) => hunk.id)).size !== hunks.length) {
+      throw new Error(`changes[${index}].hunks contains a duplicate id.`);
+    }
+  }
+  return { status: change.status, path, addPaths, ...(hunks ? { hunks } : {}) };
 }
 
-function normalizeGroup(group, index, allowedPaths, policy, language) {
+function normalizeGroup(group, index, allowedPaths, hunkCatalog, policy, language) {
   if (!object(group)) throw new Error(`groups[${index}] must be an object.`);
   const keys = Object.keys(group);
-  if (keys.some((key) => !['message', 'files'].includes(key))) {
+  if (keys.some((key) => !['message', 'files', 'hunks'].includes(key))) {
     throw new Error(`groups[${index}] contains an unknown property.`);
   }
   if (typeof group.message !== 'string' || !group.message.trim() || group.message.length > 10_000) {
@@ -83,8 +120,8 @@ function normalizeGroup(group, index, allowedPaths, policy, language) {
         .join(' ')}`,
     );
   }
-  if (!Array.isArray(group.files) || !group.files.length) {
-    throw new Error(`groups[${index}].files must not be empty.`);
+  if (!Array.isArray(group.files)) {
+    throw new Error(`groups[${index}].files must be an array.`);
   }
   const files = group.files.map((item, fileIndex) =>
     safePath(item, `groups[${index}].files[${fileIndex}]`),
@@ -96,7 +133,38 @@ function normalizeGroup(group, index, allowedPaths, policy, language) {
     if (!allowedPaths.has(path))
       throw new Error(`groups[${index}] references unknown path: ${path}`);
   }
-  return { message: validation.parsed.cleaned, files };
+  let hunks = [];
+  if (group.hunks !== undefined) {
+    if (!Array.isArray(group.hunks)) throw new Error(`groups[${index}].hunks must be an array.`);
+    hunks = group.hunks.map((assignment, assignmentIndex) => {
+      if (
+        !object(assignment) ||
+        Object.keys(assignment).some((key) => !['path', 'ids'].includes(key)) ||
+        typeof assignment.path !== 'string' ||
+        !hunkCatalog.has(assignment.path) ||
+        !Array.isArray(assignment.ids) ||
+        !assignment.ids.length
+      ) {
+        throw new Error(`groups[${index}].hunks[${assignmentIndex}] is invalid.`);
+      }
+      const path = safePath(assignment.path, `groups[${index}].hunks[${assignmentIndex}].path`);
+      const ids = assignment.ids.map((id) => {
+        if (typeof id !== 'string' || !hunkCatalog.get(path).has(id)) {
+          throw new Error(`groups[${index}] references unknown hunk: ${path}#${id}`);
+        }
+        return id;
+      });
+      if (new Set(ids).size !== ids.length) {
+        throw new Error(`groups[${index}].hunks[${assignmentIndex}] contains a duplicate id.`);
+      }
+      return { path, ids };
+    });
+    if (new Set(hunks.map((assignment) => assignment.path)).size !== hunks.length) {
+      throw new Error(`groups[${index}].hunks contains a duplicate path.`);
+    }
+  }
+  if (!files.length && !hunks.length) throw new Error(`groups[${index}] must not be empty.`);
+  return { message: validation.parsed.cleaned, files, ...(hunks.length ? { hunks } : {}) };
 }
 
 export function validateSplitPlanArtifact(input) {
@@ -105,6 +173,7 @@ export function validateSplitPlanArtifact(input) {
     'kind',
     'version',
     'createdAt',
+    'hunkMode',
     'scope',
     'baseHead',
     'fingerprint',
@@ -124,6 +193,10 @@ export function validateSplitPlanArtifact(input) {
   }
   if (!['staged', 'all'].includes(input.scope)) {
     throw new Error('Split plan scope must be staged or all.');
+  }
+  const hunkMode = input.hunkMode === true;
+  if (input.hunkMode !== undefined && typeof input.hunkMode !== 'boolean') {
+    throw new Error('Split plan hunkMode must be a boolean.');
   }
   if (
     input.baseHead !== null &&
@@ -150,20 +223,48 @@ export function validateSplitPlanArtifact(input) {
     throw new Error('Split plan groups must contain 1-1000 entries.');
   }
   const allowedPaths = new Set(displayPaths);
-  const groups = input.groups.map((group, index) =>
-    normalizeGroup(group, index, allowedPaths, commitPolicy, input.language),
+  const hunkCatalog = new Map(
+    changes
+      .filter((change) => change.hunks?.length)
+      .map((change) => [change.path, new Set(change.hunks.map((hunk) => hunk.id))]),
   );
-  const assigned = groups.flatMap((group) => group.files);
-  if (new Set(assigned).size !== assigned.length) {
+  if (!hunkMode && hunkCatalog.size) {
+    throw new Error('Split plan cannot contain a hunk catalog when hunkMode is disabled.');
+  }
+  const groups = input.groups.map((group, index) =>
+    normalizeGroup(group, index, allowedPaths, hunkCatalog, commitPolicy, input.language),
+  );
+  const assignedFiles = groups.flatMap((group) => group.files);
+  if (new Set(assignedFiles).size !== assignedFiles.length) {
     throw new Error('Split plan assigns a path to more than one group.');
   }
-  const missing = displayPaths.filter((path) => !assigned.includes(path));
+  const assignedHunks = new Set();
+  for (const group of groups) {
+    for (const assignment of group.hunks || []) {
+      if (assignedFiles.includes(assignment.path)) {
+        throw new Error(`Split plan assigns both a whole file and hunks: ${assignment.path}`);
+      }
+      for (const id of assignment.ids) {
+        const key = `${assignment.path}\0${id}`;
+        if (assignedHunks.has(key)) {
+          throw new Error(`Split plan assigns a hunk more than once: ${assignment.path}#${id}`);
+        }
+        assignedHunks.add(key);
+      }
+    }
+  }
+  const missing = displayPaths.filter((path) => {
+    if (assignedFiles.includes(path)) return false;
+    const ids = hunkCatalog.get(path);
+    return !ids || [...ids].some((id) => !assignedHunks.has(`${path}\0${id}`));
+  });
   if (missing.length) throw new Error(`Split plan leaves paths unassigned: ${missing.join(', ')}`);
 
   return {
     kind: SPLIT_PLAN_KIND,
     version: SPLIT_PLAN_VERSION,
     createdAt: input.createdAt,
+    hunkMode,
     scope: input.scope,
     baseHead: input.baseHead,
     fingerprint: input.fingerprint,
@@ -182,12 +283,14 @@ export function createSplitPlanArtifact({
   commitPolicy,
   changes,
   groups,
+  hunkMode = false,
   createdAt = new Date().toISOString(),
 }) {
   return validateSplitPlanArtifact({
     kind: SPLIT_PLAN_KIND,
     version: SPLIT_PLAN_VERSION,
     createdAt,
+    hunkMode,
     scope,
     baseHead,
     fingerprint,

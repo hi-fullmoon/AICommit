@@ -16,6 +16,14 @@ function normalizedPlan(plan) {
   return plan.map((item) => ({
     message: String(item?.message || ''),
     files: Array.isArray(item?.files) ? item.files.map(String) : [],
+    ...(Array.isArray(item?.hunks)
+      ? {
+          hunks: item.hunks.map((assignment) => ({
+            path: String(assignment?.path || ''),
+            ids: Array.isArray(assignment?.ids) ? assignment.ids.map(String) : [],
+          })),
+        }
+      : {}),
   }));
 }
 

@@ -35,6 +35,7 @@ function showHelp() {
     -p, --provider=<name> Use the named provider from config "providers"
     -s, --split           Choose a split scope interactively
     --split=<scope>       Split staged changes or all changes: staged, all
+    --split-hunks         Experimental same-file hunk planning (default: off)
     --scope=<scope>       Scope for "split plan": staged, all
     --file=<path>         Plan artifact path for "split plan/apply"
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
@@ -56,6 +57,7 @@ function showHelp() {
     aicommit --split      Choose staged/all scope, then plan logical commits
     aicommit --split=staged  Split only the reviewed index snapshot
     aicommit --split=all --yes  Split the complete working tree non-interactively
+    aicommit --split=staged --split-hunks  Experimentally split eligible text hunks
     aicommit split plan --scope=staged --file=.aicommit-plan.json --yes
     aicommit split apply --file=.aicommit-plan.json --yes
     aicommit split --resume --yes  Resume pending groups from the checkpoint
@@ -93,6 +95,7 @@ function parsedDefaults(overrides = {}) {
     output: 'text',
     debug: false,
     split: null,
+    splitHunks: false,
     splitCommand: null,
     splitPlanFile: null,
     dryRun: false,
@@ -162,6 +165,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let output = 'text';
   let debug = false;
   let split = null;
+  let splitHunks = false;
   let splitPlanFile = null;
   let splitScopeOption = false;
   let dryRun = false;
@@ -209,6 +213,11 @@ export function parseArgs(args = process.argv.slice(2)) {
       if (!['staged', 'all'].includes(split)) {
         throw fail(ERROR_CATEGORIES.CONFIG, `Invalid split scope: "${split}". Use staged or all.`);
       }
+      continue;
+    }
+
+    if (arg === '--split-hunks') {
+      splitHunks = true;
       continue;
     }
 
@@ -338,6 +347,12 @@ export function parseArgs(args = process.argv.slice(2)) {
       'Non-interactive split requires an explicit scope: use --split=staged or --split=all.',
     );
   }
+  if (splitHunks && !split && splitCommand !== 'plan') {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      '--split-hunks requires --split, --split=<scope>, or "aicommit split plan".',
+    );
+  }
   if (splitCommand) {
     if (splitCommand !== 'resume' && !splitPlanFile) {
       throw fail(ERROR_CATEGORIES.CONFIG, `split ${splitCommand} requires --file=<path>.`);
@@ -349,7 +364,7 @@ export function parseArgs(args = process.argv.slice(2)) {
       split ||= 'prompt';
       dryRun = true;
     } else if (splitCommand === 'apply') {
-      if (split) {
+      if (split || splitHunks) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
           'split apply reads its scope from the plan; do not pass --scope or --split.',
@@ -362,7 +377,16 @@ export function parseArgs(args = process.argv.slice(2)) {
         );
       }
     } else {
-      if (splitPlanFile || split || cliProvider || cliLang || cliReasoning || check || dryRun) {
+      if (
+        splitPlanFile ||
+        split ||
+        splitHunks ||
+        cliProvider ||
+        cliLang ||
+        cliReasoning ||
+        check ||
+        dryRun
+      ) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
           'split --resume accepts only --yes, --output, and --debug.',
@@ -388,6 +412,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     output,
     debug,
     split,
+    splitHunks,
     splitCommand,
     splitPlanFile,
     dryRun,

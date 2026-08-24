@@ -30,7 +30,19 @@
         "required": ["message", "files"],
         "properties": {
           "message": { "type": "string" },
-          "files": { "type": "array", "items": { "type": "string" } }
+          "files": { "type": "array", "items": { "type": "string" } },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "ids"],
+              "properties": {
+                "path": { "type": "string" },
+                "ids": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
         }
       }
     },
