@@ -185,3 +185,80 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   );
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
+
+test('single-file --split --yes keeps split semantics and stages the worktree change', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-one-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  git(repo, ['reset', '-q']);
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify([{
+              subject: 'fix: commit one split file',
+              files: ['app.js'],
+            }]),
+          },
+        }],
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
+    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+    apiKey: '',
+    modelId: 'local-test-model',
+    reasoning: { mode: 'off' },
+  }));
+
+  const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Split plan: 1 commit/);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: commit one split file');
+  assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
+});
+
+test('--split --yes scans complete untracked files before auto-staging', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-sensitive-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(
+    join(repo, 'notes.txt'),
+    'ordinary notes\n'.repeat(200) + 'API_KEY=must-not-be-committed\n',
+  );
+
+  let requests = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    req.resume();
+    res.writeHead(500);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
+    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+    apiKey: '',
+    modelId: 'local-test-model',
+    reasoning: { mode: 'off' },
+  }));
+
+  const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  assert.equal(requests, 0);
+  assert.match(result.stdout, /will not auto-stage sensitive files/);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
+  assert.match(git(repo, ['status', '--porcelain']), /notes\.txt/);
+});

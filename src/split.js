@@ -1,6 +1,9 @@
-import { openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import {
+  openSync, readSync, closeSync, fstatSync, lstatSync, readlinkSync, realpathSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 
 import chalk from 'chalk';
 import ora from 'ora';
@@ -9,7 +12,8 @@ import editor from '@inquirer/editor';
 import { getResponseText, generateCommitMessage } from './api.js';
 import {
   getBranch, hasHead, runGit, readGit, stripLockFileContent, isLockFile,
-  matchStripPattern, unifiedArg, protectSensitiveDiff, isSensitiveFile,
+  matchStripPattern, unifiedArg, protectSensitiveDiff, protectSensitiveText,
+  isSensitiveFile,
 } from './git.js';
 import {
   statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox, startReasoningStream,
@@ -116,7 +120,20 @@ export function getSplitStateFingerprint(projectRoot, head, files = getAllChange
     hash.update(`\0${path}\0`);
     let fd;
     try {
-      fd = openSync(join(projectRoot, path), 'r');
+      const fullPath = join(projectRoot, path);
+      const stat = lstatSync(fullPath);
+      if (stat.isSymbolicLink()) {
+        // Git stores the link target text, not the target file's bytes. Never
+        // follow an untracked link while fingerprinting repository state.
+        hash.update('<symlink>');
+        hash.update(readlinkSync(fullPath));
+        continue;
+      }
+      if (!stat.isFile()) {
+        hash.update(`<non-regular:${stat.mode}>`);
+        continue;
+      }
+      fd = openSync(fullPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
       let offset = 0;
       while (true) {
         const count = readSync(fd, buffer, 0, buffer.length, offset);
@@ -135,7 +152,9 @@ export function getSplitStateFingerprint(projectRoot, head, files = getAllChange
 
 // Ask the model to partition the changed files into logical commits.
 // Returns the raw response text; parsing happens in parsePlan/normalizePlan.
-export async function generateSplitPlan(config, files, diff, projectRoot, stream = null) {
+export async function generateSplitPlan(
+  config, files, diff, projectRoot, stream = null, untrackedPreviews = null,
+) {
   const { temperature, language, maxTokens, reasoning } = config;
   const t0 = performance.now();
 
@@ -144,6 +163,7 @@ export async function generateSplitPlan(config, files, diff, projectRoot, stream
   const maxDiffChars = config.splitMaxDiffChars || SPLIT_MAX_DIFF_CHARS;
   const diffPart = buildSplitPlanningContext(
     projectRoot, files, diff, maxDiffChars, config.stripFiles,
+    config.protectUntrackedPreviews === true, untrackedPreviews,
   );
 
   const system = [
@@ -233,7 +253,7 @@ function groupMessage(g) {
   const subject = typeof g.subject === 'string' ? g.subject.trim() : '';
   const body = typeof g.body === 'string' ? g.body.trim() : '';
   if (!subject) return '';
-  const message = body ? `${subject}\n\n${body}` : subject;
+  const message = cleanCommitMessage(body ? `${subject}\n\n${body}` : subject);
   return isValidCommitMessage(message) ? message : '';
 }
 
@@ -331,11 +351,26 @@ const BINARY_FILE_RE = /\.(?:png|jpe?g|gif|webp|ico|icns|pdf|zip|gz|tgz|bz2|xz|7
 // file descriptor instead of readFileSync so a huge untracked file (a build
 // artifact, a dump) is never loaded into memory whole. Returns null for
 // files containing NUL bytes (binary content a text preview can't help with).
-function readFilePreview(path, maxBytes = 2000) {
+function readFilePreview(path, projectRoot, maxBytes = 2000) {
   let fd;
   try {
-    fd = openSync(path, 'r');
-    const { size } = fstatSync(fd);
+    const stat = lstatSync(path);
+    if (!stat.isFile()) return null;
+
+    // Reject paths that resolve outside the worktree (for example through a
+    // symlinked parent directory), then ask the OS not to follow a final-link
+    // swap between this check and open where O_NOFOLLOW is available.
+    const root = realpathSync(projectRoot);
+    const target = realpathSync(path);
+    const rel = relative(root, target);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      return null;
+    }
+
+    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile()) return null;
+    const { size } = opened;
     const n = Math.min(size, maxBytes);
     const buf = Buffer.alloc(n);
     readSync(fd, buf, 0, n, 0);
@@ -349,6 +384,90 @@ function readFilePreview(path, maxBytes = 2000) {
   }
 }
 
+// Capture the exact untracked-file previews used by split planning while also
+// scanning each regular file from beginning to end. The scanner keeps a small
+// overlap between chunks so fixed markers and credential assignments split at
+// a read boundary are still detected. Symlinks and non-regular files are never
+// opened. Files excluded from model previews are still scanned because split
+// execution will stage their complete contents.
+export function captureUntrackedSnapshots(projectRoot, files, stripGlobs = [], maxPreviewBytes = 2000) {
+  const previews = new Map();
+  const findings = [];
+  const scanBuffer = Buffer.alloc(64 * 1024);
+  const overlapBytes = 256;
+  let root;
+  try {
+    root = realpathSync(projectRoot);
+  } catch {
+    return { previews, findings: ['unreadable repository root'] };
+  }
+
+  for (const file of files) {
+    if (file.status !== '??' && file.status !== '?') continue;
+    const path = file.addPaths?.[0] || file.path;
+    const includePreview = !(
+      isLockFile(path)
+      || matchStripPattern(path, stripGlobs)
+      || BINARY_FILE_RE.test(path)
+    );
+    previews.set(path, null);
+
+    let fd;
+    try {
+      const fullPath = join(projectRoot, path);
+      const stat = lstatSync(fullPath);
+      if (!stat.isFile()) continue;
+
+      const target = realpathSync(fullPath);
+      const rel = relative(root, target);
+      if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue;
+
+      fd = openSync(fullPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+      const opened = fstatSync(fd);
+      if (!opened.isFile()) continue;
+
+      const previewParts = [];
+      let previewLength = 0;
+      let overlap = Buffer.alloc(0);
+      let offset = 0;
+      while (true) {
+        const count = readSync(fd, scanBuffer, 0, scanBuffer.length, offset);
+        if (!count) break;
+        const chunk = Buffer.from(scanBuffer.subarray(0, count));
+
+        if (includePreview && previewLength < maxPreviewBytes) {
+          const take = Math.min(count, maxPreviewBytes - previewLength);
+          previewParts.push(chunk.subarray(0, take));
+          previewLength += take;
+        }
+
+        const scanWindow = overlap.length ? Buffer.concat([overlap, chunk]) : chunk;
+        findings.push(...protectSensitiveText(scanWindow.toString('utf-8'), path).findings);
+        overlap = Buffer.from(scanWindow.subarray(Math.max(0, scanWindow.length - overlapBytes)));
+        offset += count;
+      }
+
+      if (includePreview && previewParts.length) {
+        const previewBuffer = Buffer.concat(previewParts);
+        if (!previewBuffer.includes(0)) {
+          const text = previewBuffer.toString('utf-8');
+          previews.set(path, opened.size > maxPreviewBytes ? text + '\n... (truncated)' : text);
+        }
+      }
+    } catch {
+      // The path/name remains in the plan, but unreadable content is neither
+      // previewed nor treated as if it had been successfully scanned.
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+
+  return {
+    previews,
+    findings: findings.filter((item, index, all) => all.indexOf(item) === index),
+  };
+}
+
 function truncateContext(text, budget, marker) {
   if (text.length <= budget) return text;
   if (budget <= marker.length) return marker.slice(0, budget);
@@ -359,7 +478,10 @@ function truncateContext(text, budget, marker) {
 // includes untracked files, so include small text previews explicitly. When
 // tracked and untracked changes coexist, reserve up to 40% of the budget for
 // new files so neither side can crowd the other out completely.
-export function buildSplitPlanningContext(projectRoot, files, diff, maxChars, stripGlobs = []) {
+export function buildSplitPlanningContext(
+  projectRoot, files, diff, maxChars, stripGlobs = [], protectPreviews = false,
+  untrackedPreviews = null,
+) {
   const tracked = stripLockFileContent(diff, stripGlobs);
   const previewParts = [];
 
@@ -367,8 +489,13 @@ export function buildSplitPlanningContext(projectRoot, files, diff, maxChars, st
     if (file.status !== '??' && file.status !== '?') continue;
     const path = file.addPaths?.[0] || file.path;
     if (isLockFile(path) || matchStripPattern(path, stripGlobs) || BINARY_FILE_RE.test(path)) continue;
-    const preview = readFilePreview(join(projectRoot, path));
-    if (preview) previewParts.push(`Untracked file preview: ${path}\n\`\`\`\n${preview}\n\`\`\``);
+    const preview = untrackedPreviews instanceof Map
+      ? (untrackedPreviews.get(path) || null)
+      : readFilePreview(join(projectRoot, path), projectRoot);
+    const safePreview = preview && protectPreviews
+      ? protectSensitiveText(preview, path).text
+      : preview;
+    if (safePreview) previewParts.push(`Untracked file preview: ${path}\n\`\`\`\n${safePreview}\n\`\`\``);
   }
 
   const rawPreviews = previewParts.join('\n\n');
@@ -384,7 +511,10 @@ export function buildSplitPlanningContext(projectRoot, files, diff, maxChars, st
 // Diff limited to one group's files, used when regenerating that group's
 // message. Untracked files never show up in git diff, so when the diff is
 // empty feed the model the file names plus a content preview instead.
-function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlobs) {
+function getGroupDiff(
+  projectRoot, head, group, allFiles, contextLines, stripGlobs, protectPreviews = false,
+  untrackedPreviews = null,
+) {
   const addPaths = expandPaths(group.files, allFiles);
   const diff = getWorkingTreeDiff(projectRoot, head, contextLines, addPaths);
   if (diff) return stripLockFileContent(diff, stripGlobs);
@@ -395,8 +525,13 @@ function getGroupDiff(projectRoot, head, group, allFiles, contextLines, stripGlo
     const status = byPath.get(p)?.status || '?';
     parts.push(`${status} ${p}`);
     if ((status === '??' || status === '?') && !isLockFile(p) && !matchStripPattern(p, stripGlobs) && !BINARY_FILE_RE.test(p)) {
-      const preview = readFilePreview(join(projectRoot, p));
-      if (preview) parts.push('```\n' + preview + '\n```');
+      const preview = untrackedPreviews instanceof Map
+        ? (untrackedPreviews.get(p) || null)
+        : readFilePreview(join(projectRoot, p), projectRoot);
+      const safePreview = preview && protectPreviews
+        ? protectSensitiveText(preview, p).text
+        : preview;
+      if (safePreview) parts.push('```\n' + safePreview + '\n```');
     }
   }
   return 'Changed files (new files, no diff available):\n' + parts.join('\n');
@@ -454,7 +589,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
     process.exit(1);
   }
 
-  if (allFiles.length === 1) {
+  if (allFiles.length === 1 && !yes) {
     console.log('\n  ' + chalk.dim('Only one changed file — falling back to single-commit mode.'));
     return false;
   }
@@ -471,6 +606,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
 
   const plannedStateFingerprint = getSplitStateFingerprint(projectRoot, head, allFiles);
   const diff = getSplitDiff(projectRoot, head, config.diffContextLines);
+  const untrackedSnapshot = captureUntrackedSnapshots(projectRoot, allFiles, config.stripFiles);
   if (getSplitStateFingerprint(projectRoot, head, allFiles) !== plannedStateFingerprint) {
     console.log('\n  ' + chalk.red('✗ The working tree is being modified concurrently; split planning aborted.\n'));
     process.exitCode = 1;
@@ -484,21 +620,30 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
   const sensitiveFindings = [
     ...protectedInput.findings,
     ...sensitivePaths.map((path) => `sensitive file: ${path}`),
+    ...untrackedSnapshot.findings,
   ].filter((item, index, all) => all.indexOf(item) === index);
-  let planningDiff = diff;
-  let planningConfig = config;
-  let protectModelInput = false;
+  // Protection is a no-op when nothing sensitive is present, and keeping it
+  // enabled by default also protects any later message-regeneration request.
+  let planningDiff = protectedInput.diff;
+  let planningConfig = { ...config, protectUntrackedPreviews: true };
+  let protectModelInput = true;
   if (sensitiveFindings.length) {
     console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
     for (const finding of sensitiveFindings) {
       console.log('    ' + chalk.yellow(sanitizeTerminalText(finding)));
     }
-    const sensitiveAction = yes ? 'protect' : await vimSelect({
+    if (yes) {
+      console.log(chalk.red('  ✗ --split --yes will not auto-stage sensitive files.'));
+      console.log(chalk.dim('  Review and stage the intended files explicitly, then use normal --yes mode.\n'));
+      process.exitCode = 1;
+      return true;
+    }
+    const sensitiveAction = await vimSelect({
       message: 'How should aicommit handle the split-planning request?',
       choices: [
         {
           name: 'Send protected diff', value: 'protect',
-          description: 'Omit sensitive files/private keys and redact detected credential values',
+          description: 'Protect model input only; sensitive files remain in the reviewed commit plan',
         },
         { name: 'Cancel', value: 'cancel', description: 'Do not send repository content' },
         {
@@ -512,13 +657,15 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
       process.exit(0);
     }
     if (sensitiveAction === 'protect') {
-      protectModelInput = true;
-      planningDiff = protectedInput.diff;
       const sensitiveBasenames = sensitivePaths.map((path) => path.replace(/\\/g, '/').split('/').pop());
       planningConfig = {
-        ...config,
+        ...planningConfig,
         stripFiles: [...new Set([...config.stripFiles, ...sensitiveBasenames])],
       };
+    } else if (sensitiveAction === 'original') {
+      protectModelInput = false;
+      planningDiff = diff;
+      planningConfig = { ...config, protectUntrackedPreviews: false };
     }
   }
 
@@ -550,7 +697,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
   try {
     let elapsed, usage;
     ({ raw, elapsed, usage, reasoning: reasoningText } = await generateSplitPlan(
-      planningConfig, allFiles, planningDiff, projectRoot, stream,
+      planningConfig, allFiles, planningDiff, projectRoot, stream, untrackedSnapshot.previews,
     ));
     if (liveReasoning) await liveReasoning.stop();
     let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
@@ -627,9 +774,16 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
       for (const idx of picked) {
         const rawGroupDiff = getGroupDiff(
           projectRoot, head, groups[idx], allFiles,
-          config.diffContextLines, planningConfig.stripFiles,
+          config.diffContextLines, planningConfig.stripFiles, protectModelInput,
+          untrackedSnapshot.previews,
         );
         const groupDiff = protectModelInput ? protectSensitiveDiff(rawGroupDiff).diff : rawGroupDiff;
+        if (getSplitStateFingerprint(projectRoot, head) !== plannedStateFingerprint) {
+          console.log('\n  ' + chalk.red('✗ The working tree changed after split planning; message regeneration aborted.'));
+          console.log(chalk.dim('  Review the changes and run aicommit --split again.\n'));
+          process.exitCode = 1;
+          return true;
+        }
         const rspinner = ora({
           text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
           color: 'cyan',

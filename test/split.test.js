@@ -1,13 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync, writeFileSync, rmSync, symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
   buildSplitPlanningContext, getSplitDiff, generateSplitPlan, getSplitStateFingerprint,
+  captureUntrackedSnapshots,
 } from '../src/split.js';
 
 // Fresh git repo for exercising the real git index operations behind
@@ -43,6 +46,18 @@ test('normalizePlan uses the subject alone when no body is given', () => {
   const result = normalizePlan(groups, [M('a.js')], 'en');
   assert.equal(result.length, 1);
   assert.equal(result[0].message, 'chore: bump deps');
+});
+
+test('normalizePlan sanitizes subject and body fields before returning them', () => {
+  const groups = [{
+    subject: 'feat: safe\u001b[2J title',
+    body: '- keep this\u001b]52;c;YQ==\u0007 body',
+    files: ['a.js'],
+  }];
+  const result = normalizePlan(groups, [M('a.js')], 'en');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].message, 'feat: safe title\n\n- keep this body');
+  assert.doesNotMatch(result[0].message, /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/);
 });
 
 test('normalizePlan sweeps leftover files into a catch-all group', () => {
@@ -168,6 +183,70 @@ test('split planning context includes bounded previews for untracked text files'
   assert.match(context, /Untracked file preview: new-feature\.js/);
   assert.match(context, /newFeature/);
   assert.ok(context.length <= 1000);
+});
+
+test('protected split previews redact credentials in ordinary untracked files', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'notes.txt'), 'API_KEY=preview-secret-value\n');
+  const files = getAllChangedFiles(repo);
+
+  const context = buildSplitPlanningContext(repo, files, '', 1000, [], true);
+  assert.match(context, /API_KEY=\[REDACTED\]/);
+  assert.doesNotMatch(context, /preview-secret-value/);
+});
+
+test('untracked snapshot scans past the preview limit and across read boundaries', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(
+    join(repo, 'notes.txt'),
+    'x'.repeat((64 * 1024) - 5) + '\nAPI_KEY=deep-secret-value\n',
+  );
+  const files = getAllChangedFiles(repo);
+
+  const snapshot = captureUntrackedSnapshots(repo, files);
+  assert.match(snapshot.findings.join('\n'), /credential-like assignment in: notes\.txt/);
+  assert.doesNotMatch(snapshot.previews.get('notes.txt'), /deep-secret-value/);
+});
+
+test('split planning reuses captured untracked bytes instead of reopening the file', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'notes.txt'), 'safe snapshot\n');
+  const files = getAllChangedFiles(repo);
+  const snapshot = captureUntrackedSnapshots(repo, files);
+  const before = getSplitStateFingerprint(repo, false, files);
+
+  writeFileSync(join(repo, 'notes.txt'), 'API_KEY=changed-after-scan\n');
+  const context = buildSplitPlanningContext(
+    repo, files, '', 1000, [], true, snapshot.previews,
+  );
+
+  assert.match(context, /safe snapshot/);
+  assert.doesNotMatch(context, /changed-after-scan/);
+  assert.notEqual(getSplitStateFingerprint(repo, false, getAllChangedFiles(repo)), before);
+});
+
+test('split planning does not follow untracked symbolic links', (t) => {
+  const repo = makeRepo();
+  const outside = `${repo}-outside-secret.txt`;
+  t.after(() => {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(outside, { force: true });
+  });
+  writeFileSync(outside, 'LOCAL_ONLY_SECRET=do-not-send\n');
+  symlinkSync(outside, join(repo, 'linked-notes.txt'));
+  const files = getAllChangedFiles(repo);
+
+  const before = getSplitStateFingerprint(repo, false, files);
+  const context = buildSplitPlanningContext(repo, files, '', 1000, []);
+  writeFileSync(outside, 'LOCAL_ONLY_SECRET=changed-outside\n');
+  const after = getSplitStateFingerprint(repo, false, files);
+
+  assert.doesNotMatch(context, /LOCAL_ONLY_SECRET|do-not-send/);
+  assert.doesNotMatch(context, /Untracked file preview: linked-notes\.txt/);
+  assert.equal(after, before, 'outside target bytes are not part of Git symlink state');
 });
 
 test('split planning context reserves room for tracked and untracked changes', (t) => {

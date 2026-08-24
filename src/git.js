@@ -327,6 +327,35 @@ export function isSensitiveFile(path) {
   return SENSITIVE_FILE_RE.test(normalized);
 }
 
+// Protect standalone text such as an untracked-file preview. Unlike a Git
+// diff, these lines have no +/- prefix, so they need their own scanner before
+// split planning can safely include them in a model request.
+export function protectSensitiveText(text, path = '(unknown file)') {
+  const source = String(text || '');
+  if (isSensitiveFile(path)) {
+    return { text: '', findings: [`sensitive file: ${path}`] };
+  }
+  if (PRIVATE_KEY_RE.test(source)) {
+    return { text: '', findings: [`private-key material in: ${path}`] };
+  }
+
+  let foundAssignedSecret = false;
+  let foundCloudKey = false;
+  let protectedText = source.replace(AWS_KEY_RE, () => {
+    foundCloudKey = true;
+    return '[REDACTED_ACCESS_KEY]';
+  });
+  protectedText = protectedText.replace(ASSIGNED_SECRET_RE, (_match, prefix) => {
+    foundAssignedSecret = true;
+    return `${prefix}[REDACTED]`;
+  });
+
+  const findings = [];
+  if (foundAssignedSecret) findings.push(`credential-like assignment in: ${path}`);
+  if (foundCloudKey) findings.push(`cloud access key in: ${path}`);
+  return { text: protectedText, findings };
+}
+
 // Build a safer model input without changing what Git will commit. Entire
 // sensitive/private-key sections are omitted; common credential assignments
 // and cloud access-key ids in ordinary source diffs are redacted. This is a

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import {
   getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff,
   unifiedArg, getChangedFiles, getUnstagedFiles, getUntrackedFiles, getStagedDiff,
-  getIndexFingerprint, createIndexTransaction, protectSensitiveDiff,
+  getIndexFingerprint, createIndexTransaction, protectSensitiveDiff, protectSensitiveText,
   isSensitiveFile, gitCommit,
 } from '../src/git.js';
 
@@ -141,6 +141,14 @@ test('sensitive model input protection omits risky files and redacts credentials
   assert.equal(isSensitiveFile('.env.production'), true);
   assert.equal(isSensitiveFile('.env.example'), false);
   assert.equal(isSensitiveFile('.aicommit.config.json'), true);
+
+  const preview = protectSensitiveText(
+    'API_KEY=preview-secret-value\nAWS=AKIAABCDEFGHIJKLMNOP\n',
+    'notes.txt',
+  );
+  assert.doesNotMatch(preview.text, /preview-secret-value|AKIAABCDEFGHIJKLMNOP/);
+  assert.match(preview.text, /\[REDACTED\]/);
+  assert.equal(preview.findings.length, 2);
 });
 
 test('index fingerprint changes with staged content and transaction restores prior staging', () => {
