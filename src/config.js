@@ -7,6 +7,7 @@ import chalk from 'chalk';
 
 import { fileExists, deepMerge } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import { resolveCredential } from './credentials.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -22,6 +23,7 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'defaultProvider',
   'extraBody',
   'retry',
+  'credentialHelper',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
@@ -101,6 +103,12 @@ export const DEFAULT_CONFIG = {
     maxAttempts: 3,
     baseDelayMs: 500,
     maxDelayMs: 5000,
+  },
+  // Opt in to the user's configured Git credential helper, which commonly
+  // delegates to macOS Keychain, Windows Credential Manager, or libsecret.
+  credentialHelper: {
+    enabled: false,
+    username: 'aicommit',
   },
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
@@ -308,6 +316,25 @@ export function validateConfig(config) {
   if (!config.retry || typeof config.retry !== 'object' || Array.isArray(config.retry)) {
     throw new Error('Invalid config "retry": expected an object.');
   }
+  if (
+    !config.credentialHelper ||
+    typeof config.credentialHelper !== 'object' ||
+    Array.isArray(config.credentialHelper)
+  ) {
+    throw new Error('Invalid config "credentialHelper": expected an object.');
+  }
+  if (typeof config.credentialHelper.enabled !== 'boolean') {
+    throw new Error('Invalid config "credentialHelper.enabled": expected a boolean.');
+  }
+  if (
+    typeof config.credentialHelper.username !== 'string' ||
+    !config.credentialHelper.username.trim() ||
+    /[\r\n\0]/.test(config.credentialHelper.username)
+  ) {
+    throw new Error(
+      'Invalid config "credentialHelper.username": expected a non-empty string without control characters.',
+    );
+  }
   if (!['auto', 'on', 'off'].includes(config.reasoning.mode)) {
     throw new Error('Invalid config "reasoning.mode": expected "auto", "on", or "off".');
   }
@@ -415,15 +442,16 @@ export async function loadConfig(cliProvider = null) {
   const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
   validateConfig(resolvedConfig);
-  if (resolvedConfig.apiKeyEnv) {
-    const value = process.env[resolvedConfig.apiKeyEnv];
-    if (!value) {
-      throw new Error(
-        `Environment variable "${resolvedConfig.apiKeyEnv}" configured by apiKeyEnv is not set.`,
-      );
-    }
-    resolvedConfig.apiKey = value;
-  }
+  const credential = resolveCredential(resolvedConfig);
+  resolvedConfig.apiKey = credential.apiKey;
 
-  return { config: resolvedConfig, projectRoot, loaded, providerName };
+  return {
+    config: resolvedConfig,
+    projectRoot,
+    loaded,
+    providerName,
+    credentialSource: credential.source,
+    credentialSourceLabel: credential.sourceLabel,
+    credentialWarning: credential.warning || null,
+  };
 }

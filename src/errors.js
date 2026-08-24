@@ -76,7 +76,7 @@ export function classifyError(err) {
     return fail(ERROR_CATEGORIES.RESPONSE_FORMAT, message, { cause: err });
   }
   if (
-    /invalid config|failed to parse.*config|environment variable|unknown provider|provider.*defined|unknown option|missing value|unexpected extra argument|invalid reasoning level|not a valid directory|--output=json/.test(
+    /invalid config|failed to parse.*config|environment variable|credential helper|unknown provider|provider.*defined|unknown option|missing value|unexpected extra argument|invalid reasoning level|not a valid directory|--output=json/.test(
       lower,
     )
   ) {

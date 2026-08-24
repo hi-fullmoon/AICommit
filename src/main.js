@@ -45,6 +45,7 @@ import { splitFlow } from './split.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import { runDoctor } from './doctor.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
@@ -61,6 +62,7 @@ export async function main() {
     yes,
     check,
     setup,
+    doctor,
     help,
     version,
   } = parseArgs();
@@ -68,7 +70,7 @@ export async function main() {
   if (help || version) return { exitReason: help ? 'help' : 'version' };
 
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !check) {
+  if (machineOutput && !yes && !check && !doctor) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -97,6 +99,8 @@ export async function main() {
   );
   console.log('  ' + chalk.dim('─'.repeat(45)));
   console.log('  ' + chalk.dim(`Working directory: ${sanitizeTerminalText(process.cwd())}`));
+
+  if (doctor) return runDoctor(cliProvider);
 
   // ── 1. Config ───────────────────────────────────────────────────────
 

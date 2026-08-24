@@ -492,3 +492,65 @@ test('clean repositories return a git_state JSON error with exit code 3', async 
   assert.equal(output.exitReason, 'git_state');
   assert.equal(output.error.category, 'git_state');
 });
+
+test('doctor checks runtime, config, capabilities, credentials, and connectivity without leaking keys', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-doctor-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  let authorization = null;
+
+  const server = createServer((req, res) => {
+    authorization = req.headers.authorization;
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          model: 'doctor-model-v2',
+          choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5 },
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: 'legacy-plaintext-must-not-win',
+      apiKeyEnv: 'AICOMMIT_DOCTOR_KEY',
+      modelId: 'doctor-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['doctor', '--output=json'], {
+    AICOMMIT_DOCTOR_KEY: 'doctor-secret-value',
+  });
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.exitReason, 'doctor_ok');
+  assert.equal(output.provider, 'custom');
+  assert.equal(output.model, 'doctor-model');
+  assert.deepEqual(output.usage, { inputTokens: 4, outputTokens: 1, totalTokens: 5 });
+  assert.equal(authorization, 'Bearer doctor-secret-value');
+  for (const label of [
+    'Node.js:',
+    'Git:',
+    'Config:',
+    'Endpoint security:',
+    'Provider capabilities:',
+    'Credentials: env:AICOMMIT_DOCTOR_KEY',
+    'Connectivity:',
+  ]) {
+    assert.match(result.stderr, new RegExp(label));
+  }
+  assert.doesNotMatch(result.stdout + result.stderr, /doctor-secret-value/);
+  assert.doesNotMatch(result.stdout + result.stderr, /legacy-plaintext-must-not-win/);
+});

@@ -41,3 +41,12 @@ test('parseArgs accepts text and JSON output modes', () => {
   assert.equal(parseArgs(['--output', 'text']).output, 'text');
   assert.throws(() => parseArgs(['--output=yaml']), /Invalid output mode/);
 });
+
+test('parseArgs recognizes doctor and restricts it to diagnostic options', () => {
+  const doctor = parseArgs(['doctor', '--provider=local', '--output=json']);
+  assert.equal(doctor.doctor, true);
+  assert.equal(doctor.cliProvider, 'local');
+  assert.equal(doctor.output, 'json');
+  assert.throws(() => parseArgs(['doctor', '--yes']), /doctor accepts only/);
+  assert.equal(parseArgs([]).doctor, false);
+});

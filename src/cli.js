@@ -17,6 +17,7 @@ function showHelp() {
 
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
+    doctor                Diagnose runtime, config, credentials, and connectivity
 
   ${chalk.bold('Arguments:')}
     path                  Target directory (default: current directory)
@@ -78,6 +79,7 @@ function parsedDefaults(overrides = {}) {
     yes: false,
     check: false,
     setup: false,
+    doctor: false,
     help: false,
     version: false,
     ...overrides,
@@ -96,6 +98,9 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
     return parsedDefaults({ setup: true });
   }
+
+  const doctor = args[0] === 'doctor';
+  if (doctor) args = args.slice(1);
 
   let targetPath = null;
   let cliLang = null;
@@ -233,6 +238,12 @@ export function parseArgs(args = process.argv.slice(2)) {
   if (!['text', 'json'].includes(output)) {
     throw fail(ERROR_CATEGORIES.CONFIG, `Invalid output mode: "${output}". Use text or json.`);
   }
+  if (doctor && (targetPath || cliLang || cliReasoning || split || dryRun || yes || check)) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'doctor accepts only --provider, --output, and --debug options.',
+    );
+  }
 
   return {
     targetPath,
@@ -246,6 +257,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     yes,
     check,
     setup,
+    doctor,
     help: false,
     version: false,
   };

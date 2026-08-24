@@ -37,6 +37,7 @@ test('project config cannot override connection/provider settings or raise cost 
     defaultProvider: 'evil',
     extraBody: { arbitrary: true },
     retry: { maxAttempts: 10 },
+    credentialHelper: { enabled: true },
     maxTokens: DEFAULT_CONFIG.maxTokens + 1,
     reasoning: { mode: 'on', maxTokens: 999999 },
     language: 'en',
@@ -48,6 +49,7 @@ test('project config cannot override connection/provider settings or raise cost 
     'apiKey',
     'apiKeyEnv',
     'apiUrl',
+    'credentialHelper',
     'defaultProvider',
     'extraBody',
     'maxTokens',
@@ -115,5 +117,33 @@ test('validateConfig validates provider adapter and retry settings', () => {
     () =>
       validateConfig(cfg({ retry: { ...DEFAULT_CONFIG.retry, baseDelayMs: 100, maxDelayMs: 50 } })),
     /maxDelayMs/,
+  );
+});
+
+test('validateConfig validates credential helper settings', () => {
+  assert.equal(validateConfig(cfg()).credentialHelper.enabled, false);
+  assert.throws(() => validateConfig(cfg({ credentialHelper: null })), /credentialHelper/);
+  assert.throws(
+    () =>
+      validateConfig(
+        cfg({ credentialHelper: { ...DEFAULT_CONFIG.credentialHelper, enabled: 'yes' } }),
+      ),
+    /credentialHelper\.enabled/,
+  );
+  assert.throws(
+    () =>
+      validateConfig(
+        cfg({ credentialHelper: { ...DEFAULT_CONFIG.credentialHelper, username: '' } }),
+      ),
+    /credentialHelper\.username/,
+  );
+  assert.throws(
+    () =>
+      validateConfig(
+        cfg({
+          credentialHelper: { ...DEFAULT_CONFIG.credentialHelper, username: 'robot\npassword=x' },
+        }),
+      ),
+    /credentialHelper\.username/,
   );
 });
