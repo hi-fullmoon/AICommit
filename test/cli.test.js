@@ -150,6 +150,20 @@ test('parseArgs recognizes team policy template and check inputs', () => {
   assert.throws(() => parseArgs(['policy', 'check', '--provider=x']), /policy check accepts only/);
 });
 
+test('parseArgs recognizes provider preset inspection and lifecycle commands', () => {
+  assert.equal(parseArgs(['preset', 'show', '--output=json']).presetAction, 'show');
+  assert.equal(parseArgs(['preset', 'validate']).presetAction, 'validate');
+  assert.equal(parseArgs(['preset', 'path']).presetAction, 'path');
+  const install = parseArgs(['preset', 'install', '--file=next.json']);
+  assert.equal(install.presetAction, 'install');
+  assert.equal(install.presetFile, 'next.json');
+  assert.equal(parseArgs(['preset', 'rollback']).presetAction, 'rollback');
+  assert.throws(() => parseArgs(['preset']), /show, validate, path, install, or rollback/);
+  assert.throws(() => parseArgs(['preset', 'install']), /requires --file/);
+  assert.throws(() => parseArgs(['preset', 'show', '--file=x']), /only valid with preset/);
+  assert.throws(() => parseArgs(['preset', 'show', '/tmp/repo']), /preset accepts only/);
+});
+
 test('parseArgs recognizes local metrics management actions', () => {
   assert.equal(parseArgs(['metrics']).metricsAction, 'status');
   assert.equal(parseArgs(['metrics', 'clear']).metricsAction, 'clear');

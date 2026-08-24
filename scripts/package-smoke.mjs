@@ -103,12 +103,17 @@ async function main() {
       'docs/team-policy.md',
       'docs/examples/commit-msg',
       'docs/examples/aicommit-policy.yml',
+      'docs/provider-presets.md',
       'package.json',
+      'presets/provider-presets.json',
+      'schemas/aicommit-provider-presets.schema.json',
       'schemas/aicommit-output.schema.json',
       'schemas/aicommit-team-policy.schema.json',
       'src/completion.js',
       'src/config-command.js',
       'src/policy-command.js',
+      'src/preset-command.js',
+      'src/provider-presets.js',
       'src/team-policy.js',
       'src/main.js',
       'templates/.aicommit.policy.json',
@@ -157,6 +162,21 @@ async function main() {
 
     const home = join(root, 'home');
     mkdirSync(home);
+    const presetShow = await runCli(entry, ['preset', 'show', '--output=json'], {
+      cwd: root,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+      },
+    });
+    assert.equal(presetShow.code, 0, presetShow.stdout + presetShow.stderr);
+    const presetOutput = JSON.parse(presetShow.stdout);
+    assert.equal(presetOutput.exitReason, 'preset_show');
+    assert.equal(presetOutput.data.compatibility.adapterContract, 1);
+    assert.doesNotMatch(presetShow.stdout, /apiKey|credential/i);
     const repo = makeRepo(root);
     writeFileSync(join(repo, '.aicommit.policy.json'), policyTemplate);
     const messageFile = join(root, 'COMMIT_EDITMSG');

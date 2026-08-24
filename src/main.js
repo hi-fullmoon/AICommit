@@ -50,6 +50,7 @@ import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.
 import { runConfigCommand } from './config-command.js';
 import { generateCompletion } from './completion.js';
 import { runPolicyCommand } from './policy-command.js';
+import { runPresetCommand } from './preset-command.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -79,6 +80,8 @@ export async function main() {
     policyAction,
     policyMessageFile,
     policyRange,
+    presetAction,
+    presetFile,
     completionShell,
     statsAction,
     metricsAction,
@@ -101,7 +104,15 @@ export async function main() {
   }
 
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !check && !doctor && !configAction && !policyAction) {
+  if (
+    machineOutput &&
+    !yes &&
+    !check &&
+    !doctor &&
+    !configAction &&
+    !policyAction &&
+    !presetAction
+  ) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -135,6 +146,10 @@ export async function main() {
       range: policyRange,
       machineOutput,
     });
+  }
+
+  if (presetAction) {
+    return runPresetCommand(presetAction, { file: presetFile, machineOutput });
   }
 
   // ── Banner ──────────────────────────────────────────────────────────

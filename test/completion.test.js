@@ -10,6 +10,7 @@ test('completion generators cover stable commands and shell-specific registratio
     for (const command of [
       'config',
       'policy',
+      'preset',
       'completion',
       'split',
       'doctor',

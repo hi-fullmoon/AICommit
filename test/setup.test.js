@@ -13,6 +13,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { mergeSetupConfig, runSetup } from '../src/setup.js';
+import {
+  BUNDLED_PROVIDER_PRESET_PATH,
+  loadProviderPresetManifest,
+  validateProviderPresetManifest,
+} from '../src/provider-presets.js';
+
+const bundledPresetLoader = () =>
+  loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.3.0' });
 
 const entry = {
   apiUrl: 'https://api.deepseek.com/v1/chat/completions',
@@ -97,6 +105,7 @@ test('runSetup saves a preset provider atomically with environment credentials',
     inputPrompt: async () => 'gpt-test',
     passwordPrompt: async () => 'env:AICOMMIT_SETUP_TEST_KEY',
     confirmPrompt: async () => false,
+    presetLoader: bundledPresetLoader,
   });
 
   const saved = JSON.parse(readFileSync(targetPath, 'utf-8'));
@@ -107,6 +116,7 @@ test('runSetup saves a preset provider atomically with environment credentials',
     apiKey: '',
     apiKeyEnv: 'AICOMMIT_SETUP_TEST_KEY',
     modelId: 'gpt-test',
+    providerType: 'openai',
   });
   if (process.platform !== 'win32') {
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
@@ -144,6 +154,7 @@ test('runSetup preserves invalid config and cancels after a failed connection te
         spinnerEvents.push(['fail', message]);
       },
     }),
+    presetLoader: bundledPresetLoader,
   });
 
   assert.equal(readFileSync(targetPath, 'utf-8'), '{invalid json\n');
@@ -151,4 +162,46 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   assert.ok(backup, 'invalid source config is backed up');
   assert.equal(readFileSync(join(root, backup), 'utf-8'), '{invalid json\n');
   assert.deepEqual(spinnerEvents, [['fail', 'Connection failed']]);
+});
+
+test('setup discovers a new compatible provider only from preset data', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-preset-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const targetPath = join(root, '.aicommit.config.json');
+  const base = (await bundledPresetLoader()).manifest;
+  const manifest = JSON.parse(JSON.stringify(base));
+  manifest.version = '1.1.0';
+  manifest.providers = [
+    {
+      id: 'acme',
+      label: 'Acme Compatible',
+      adapter: 'custom',
+      apiUrl: 'https://api.acme.example/v1/chat/completions',
+      modelId: 'acme-default',
+    },
+  ];
+  validateProviderPresetManifest(manifest);
+  const selections = ['acme', 'en'];
+  let providerChoices;
+  await runSetup({
+    targetPath,
+    presetLoader: async () => ({ manifest, path: 'test', source: 'file' }),
+    selectPrompt: async (question) => {
+      if (question.message === 'Choose a provider') providerChoices = question.choices;
+      return selections.shift();
+    },
+    inputPrompt: async () => 'acme-v2',
+    passwordPrompt: async () => '',
+    confirmPrompt: async () => false,
+  });
+
+  assert.ok(providerChoices.some((choice) => choice.value === 'acme'));
+  const saved = JSON.parse(readFileSync(targetPath, 'utf8'));
+  assert.deepEqual(saved.providers.acme, {
+    apiUrl: 'https://api.acme.example/v1/chat/completions',
+    apiKey: '',
+    apiKeyEnv: '',
+    modelId: 'acme-v2',
+    providerType: 'custom',
+  });
 });

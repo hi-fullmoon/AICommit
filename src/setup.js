@@ -12,28 +12,7 @@ import { checkConnection } from './api.js';
 import { isSecureApiUrl } from './config.js';
 import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
-
-// Presets offered by the wizard. Each provides the endpoint and a sensible
-// default model; the user can still override the model id in a later step.
-const PROVIDER_PRESETS = [
-  { name: 'openai', apiUrl: 'https://api.openai.com/v1/chat/completions', modelId: 'gpt-4o' },
-  {
-    name: 'deepseek',
-    apiUrl: 'https://api.deepseek.com/v1/chat/completions',
-    modelId: 'deepseek-v4-flash',
-  },
-  {
-    name: 'openrouter',
-    apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
-    modelId: 'openai/gpt-4o-mini',
-  },
-  {
-    name: 'minimax',
-    apiUrl: 'https://api.minimaxi.com/v1/chat/completions',
-    modelId: 'MiniMax-M3',
-    extraBody: { thinking: { type: 'disabled' }, reasoning_split: true },
-  },
-];
+import { loadProviderPresetManifest } from './provider-presets.js';
 
 // Top-level connection keys from a legacy flat config. When the wizard writes
 // a providers map these are dropped from the top level, so the old flat
@@ -100,6 +79,7 @@ export async function runSetup(dependencies = {}) {
     confirmPrompt = confirm,
     connectionCheck = checkConnection,
     spinnerFactory = ora,
+    presetLoader = loadProviderPresetManifest,
   } = dependencies;
 
   console.log('');
@@ -114,22 +94,24 @@ export async function runSetup(dependencies = {}) {
   console.log(chalk.dim(`  Credentials will be stored in the user config: ${targetPath}`));
 
   const existing = await readExistingConfig(targetPath);
+  const { manifest: presetManifest } = await presetLoader();
+  const providerPresets = presetManifest.providers;
 
   // ── 2. Provider ─────────────────────────────────────────────────────
 
   const presetName = await selectPrompt({
     message: 'Choose a provider',
     choices: [
-      ...PROVIDER_PRESETS.map((p) => ({
-        name: p.name,
-        value: p.name,
+      ...providerPresets.map((p) => ({
+        name: p.label,
+        value: p.id,
         description: `${p.apiUrl} — default model: ${p.modelId}`,
       })),
       { name: 'custom', value: 'custom', description: 'Any OpenAI-compatible endpoint' },
     ],
   });
 
-  let providerName, apiUrl, defaultModel, presetExtraBody;
+  let providerName, apiUrl, defaultModel, presetAdapter, presetExtraBody;
   if (presetName === 'custom') {
     providerName = await inputPrompt({
       message: 'Provider name (used with aicommit -p <name>)',
@@ -143,10 +125,12 @@ export async function runSetup(dependencies = {}) {
     apiUrl = apiUrl.trim();
     defaultModel = '';
   } else {
-    const preset = PROVIDER_PRESETS.find((p) => p.name === presetName);
-    providerName = preset.name;
+    const preset = providerPresets.find((p) => p.id === presetName);
+    if (!preset) throw new Error(`Provider preset not found: ${presetName}`);
+    providerName = preset.id;
     apiUrl = preset.apiUrl;
     defaultModel = preset.modelId;
+    presetAdapter = preset.adapter;
     presetExtraBody = preset.extraBody;
   }
 
@@ -212,6 +196,7 @@ export async function runSetup(dependencies = {}) {
     apiKey,
     apiKeyEnv,
     modelId,
+    ...(presetAdapter ? { providerType: presetAdapter } : {}),
     ...(presetExtraBody && !existingProvider.extraBody ? { extraBody: presetExtraBody } : {}),
   };
 

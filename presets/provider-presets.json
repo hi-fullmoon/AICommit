@@ -1,0 +1,53 @@
+{
+  "kind": "aicommit-provider-presets",
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "compatibility": {
+    "coreMinimum": "1.3.0",
+    "coreMaximumExclusive": "2.0.0",
+    "adapterContract": 1
+  },
+  "providers": [
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "adapter": "openai",
+      "apiUrl": "https://api.openai.com/v1/chat/completions",
+      "modelId": "gpt-4o"
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "adapter": "deepseek",
+      "apiUrl": "https://api.deepseek.com/v1/chat/completions",
+      "modelId": "deepseek-v4-flash"
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "adapter": "openrouter",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "modelId": "openai/gpt-4o-mini"
+    },
+    {
+      "id": "minimax",
+      "label": "MiniMax",
+      "adapter": "minimax",
+      "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
+      "modelId": "MiniMax-M3",
+      "extraBody": {
+        "thinking": {
+          "type": "disabled"
+        },
+        "reasoning_split": true
+      }
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama (local)",
+      "adapter": "ollama",
+      "apiUrl": "http://127.0.0.1:11434/api/chat",
+      "modelId": "qwen3:8b"
+    }
+  ]
+}

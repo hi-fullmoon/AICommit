@@ -1,4 +1,16 @@
-const PROVIDER_TYPES = new Set(['openai', 'openrouter', 'deepseek', 'minimax', 'ollama', 'custom']);
+export const PROVIDER_TYPES = Object.freeze([
+  'openai',
+  'openrouter',
+  'deepseek',
+  'minimax',
+  'ollama',
+  'custom',
+]);
+const PROVIDER_TYPE_SET = new Set(PROVIDER_TYPES);
+
+export function isProviderType(value) {
+  return typeof value === 'string' && PROVIDER_TYPE_SET.has(value.toLowerCase());
+}
 
 function endpoint(apiUrl) {
   try {
@@ -11,9 +23,9 @@ function endpoint(apiUrl) {
 export function detectProviderType(apiUrl, explicitType = '') {
   if (explicitType) {
     const normalized = explicitType.toLowerCase();
-    if (!PROVIDER_TYPES.has(normalized)) {
+    if (!PROVIDER_TYPE_SET.has(normalized)) {
       throw new Error(
-        `Unknown providerType "${explicitType}". Use one of: ${[...PROVIDER_TYPES].join(', ')}.`,
+        `Unknown providerType "${explicitType}". Use one of: ${PROVIDER_TYPES.join(', ')}.`,
       );
     }
     return normalized;

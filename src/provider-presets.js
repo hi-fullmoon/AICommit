@@ -1,0 +1,316 @@
+import { createRequire } from 'node:module';
+import { lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { isProviderType } from './providers.js';
+import { fileExists } from './utils.js';
+
+const require = createRequire(import.meta.url);
+const { version: CORE_VERSION } = require('../package.json');
+
+export const PROVIDER_PRESET_KIND = 'aicommit-provider-presets';
+export const PROVIDER_PRESET_SCHEMA_VERSION = 1;
+export const PROVIDER_ADAPTER_CONTRACT_VERSION = 1;
+export const PROVIDER_PRESET_FILENAME = 'provider-presets.json';
+export const PROVIDER_PRESET_BACKUP_FILENAME = 'provider-presets.previous.json';
+export const BUNDLED_PROVIDER_PRESET_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../presets/provider-presets.json',
+);
+
+const MAX_PRESET_BYTES = 256 * 1024;
+const MAX_EXTRA_BODY_DEPTH = 8;
+const MAX_EXTRA_BODY_NODES = 500;
+const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const FORBIDDEN_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const CREDENTIAL_KEY_RE =
+  /^(?:authorization|proxy-authorization|api[-_]?key|access[-_]?token|bearer[-_]?token|token|secret(?:[-_]?key)?|client[-_]?secret|password)$/i;
+
+function object(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertExactKeys(value, expected, path) {
+  if (!object(value)) throw new Error(`${path} must be an object.`);
+  const allowed = new Set(expected);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  const missing = expected.filter((key) => !Object.hasOwn(value, key));
+  if (unknown.length)
+    throw new Error(`${path} contains unknown properties: ${unknown.join(', ')}.`);
+  if (missing.length) throw new Error(`${path} is missing properties: ${missing.join(', ')}.`);
+}
+
+function semverTuple(value, path) {
+  const match = typeof value === 'string' ? value.match(SEMVER_RE) : null;
+  if (!match) throw new Error(`${path} must be a stable semantic version (x.y.z).`);
+  return match.slice(1).map(Number);
+}
+
+function compareVersions(left, right) {
+  for (let index = 0; index < 3; index++) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function assertExtraBody(value, path = 'provider.extraBody', depth = 0, state = { nodes: 0 }) {
+  state.nodes += 1;
+  if (state.nodes > MAX_EXTRA_BODY_NODES) throw new Error(`${path} is too complex.`);
+  if (depth > MAX_EXTRA_BODY_DEPTH) throw new Error(`${path} is nested too deeply.`);
+  if (value === null || ['string', 'boolean'].includes(typeof value)) return;
+  if (typeof value === 'number' && Number.isFinite(value)) return;
+  if (Array.isArray(value)) {
+    if (value.length > 100) throw new Error(`${path} has too many array items.`);
+    value.forEach((item, index) => assertExtraBody(item, `${path}[${index}]`, depth + 1, state));
+    return;
+  }
+  if (!object(value)) throw new Error(`${path} must contain JSON-compatible values.`);
+  const entries = Object.entries(value);
+  if (entries.length > 100) throw new Error(`${path} has too many properties.`);
+  for (const [key, item] of entries) {
+    if (
+      FORBIDDEN_JSON_KEYS.has(key) ||
+      CREDENTIAL_KEY_RE.test(key) ||
+      (depth === 0 && (key === 'model' || key === 'messages'))
+    ) {
+      throw new Error(`${path} contains forbidden property: ${key}.`);
+    }
+    assertExtraBody(item, `${path}.${key}`, depth + 1, state);
+  }
+}
+
+function securePresetUrl(value) {
+  try {
+    const url = new URL(value);
+    const loopback =
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.startsWith('127.') ||
+      url.hostname === '[::1]';
+    const secureTransport = url.protocol === 'https:' || (url.protocol === 'http:' && loopback);
+    return secureTransport && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+export function validateProviderPresetManifest(value) {
+  assertExactKeys(
+    value,
+    ['kind', 'schemaVersion', 'version', 'compatibility', 'providers'],
+    'Provider preset manifest',
+  );
+  if (value.kind !== PROVIDER_PRESET_KIND) {
+    throw new Error(`Provider preset kind must be "${PROVIDER_PRESET_KIND}".`);
+  }
+  if (value.schemaVersion !== PROVIDER_PRESET_SCHEMA_VERSION) {
+    throw new Error(`Provider preset schemaVersion must be ${PROVIDER_PRESET_SCHEMA_VERSION}.`);
+  }
+  semverTuple(value.version, 'Provider preset version');
+  assertExactKeys(
+    value.compatibility,
+    ['coreMinimum', 'coreMaximumExclusive', 'adapterContract'],
+    'Provider preset compatibility',
+  );
+  const minimum = semverTuple(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
+  const maximum = semverTuple(
+    value.compatibility.coreMaximumExclusive,
+    'compatibility.coreMaximumExclusive',
+  );
+  if (compareVersions(minimum, maximum) >= 0) {
+    throw new Error('Provider preset compatibility range is empty.');
+  }
+  if (value.compatibility.adapterContract !== PROVIDER_ADAPTER_CONTRACT_VERSION) {
+    throw new Error(
+      `Provider preset adapterContract must be ${PROVIDER_ADAPTER_CONTRACT_VERSION}.`,
+    );
+  }
+  if (!Array.isArray(value.providers) || !value.providers.length || value.providers.length > 100) {
+    throw new Error('Provider preset providers must contain 1-100 entries.');
+  }
+  const ids = new Set();
+  for (const [index, provider] of value.providers.entries()) {
+    const path = `Provider preset providers[${index}]`;
+    const required = ['id', 'label', 'adapter', 'apiUrl', 'modelId'];
+    assertExactKeys(
+      provider,
+      Object.hasOwn(provider || {}, 'extraBody') ? [...required, 'extraBody'] : required,
+      path,
+    );
+    if (
+      !ID_RE.test(provider.id) ||
+      provider.id.toLowerCase() === 'custom' ||
+      ids.has(provider.id)
+    ) {
+      throw new Error(
+        `${path}.id must be unique and use letters, digits, dot, dash, or underscore.`,
+      );
+    }
+    ids.add(provider.id);
+    if (
+      typeof provider.label !== 'string' ||
+      !provider.label.trim() ||
+      provider.label.length > 80 ||
+      /[\0-\x1f\x7f]/.test(provider.label)
+    ) {
+      throw new Error(`${path}.label must be a non-empty string of at most 80 characters.`);
+    }
+    if (!isProviderType(provider.adapter) || provider.adapter !== provider.adapter.toLowerCase()) {
+      throw new Error(`${path}.adapter is not supported by adapter contract v1.`);
+    }
+    if (
+      !securePresetUrl(provider.apiUrl) ||
+      provider.apiUrl.length > 2048 ||
+      /[\0-\x1f\x7f]/.test(provider.apiUrl)
+    ) {
+      throw new Error(
+        `${path}.apiUrl must be credential-free HTTPS, or HTTP only for localhost/loopback, without query or fragment.`,
+      );
+    }
+    if (
+      typeof provider.modelId !== 'string' ||
+      !provider.modelId.trim() ||
+      provider.modelId.length > 256 ||
+      /[\0-\x1f\x7f]/.test(provider.modelId)
+    ) {
+      throw new Error(`${path}.modelId must be a non-empty string of at most 256 characters.`);
+    }
+    if (Object.hasOwn(provider, 'extraBody')) {
+      if (!object(provider.extraBody)) throw new Error(`${path}.extraBody must be an object.`);
+      assertExtraBody(provider.extraBody, `${path}.extraBody`);
+    }
+  }
+  return value;
+}
+
+export function assertProviderPresetCompatibility(value, coreVersion = CORE_VERSION) {
+  validateProviderPresetManifest(value);
+  const core = semverTuple(coreVersion, 'Core version');
+  const minimum = semverTuple(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
+  const maximum = semverTuple(
+    value.compatibility.coreMaximumExclusive,
+    'compatibility.coreMaximumExclusive',
+  );
+  if (compareVersions(core, minimum) < 0 || compareVersions(core, maximum) >= 0) {
+    throw new Error(
+      `Provider preset v${value.version} requires aicommit >=${value.compatibility.coreMinimum} and <${value.compatibility.coreMaximumExclusive}; current core is ${coreVersion}.`,
+    );
+  }
+  return value;
+}
+
+export function providerPresetPaths(home = homedir()) {
+  const directory = join(home, '.aicommit');
+  return {
+    bundled: BUNDLED_PROVIDER_PRESET_PATH,
+    user: join(directory, PROVIDER_PRESET_FILENAME),
+    backup: join(directory, PROVIDER_PRESET_BACKUP_FILENAME),
+  };
+}
+
+async function readManifest(path, coreVersion) {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) {
+    throw new Error(`Provider preset must be a regular non-symlinked file: ${path}`);
+  }
+  if (info.size > MAX_PRESET_BYTES) {
+    throw new Error(`Provider preset exceeds 256 KiB: ${path}`);
+  }
+  let value;
+  try {
+    value = JSON.parse(await readFile(path, 'utf8'));
+  } catch (err) {
+    throw new Error(`Failed to parse provider preset ${path}: ${err.message}`, { cause: err });
+  }
+  assertProviderPresetCompatibility(value, coreVersion);
+  return value;
+}
+
+export async function loadProviderPresetManifest({
+  path = null,
+  home = homedir(),
+  coreVersion,
+} = {}) {
+  const paths = providerPresetPaths(home);
+  const selected = path
+    ? resolve(path)
+    : (await fileExists(paths.user))
+      ? paths.user
+      : paths.bundled;
+  return {
+    manifest: await readManifest(selected, coreVersion),
+    path: selected,
+    source: path ? 'file' : selected === paths.user ? 'user' : 'bundled',
+  };
+}
+
+async function assertWritableTarget(path) {
+  if (!(await fileExists(path))) return;
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) {
+    throw new Error(`Refusing to replace non-regular provider preset path: ${path}`);
+  }
+}
+
+async function writeTextAtomic(path, text) {
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(temp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temp, path);
+  } catch (err) {
+    await unlink(temp).catch(() => {});
+    throw err;
+  }
+}
+
+async function writeAtomic(path, value) {
+  await writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export async function installProviderPresetManifest(
+  sourcePath,
+  { home = homedir(), coreVersion } = {},
+) {
+  if (!sourcePath) throw new Error('preset install requires --file=<manifest>.');
+  const source = await loadProviderPresetManifest({ path: sourcePath, home, coreVersion });
+  const paths = providerPresetPaths(home);
+  const directory = dirname(paths.user);
+  if (await fileExists(directory)) {
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error(`Refusing to use non-regular provider preset directory: ${directory}`);
+    }
+  } else {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+  }
+  await assertWritableTarget(paths.user);
+  await assertWritableTarget(paths.backup);
+  let invalidBackupPath = null;
+  if (await fileExists(paths.user)) {
+    try {
+      const current = await readManifest(paths.user, coreVersion);
+      await writeAtomic(paths.backup, current);
+    } catch {
+      invalidBackupPath = join(dirname(paths.user), `provider-presets.invalid-${Date.now()}.json`);
+      await writeTextAtomic(invalidBackupPath, await readFile(paths.user, 'utf8'));
+    }
+  }
+  await writeAtomic(paths.user, source.manifest);
+  return {
+    manifest: source.manifest,
+    path: paths.user,
+    backupPath: paths.backup,
+    invalidBackupPath,
+  };
+}
+
+export async function rollbackProviderPresetManifest({ home = homedir(), coreVersion } = {}) {
+  const paths = providerPresetPaths(home);
+  if (!(await fileExists(paths.backup))) {
+    throw new Error(`No previous provider preset is available at ${paths.backup}.`);
+  }
+  return installProviderPresetManifest(paths.backup, { home, coreVersion });
+}

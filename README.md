@@ -20,7 +20,7 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
+It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key/model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
 
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
@@ -146,6 +146,19 @@ The complete team policy loads after personal settings. Machine output includes 
 Every provider adapter maps the same generation contract: messages, streaming, reasoning controls, output-token budget, normalized usage (`inputTokens`, `outputTokens`, `totalTokens`), and finish reason. Endpoint detection normally selects the adapter; set `providerType` when a compatible service uses a custom domain.
 
 Requests retry only transient failures: HTTP 429, recoverable 5xx responses, network interruption, and interrupted response bodies. Retries are bounded by `retry.maxAttempts`, use capped exponential backoff, and honor `Retry-After` when present. Authentication, invalid-parameter, and content-safety failures are returned immediately without retrying.
+
+### Versioned provider presets
+
+Setup defaults live in a strict manifest separate from request adapters and the Git/interaction flow. A compatible provider can be added by updating preset data and referencing an existing adapter:
+
+```bash
+aicommit preset show
+aicommit preset validate --file=provider-presets.json
+aicommit preset install --file=provider-presets.json
+aicommit preset rollback
+```
+
+The active user manifest is `~/.aicommit/provider-presets.json`; each update keeps the previous valid version for rollback. Manifests declare their own semantic version, supported core range, and adapter-contract version, and cannot contain credentials. See the bilingual [preset compatibility/update guide](docs/provider-presets.md) and [published schema](schemas/aicommit-provider-presets.schema.json).
 
 ### Saving tokens
 

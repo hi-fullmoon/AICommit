@@ -16,6 +16,7 @@ function showHelp() {
     ${chalk.dim('$')} aicommit setup
     ${chalk.dim('$')} aicommit config <show|validate|path> [options]
     ${chalk.dim('$')} aicommit policy <template|check> [options]
+    ${chalk.dim('$')} aicommit preset <show|validate|path|install|rollback> [options]
     ${chalk.dim('$')} aicommit completion <bash|zsh|fish>
     ${chalk.dim('$')} aicommit split <plan|apply> --file=<path> [options]
 
@@ -27,6 +28,7 @@ function showHelp() {
     config path           Print user, project, and team-policy paths
     policy template       Print a safe repository team-policy template
     policy check          Validate a message file or Git range with the effective team policy
+    preset                Inspect, validate, install, or roll back provider preset manifests
     completion            Generate Bash, Zsh, or Fish completion on stdout
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
@@ -65,6 +67,9 @@ function showHelp() {
     aicommit policy template > .aicommit.policy.json  Create a committable policy
     aicommit policy check --file=.git/COMMIT_EDITMSG  Validate a local commit message
     aicommit policy check --range=origin/main..HEAD --output=json  Validate a CI range
+    aicommit preset show  Show the active versioned provider preset manifest
+    aicommit preset install --file=provider-presets.json  Install a compatible manifest
+    aicommit preset rollback  Restore the previously installed manifest
     aicommit completion zsh > _aicommit  Generate Zsh completion
     aicommit metrics status  Show local-only metrics status and record count
     aicommit stats        Show local acceptance, quality, latency, and token trends
@@ -124,6 +129,8 @@ function parsedDefaults(overrides = {}) {
     policyAction: null,
     policyMessageFile: null,
     policyRange: null,
+    presetAction: null,
+    presetFile: null,
     completionShell: null,
     statsAction: null,
     metricsAction: null,
@@ -192,6 +199,18 @@ export function parseArgs(args = process.argv.slice(2)) {
     args = args.slice(2);
   }
 
+  let presetAction = null;
+  if (args[0] === 'preset') {
+    presetAction = args[1];
+    if (!['show', 'validate', 'path', 'install', 'rollback'].includes(presetAction)) {
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'preset requires one action: show, validate, path, install, or rollback.',
+      );
+    }
+    args = args.slice(2);
+  }
+
   let configAction = null;
   if (args[0] === 'config') {
     configAction = args[1];
@@ -224,6 +243,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let splitPlanFile = null;
   let policyMessageFile = null;
   let policyRange = null;
+  let presetFile = null;
   let splitScopeOption = false;
   let dryRun = false;
   let yes = false;
@@ -300,6 +320,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     if (arg === '--file') {
       const value = takeValue(args, i, arg, 'path');
       if (policyAction) policyMessageFile = value;
+      else if (presetAction) presetFile = value;
       else splitPlanFile = value;
       i++;
       continue;
@@ -309,6 +330,7 @@ export function parseArgs(args = process.argv.slice(2)) {
       const value = arg.slice('--file='.length);
       if (!value) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --file.');
       if (policyAction) policyMessageFile = value;
+      else if (presetAction) presetFile = value;
       else splitPlanFile = value;
       continue;
     }
@@ -514,6 +536,30 @@ export function parseArgs(args = process.argv.slice(2)) {
     throw fail(ERROR_CATEGORIES.CONFIG, 'policy check accepts either --file or --range, not both.');
   }
   if (
+    presetAction &&
+    (targetPath ||
+      cliProvider ||
+      cliLang ||
+      cliReasoning ||
+      split ||
+      splitHunks ||
+      splitCommand ||
+      dryRun ||
+      yes ||
+      check)
+  ) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'preset accepts only --file (validate/install), --output, and --debug.',
+    );
+  }
+  if (presetAction === 'install' && !presetFile) {
+    throw fail(ERROR_CATEGORIES.CONFIG, 'preset install requires --file=<manifest>.');
+  }
+  if (presetFile && !['validate', 'install'].includes(presetAction)) {
+    throw fail(ERROR_CATEGORIES.CONFIG, '--file is only valid with preset validate or install.');
+  }
+  if (
     doctor &&
     (targetPath || cliLang || cliReasoning || split || splitPlanFile || dryRun || yes || check)
   ) {
@@ -543,6 +589,8 @@ export function parseArgs(args = process.argv.slice(2)) {
     policyAction,
     policyMessageFile,
     policyRange,
+    presetAction,
+    presetFile,
     completionShell: null,
     statsAction: null,
     metricsAction: null,

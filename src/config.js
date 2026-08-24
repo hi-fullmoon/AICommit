@@ -17,6 +17,7 @@ import {
   validateRepositoryContextConfig,
 } from './context.js';
 import { readTeamPolicy } from './team-policy.js';
+import { isProviderType, PROVIDER_TYPES } from './providers.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -295,13 +296,9 @@ export function validateConfig(config) {
   }
   if (
     typeof config.providerType !== 'string' ||
-    !['', 'openai', 'openrouter', 'deepseek', 'minimax', 'ollama', 'custom'].includes(
-      config.providerType.toLowerCase(),
-    )
+    (config.providerType !== '' && !isProviderType(config.providerType))
   ) {
-    throw new Error(
-      'Invalid config "providerType": expected openai, openrouter, deepseek, minimax, ollama, custom, or "".',
-    );
+    throw new Error(`Invalid config "providerType": expected ${PROVIDER_TYPES.join(', ')}, or "".`);
   }
   if (!config.metrics || typeof config.metrics !== 'object' || Array.isArray(config.metrics)) {
     throw new Error('Invalid config "metrics": expected an object.');
