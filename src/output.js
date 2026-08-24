@@ -28,7 +28,7 @@ function normalizedPlan(plan) {
 }
 
 export function successOutput(result = {}) {
-  return {
+  const output = {
     schemaVersion: OUTPUT_SCHEMA_VERSION,
     ok: true,
     message: typeof result.message === 'string' ? result.message : null,
@@ -45,6 +45,10 @@ export function successOutput(result = {}) {
     committed: Boolean(result.committed),
     error: null,
   };
+  if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
+    output.data = result.data;
+  }
+  return output;
 }
 
 export function errorOutput(err) {

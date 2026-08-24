@@ -47,6 +47,8 @@ import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
 import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.js';
+import { runConfigCommand } from './config-command.js';
+import { generateCompletion } from './completion.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -72,6 +74,8 @@ export async function main() {
     check,
     setup,
     doctor,
+    configAction,
+    completionShell,
     statsAction,
     metricsAction,
     help,
@@ -79,6 +83,10 @@ export async function main() {
   } = parseArgs();
 
   if (help || version) return { exitReason: help ? 'help' : 'version' };
+  if (completionShell) {
+    process.stdout.write(generateCompletion(completionShell));
+    return { exitReason: 'completion' };
+  }
   if (metricsAction) {
     await runMetricsCommand(metricsAction);
     return { exitReason: `metrics_${metricsAction}` };
@@ -89,7 +97,7 @@ export async function main() {
   }
 
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !check && !doctor) {
+  if (machineOutput && !yes && !check && !doctor && !configAction) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -108,6 +116,13 @@ export async function main() {
     } catch {
       throw fail(ERROR_CATEGORIES.CONFIG, `'${targetPath}' is not a valid directory.`);
     }
+  }
+
+  if (configAction) {
+    return runConfigCommand(configAction, {
+      provider: cliProvider,
+      machineOutput,
+    });
   }
 
   // ── Banner ──────────────────────────────────────────────────────────

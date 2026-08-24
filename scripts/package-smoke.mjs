@@ -102,6 +102,8 @@ async function main() {
       'bin/aicommit.js',
       'package.json',
       'schemas/aicommit-output.schema.json',
+      'src/completion.js',
+      'src/config-command.js',
       'src/main.js',
     ]) {
       assert.ok(packedPaths.has(expected), `published package is missing ${expected}`);
@@ -137,9 +139,25 @@ async function main() {
       `aicommit v${manifest.version}`,
     );
 
+    const bashCompletion = run(process.execPath, [entry, 'completion', 'bash']);
+    assert.match(bashCompletion, /complete -F _aicommit aicommit/);
+    assert.doesNotMatch(bashCompletion, /AI-powered commit message generator/);
+
     const home = join(root, 'home');
     mkdirSync(home);
     const repo = makeRepo(root);
+    const configPaths = await runCli(entry, ['config', 'path', '--output=json'], {
+      cwd: repo,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+      },
+    });
+    assert.equal(configPaths.code, 0, configPaths.stdout + configPaths.stderr);
+    assert.equal(JSON.parse(configPaths.stdout).exitReason, 'config_path');
     server = createServer((request, response) => {
       request.resume();
       request.on('end', () => {

@@ -427,7 +427,7 @@ export function getProjectRoot() {
   }
 }
 
-export async function loadConfig(cliProvider = null) {
+export async function loadConfig(cliProvider = null, { resolveCredentials = true } = {}) {
   const projectRoot = getProjectRoot();
   let config = { ...DEFAULT_CONFIG };
   const loaded = [];
@@ -476,8 +476,15 @@ export async function loadConfig(cliProvider = null) {
   const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
   validateConfig(resolvedConfig);
-  const credential = resolveCredential(resolvedConfig);
-  resolvedConfig.apiKey = credential.apiKey;
+  const credential = resolveCredentials
+    ? resolveCredential(resolvedConfig)
+    : {
+        apiKey: resolvedConfig.apiKey,
+        source: 'not_resolved',
+        sourceLabel: 'not resolved',
+        warning: null,
+      };
+  if (resolveCredentials) resolvedConfig.apiKey = credential.apiKey;
 
   return {
     config: resolvedConfig,

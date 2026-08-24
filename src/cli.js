@@ -14,11 +14,17 @@ function showHelp() {
   ${chalk.bold('Usage:')}
     ${chalk.dim('$')} aicommit [path] [options]
     ${chalk.dim('$')} aicommit setup
+    ${chalk.dim('$')} aicommit config <show|validate|path> [options]
+    ${chalk.dim('$')} aicommit completion <bash|zsh|fish>
     ${chalk.dim('$')} aicommit split <plan|apply> --file=<path> [options]
 
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
     doctor                Diagnose runtime, config, credentials, and connectivity
+    config show           Print the effective configuration with secrets redacted
+    config validate       Parse, merge, and validate configuration without reading credentials
+    config path           Print user and project configuration paths
+    completion            Generate Bash, Zsh, or Fish completion on stdout
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
     split --resume        Resume the repository's unfinished transaction
@@ -49,6 +55,10 @@ function showHelp() {
   ${chalk.bold('Examples:')}
     aicommit setup        Run the interactive configuration wizard
     aicommit doctor       Check runtime, config, credentials, and connectivity
+    aicommit config show  Show effective redacted configuration
+    aicommit config validate --output=json  Validate configuration for CI
+    aicommit config path  Show user and project config locations
+    aicommit completion zsh > _aicommit  Generate Zsh completion
     aicommit metrics status  Show local-only metrics status and record count
     aicommit stats        Show local acceptance, quality, latency, and token trends
     aicommit              Commit changes in current directory (Chinese)
@@ -103,6 +113,8 @@ function parsedDefaults(overrides = {}) {
     check: false,
     setup: false,
     doctor: false,
+    configAction: null,
+    completionShell: null,
     statsAction: null,
     metricsAction: null,
     help: false,
@@ -144,6 +156,23 @@ export function parseArgs(args = process.argv.slice(2)) {
       );
     }
     return parsedDefaults({ statsAction: action });
+  }
+
+  if (args[0] === 'completion') {
+    const shell = args[1];
+    if (args.length !== 2 || !['bash', 'zsh', 'fish'].includes(shell)) {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'completion requires one shell: bash, zsh, or fish.');
+    }
+    return parsedDefaults({ completionShell: shell });
+  }
+
+  let configAction = null;
+  if (args[0] === 'config') {
+    configAction = args[1];
+    if (!['show', 'validate', 'path'].includes(configAction)) {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'config requires one action: show, validate, or path.');
+    }
+    args = args.slice(2);
   }
 
   let splitCommand = null;
@@ -397,6 +426,18 @@ export function parseArgs(args = process.argv.slice(2)) {
   if (splitScopeOption && splitCommand !== 'plan') {
     throw fail(ERROR_CATEGORIES.CONFIG, '--scope is only valid with "aicommit split plan".');
   }
+  if (
+    configAction &&
+    (cliLang || cliReasoning || split || splitHunks || splitCommand || dryRun || yes || check)
+  ) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'config accepts only an optional path, --provider, --output, and --debug.',
+    );
+  }
+  if (configAction === 'path' && cliProvider) {
+    throw fail(ERROR_CATEGORIES.CONFIG, 'config path does not accept --provider.');
+  }
   if (doctor && (targetPath || cliLang || cliReasoning || split || dryRun || yes || check)) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
@@ -420,6 +461,8 @@ export function parseArgs(args = process.argv.slice(2)) {
     check,
     setup,
     doctor,
+    configAction,
+    completionShell: null,
     statsAction: null,
     metricsAction: null,
     help: false,

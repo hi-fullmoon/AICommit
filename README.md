@@ -172,6 +172,10 @@ Use `aicommit stats` to view first-pass acceptance, edit/rewrite/failure rates, 
 ```bash
 aicommit setup           # interactive configuration wizard
 aicommit doctor          # diagnose runtime, config, credentials, and connectivity
+aicommit config show     # show the effective config with secrets redacted
+aicommit config validate # validate config without resolving credentials
+aicommit config path     # print user and project config paths
+aicommit completion bash # generate Bash completion on stdout
 aicommit metrics status  # inspect local metrics state without uploading anything
 aicommit stats           # show local quality, latency, and token trends
 aicommit stats clear     # permanently clear local metric history
@@ -215,6 +219,25 @@ aicommit -h              # help
 | `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working; failures use the stable classified exits |
 | `-v`, `--version`  | Show version                                                                                         |
 | `-h`, `--help`     | Show help                                                                                            |
+
+### Configuration inspection
+
+`aicommit config show|validate|path` can run outside a repository and accepts an optional target directory. `show` applies the same user/project trust filtering and provider selection as commit generation, but recursively masks secrets. `validate` parses, merges, and validates configuration without reading environment credentials or invoking Git credential helpers, making `aicommit config validate --output=json` safe for CI. `path` reports both locations even when a config file is malformed. `show` and `validate` accept `--provider=<name>`.
+
+### Shell completion
+
+Completion scripts are generated from the installed CLI and contain no configuration or credentials:
+
+```bash
+# Bash
+aicommit completion bash > ~/.local/share/bash-completion/completions/aicommit
+
+# Zsh (ensure the destination directory is in $fpath)
+aicommit completion zsh > ~/.zfunc/_aicommit
+
+# Fish
+aicommit completion fish > ~/.config/fish/completions/aicommit.fish
+```
 
 ### Machine-readable output
 

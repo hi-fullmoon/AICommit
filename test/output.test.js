@@ -63,12 +63,14 @@ test('success and error machine outputs validate against the published JSON sche
     usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25, vendorField: 9 },
     warnings: ['diff condensed'],
     committed: true,
+    data: { configValid: true },
   });
   const error = errorOutput(new AicommitError(ERROR_CATEGORIES.NETWORK, 'socket reset'));
 
   validate(success, schema);
   validate(error, schema);
   assert.equal(success.error, null);
+  assert.deepEqual(success.data, { configValid: true });
   assert.equal(error.exitReason, 'network');
   assert.ok(!Object.hasOwn(success, 'reasoning'));
   assert.ok(!Object.hasOwn(success, 'diff'));

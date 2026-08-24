@@ -112,6 +112,25 @@ test('parseArgs recognizes doctor and restricts it to diagnostic options', () =>
   assert.equal(parseArgs([]).doctor, false);
 });
 
+test('parseArgs recognizes config inspection and shell completion commands', () => {
+  const show = parseArgs(['config', 'show', '/tmp/repo', '--provider=local', '--output=json']);
+  assert.equal(show.configAction, 'show');
+  assert.equal(show.targetPath, '/tmp/repo');
+  assert.equal(show.cliProvider, 'local');
+  assert.equal(show.output, 'json');
+  assert.equal(parseArgs(['config', 'validate']).configAction, 'validate');
+  assert.equal(parseArgs(['config', 'path']).configAction, 'path');
+  assert.throws(() => parseArgs(['config']), /show, validate, or path/);
+  assert.throws(() => parseArgs(['config', 'path', '--provider=x']), /does not accept/);
+  assert.throws(() => parseArgs(['config', 'show', '--yes']), /config accepts only/);
+
+  assert.equal(parseArgs(['completion', 'bash']).completionShell, 'bash');
+  assert.equal(parseArgs(['completion', 'zsh']).completionShell, 'zsh');
+  assert.equal(parseArgs(['completion', 'fish']).completionShell, 'fish');
+  assert.throws(() => parseArgs(['completion']), /requires one shell/);
+  assert.throws(() => parseArgs(['completion', 'powershell']), /bash, zsh, or fish/);
+});
+
 test('parseArgs recognizes local metrics management actions', () => {
   assert.equal(parseArgs(['metrics']).metricsAction, 'status');
   assert.equal(parseArgs(['metrics', 'clear']).metricsAction, 'clear');
