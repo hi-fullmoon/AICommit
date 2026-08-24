@@ -1,5 +1,6 @@
 import { cleanCommitMessage, isValidCommitMessage } from './utils.js';
 import { getProviderAdapter, normalizeUsage } from './providers.js';
+import { ERROR_CATEGORIES, fail } from './errors.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -189,7 +190,16 @@ export async function requestGeneration(config, request) {
           eventStream: true,
         };
       }
-      return { data: await response.json(), eventStream: false };
+      try {
+        return { data: await response.json(), eventStream: false };
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Provider returned invalid JSON.', {
+            cause: err,
+          });
+        }
+        throw err;
+      }
     },
   );
 

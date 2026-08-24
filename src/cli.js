@@ -2,6 +2,8 @@ import { createRequire } from 'node:module';
 
 import chalk from 'chalk';
 
+import { ERROR_CATEGORIES, fail } from './errors.js';
+
 const _require = createRequire(import.meta.url);
 const { version: VERSION } = _require('../package.json');
 
@@ -29,6 +31,7 @@ function showHelp() {
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
     -y, --yes             Non-interactive: accept the generated message/plan
+    --output=<text|json>  Output mode; JSON requires --yes for commit flows
     -c, --check           Verify the configured LLM is reachable (ping test)
     --debug               Print debug info (parsed args, final config, etc.)
 
@@ -57,11 +60,28 @@ function showVersion() {
 function takeValue(args, i, arg, hint) {
   const next = args[i + 1];
   if (!next || next.startsWith('-')) {
-    console.error(chalk.red(`  Missing value for ${arg}. Use ${arg}=<${hint}>`));
-    console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
-    process.exit(1);
+    throw fail(ERROR_CATEGORIES.CONFIG, `Missing value for ${arg}. Use ${arg}=<${hint}>`);
   }
   return next;
+}
+
+function parsedDefaults(overrides = {}) {
+  return {
+    targetPath: null,
+    cliLang: null,
+    cliProvider: null,
+    cliReasoning: null,
+    output: 'text',
+    debug: false,
+    split: false,
+    dryRun: false,
+    yes: false,
+    check: false,
+    setup: false,
+    help: false,
+    version: false,
+    ...overrides,
+  };
 }
 
 export function parseArgs(args = process.argv.slice(2)) {
@@ -69,27 +89,19 @@ export function parseArgs(args = process.argv.slice(2)) {
   // commit-flow options, so short-circuit before parsing them.
   if (args[0] === 'setup') {
     if (args.length > 1) {
-      console.error(chalk.red(`  "setup" takes no arguments — got: ${args.slice(1).join(' ')}`));
-      process.exit(1);
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        `"setup" takes no arguments — got: ${args.slice(1).join(' ')}`,
+      );
     }
-    return {
-      targetPath: null,
-      cliLang: null,
-      cliProvider: null,
-      cliReasoning: null,
-      debug: false,
-      split: false,
-      dryRun: false,
-      yes: false,
-      check: false,
-      setup: true,
-    };
+    return parsedDefaults({ setup: true });
   }
 
   let targetPath = null;
   let cliLang = null;
   let cliProvider = null;
   let cliReasoning = null;
+  let output = 'text';
   let debug = false;
   let split = false;
   let dryRun = false;
@@ -102,16 +114,28 @@ export function parseArgs(args = process.argv.slice(2)) {
 
     if (arg === '-h' || arg === '--help') {
       showHelp();
-      process.exit(0);
+      return parsedDefaults({ output, help: true });
     }
 
     if (arg === '-v' || arg === '--version') {
       showVersion();
-      process.exit(0);
+      return parsedDefaults({ output, version: true });
     }
 
     if (arg === '--debug') {
       debug = true;
+      continue;
+    }
+
+    if (arg === '--output') {
+      output = takeValue(args, i, arg, 'text|json');
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith('--output=')) {
+      output = arg.slice('--output='.length);
+      if (!output) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --output.');
       continue;
     }
 
@@ -139,8 +163,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     if (arg.startsWith('--reasoning=')) {
       cliReasoning = arg.slice('--reasoning='.length);
       if (!cliReasoning) {
-        console.error(chalk.red('  Missing value for --reasoning.'));
-        process.exit(1);
+        throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --reasoning.');
       }
       continue;
     }
@@ -189,25 +212,26 @@ export function parseArgs(args = process.argv.slice(2)) {
 
     if (!arg.startsWith('-')) {
       if (targetPath) {
-        console.error(chalk.red(`  Unexpected extra argument: ${arg}`));
-        console.error(
-          chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'),
+        throw fail(
+          ERROR_CATEGORIES.CONFIG,
+          `Unexpected extra argument: ${arg}. Use aicommit --help for usage.`,
         );
-        process.exit(1);
       }
       targetPath = arg;
     } else {
-      console.error(chalk.red(`  Unknown option: ${arg}`));
-      console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.CONFIG, `Unknown option: ${arg}. Use aicommit --help for usage.`);
     }
   }
 
   const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max'];
   if (cliReasoning && !reasoningLevels.includes(cliReasoning)) {
-    console.error(chalk.red(`  Invalid reasoning level: "${cliReasoning}".`));
-    console.error(chalk.dim(`  Use one of: ${reasoningLevels.join(', ')}`));
-    process.exit(1);
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `Invalid reasoning level: "${cliReasoning}". Use one of: ${reasoningLevels.join(', ')}`,
+    );
+  }
+  if (!['text', 'json'].includes(output)) {
+    throw fail(ERROR_CATEGORIES.CONFIG, `Invalid output mode: "${output}". Use text or json.`);
   }
 
   return {
@@ -215,11 +239,14 @@ export function parseArgs(args = process.argv.slice(2)) {
     cliLang,
     cliProvider,
     cliReasoning,
+    output,
     debug,
     split,
     dryRun,
     yes,
     check,
     setup,
+    help: false,
+    version: false,
   };
 }

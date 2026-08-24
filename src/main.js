@@ -43,6 +43,8 @@ import {
 } from './utils.js';
 import { splitFlow } from './split.js';
 import { runSetup } from './setup.js';
+import { detectProviderType } from './providers.js';
+import { ERROR_CATEGORIES, fail } from './errors.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
@@ -52,13 +54,23 @@ export async function main() {
     cliLang,
     cliProvider,
     cliReasoning,
+    output,
     debug,
     split,
     dryRun,
     yes,
     check,
     setup,
+    help,
+    version,
   } = parseArgs();
+
+  if (help || version) return { exitReason: help ? 'help' : 'version' };
+
+  const machineOutput = output === 'json';
+  if (machineOutput && !yes && !check) {
+    throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
+  }
 
   // The setup wizard is a standalone flow — no git repo, diff, or loaded
   // config required.
@@ -73,8 +85,7 @@ export async function main() {
       await stat(resolved);
       process.chdir(resolved);
     } catch {
-      console.error(chalk.red(`  ✗ Error: '${targetPath}' is not a valid directory`));
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.CONFIG, `'${targetPath}' is not a valid directory.`);
     }
   }
 
@@ -90,6 +101,8 @@ export async function main() {
   // ── 1. Config ───────────────────────────────────────────────────────
 
   const { config, projectRoot, loaded, providerName } = await loadConfig(cliProvider);
+  const selectedProvider = providerName || detectProviderType(config.apiUrl, config.providerType);
+  const warnings = [];
 
   if (loaded.length === 0) {
     console.log(chalk.dim('\n  No config files found — using defaults.'));
@@ -111,10 +124,10 @@ export async function main() {
 
   if (cliLang) config.language = cliLang;
   if (config.language !== 'zh' && config.language !== 'en') {
-    console.log(
-      '\n  ' + chalk.red(`✗ Invalid language: "${config.language}". Use "zh" or "en".\n`),
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `Invalid language: "${config.language}". Use "zh" or "en".`,
     );
-    process.exit(1);
   }
 
   if (cliReasoning === 'off') {
@@ -155,18 +168,19 @@ export async function main() {
       color: 'cyan',
     }).start();
     let reasoningStream;
-    const stream = reasoningEnabled
-      ? {
-          onReasoningDelta(chunk) {
-            if (!reasoningStream) {
-              spinner.stop();
-              reasoningStream = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-              return;
-            }
-            reasoningStream.append(chunk);
-          },
-        }
-      : null;
+    const stream =
+      reasoningEnabled && !machineOutput
+        ? {
+            onReasoningDelta(chunk) {
+              if (!reasoningStream) {
+                spinner.stop();
+                reasoningStream = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+                return;
+              }
+              reasoningStream.append(chunk);
+            },
+          }
+        : null;
 
     try {
       const report = await checkConnection(config, stream);
@@ -199,12 +213,21 @@ export async function main() {
         console.log('  ' + chalk.dim('Tokens:    ') + formatUsage(report.usage));
       }
       console.log('');
-      process.exit(0);
+      return {
+        message: null,
+        provider: selectedProvider,
+        model: config.modelId,
+        latencyMs: report.elapsed,
+        usage: report.usage,
+        warnings,
+        exitReason: 'connection_ok',
+        committed: false,
+      };
     } catch (err) {
       if (reasoningStream) await reasoningStream.stop();
       spinner.fail('Connection failed');
       console.log(`\n  ${indentError(err)}\n`);
-      process.exit(1);
+      throw err;
     }
   }
 
@@ -251,12 +274,19 @@ export async function main() {
   if (!isGitRepo(projectRoot)) {
     console.log('\n  ' + chalk.red(`✗ Not a git repository: ${process.cwd()}`));
     console.log(chalk.dim('  Run aicommit inside a git working tree.\n'));
-    process.exit(1);
+    throw fail(ERROR_CATEGORIES.GIT_STATE, `Not a git repository: ${process.cwd()}`, {
+      reported: true,
+    });
   }
 
   if (split) {
-    const handled = await splitFlow(config, projectRoot, { dryRun, yes });
-    if (handled) return;
+    const handled = await splitFlow(config, projectRoot, {
+      dryRun,
+      yes,
+      machineOutput,
+      provider: selectedProvider,
+    });
+    if (handled) return handled === true ? { exitReason: 'success' } : handled;
     // Only one changed file — continue with the normal single-commit flow.
   }
 
@@ -286,7 +316,7 @@ export async function main() {
 
     if (!tips.length) {
       console.log('\n  ' + chalk.yellow('✗ No changes to commit.\n'));
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
     }
 
     console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`));
@@ -307,7 +337,9 @@ export async function main() {
       console.log(
         chalk.dim('  Stage the intended files with git add, then run aicommit --yes again.\n'),
       );
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.GIT_STATE, '--yes requires explicitly staged changes.', {
+        reported: true,
+      });
     }
 
     // Offer to stage instead of exiting — the user can stage everything or
@@ -373,13 +405,18 @@ export async function main() {
       console.log(
         '\n  ' + chalk.red(`✗ Failed to stage files: ${sanitizeTerminalText(err.message)}\n`),
       );
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `Failed to stage files: ${err.message}`, {
+        cause: err,
+        reported: true,
+      });
     }
 
     diff = getStagedDiff(projectRoot, config.diffContextLines);
     if (!diff) {
       console.log('\n  ' + chalk.yellow('✗ Nothing staged — no diff to commit.\n'));
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.GIT_STATE, 'Nothing staged; no diff to commit.', {
+        reported: true,
+      });
     }
   }
 
@@ -491,8 +528,11 @@ export async function main() {
     console.log(
       '\n  ' + chalk.red('✗ The staged changes are being modified concurrently; commit aborted.\n'),
     );
-    process.exitCode = 1;
-    return;
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'The staged changes are being modified concurrently; commit aborted.',
+      { reported: true },
+    );
   }
 
   const stats = getDiffStats(diff);
@@ -517,6 +557,7 @@ export async function main() {
   const protectedInput = protectSensitiveDiff(diff);
   let diffForModel = diff;
   if (protectedInput.findings.length) {
+    warnings.push('Sensitive data was detected and protected before the provider request.');
     console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
     for (const finding of protectedInput.findings) {
       console.log('    ' + chalk.yellow(sanitizeTerminalText(finding)));
@@ -560,6 +601,7 @@ export async function main() {
     config.maxFileDiffChars,
   );
   if (truncated) {
+    warnings.push('The diff was condensed to fit the configured provider input limit.');
     console.log(
       chalk.dim(
         `  (diff condensed for the model — ${strippedDiff.length} → ${modelDiff.length} chars)`,
@@ -577,18 +619,19 @@ export async function main() {
       color: 'cyan',
     }).start();
     let liveReasoning;
-    const stream = reasoningEnabled
-      ? {
-          onReasoningDelta(chunk) {
-            if (!liveReasoning) {
-              spinner.stop();
-              liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-              return;
-            }
-            liveReasoning.append(chunk);
-          },
-        }
-      : null;
+    const stream =
+      reasoningEnabled && !machineOutput
+        ? {
+            onReasoningDelta(chunk) {
+              if (!liveReasoning) {
+                spinner.stop();
+                liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+                return;
+              }
+              liveReasoning.append(chunk);
+            },
+          }
+        : null;
 
     // Ctrl+C while the model call is in flight cancels the commit cleanly:
     // stop the spinner (restoring the cursor) and exit, instead of dying
@@ -638,7 +681,9 @@ export async function main() {
 
     if (!message) {
       console.log('\n  ' + chalk.red('✗ Empty response from AI.\n'));
-      process.exit(1);
+      throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Empty response from AI.', {
+        reported: true,
+      });
     }
 
     // ── 4. User action ─────────────────────────────────────────────────
@@ -689,6 +734,7 @@ export async function main() {
     const restored = indexTransaction ? indexTransaction.restore() : true;
     indexTransaction = null;
     if (!restored) {
+      warnings.push('The Git index changed during the run and was left untouched.');
       console.log(
         '  ' + chalk.yellow('⚠ The Git index changed during the run and was left untouched.'),
       );
@@ -699,7 +745,16 @@ export async function main() {
           '✓ Dry run complete — no commit was created and tool-owned staging was restored.\n',
         ),
     );
-    return;
+    return {
+      message,
+      provider: selectedProvider,
+      model: config.modelId,
+      latencyMs: elapsed,
+      usage,
+      warnings,
+      exitReason: 'dry_run',
+      committed: false,
+    };
   }
 
   if (getIndexFingerprint(projectRoot) !== plannedIndexFingerprint) {
@@ -715,15 +770,28 @@ export async function main() {
         chalk.dim('  The current index was left untouched to avoid overwriting concurrent work.'),
       );
     console.log(chalk.dim('  Review the changes and run aicommit again.\n'));
-    process.exitCode = 1;
-    return;
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'The staged changes changed after message generation; commit aborted.',
+      { reported: true },
+    );
   }
 
   try {
-    gitCommit(message, projectRoot);
+    gitCommit(message, projectRoot, machineOutput);
     indexTransaction?.release();
     indexTransaction = null;
     console.log('\n  ' + chalk.green.bold('✓ Done!\n'));
+    return {
+      message,
+      provider: selectedProvider,
+      model: config.modelId,
+      latencyMs: elapsed,
+      usage,
+      warnings,
+      exitReason: 'success',
+      committed: true,
+    };
   } catch (err) {
     const restored = indexTransaction ? indexTransaction.restore() : false;
     indexTransaction = null;
@@ -731,6 +799,9 @@ export async function main() {
     if (restored)
       console.log(chalk.dim('  Tool-owned staging was restored to its original state.'));
     console.log(chalk.dim('  Resolve the Git or hook error, then run aicommit again.\n'));
-    process.exitCode = 1;
+    throw fail(ERROR_CATEGORIES.GIT_STATE, `Git commit failed: ${err.message}`, {
+      cause: err,
+      reported: true,
+    });
   }
 }

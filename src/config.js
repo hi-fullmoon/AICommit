@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import chalk from 'chalk';
 
 import { fileExists, deepMerge } from './utils.js';
+import { ERROR_CATEGORIES, fail } from './errors.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -181,13 +182,11 @@ function resolveProvider(config, cliProvider) {
   const providers = config.providers;
 
   if (cliProvider && !providers) {
-    console.error(
-      chalk.red(`  ✗ -p/--provider given ("${cliProvider}") but no "providers" defined in config.`),
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `-p/--provider given ("${cliProvider}") but no "providers" defined in config. ` +
+        'Define a "providers" map in ~/.aicommit.config.json.',
     );
-    console.error(
-      chalk.dim('  Define a "providers" map in ~/.aicommit.config.json or ./.aicommit.config.json'),
-    );
-    process.exit(1);
   }
 
   if (!providers || typeof providers !== 'object' || Object.keys(providers).length === 0) {
@@ -197,9 +196,10 @@ function resolveProvider(config, cliProvider) {
   const name = cliProvider || config.defaultProvider || Object.keys(providers)[0];
 
   if (!providers[name]) {
-    console.error(chalk.red(`  ✗ Unknown provider: "${name}"`));
-    console.error(chalk.dim(`  Available providers: ${Object.keys(providers).join(', ')}`));
-    process.exit(1);
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `Unknown provider: "${name}". Available providers: ${Object.keys(providers).join(', ')}`,
+    );
   }
 
   const resolved = deepMerge(config, providers[name]);

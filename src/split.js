@@ -45,6 +45,7 @@ import {
   sanitizeTerminalText,
   isValidCommitMessage,
 } from './utils.js';
+import { ERROR_CATEGORIES, fail } from './errors.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -624,7 +625,7 @@ function getGroupDiff(
 // groups one by one: unstage all → add the group's files → commit.
 // Note: if a file has both staged and unstaged changes, the whole file is
 // committed in its group — file-level splitting cannot separate hunks.
-export function executeSplit(groups, projectRoot, allFiles) {
+export function executeSplit(groups, projectRoot, allFiles, diagnosticsOnly = false) {
   runGit(['add', '-A'], projectRoot);
 
   for (let i = 0; i < groups.length; i++) {
@@ -641,7 +642,7 @@ export function executeSplit(groups, projectRoot, allFiles) {
       if (hasHead(projectRoot)) runGit(['reset', '-q'], projectRoot);
       else runGit(['rm', '-r', '-q', '--cached', '.'], projectRoot);
       runGit(['add', '--', ...expandPaths(g.files, allFiles)], projectRoot);
-      runGit(['commit', '-m', g.message], projectRoot, true);
+      runGit(['commit', '-m', g.message], projectRoot, diagnosticsOnly ? 'stderr' : true);
     } catch (err) {
       // Re-stage the remaining groups' files so the user isn't left with an
       // empty index and can finish with plain `git commit` once the issue
@@ -666,18 +667,23 @@ export function executeSplit(groups, projectRoot, allFiles) {
   return true;
 }
 
-// Returns true when the split flow ran to completion (or exited); false
-// means "fall back to the normal single-commit flow".
-export async function splitFlow(config, projectRoot, { dryRun = false, yes = false } = {}) {
+// Returns a structured result when split mode handled the run; false means
+// "fall back to the normal single-commit flow" for a lone interactive file.
+export async function splitFlow(
+  config,
+  projectRoot,
+  { dryRun = false, yes = false, machineOutput = false, provider = null } = {},
+) {
   const reasoningEnabled = config.reasoning.mode === 'on';
   const allFiles = getAllChangedFiles(projectRoot);
+  const warnings = [];
 
   if (allFiles.length === 0) {
     console.log('\n  ' + chalk.yellow('✗ No changes to commit.'));
     console.log(
       chalk.dim('  Stage your changes with ') + chalk.bold('git add') + chalk.dim(' first.\n'),
     );
-    process.exit(1);
+    throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
   }
 
   if (allFiles.length === 1 && !yes) {
@@ -708,8 +714,11 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
       '\n  ' +
         chalk.red('✗ The working tree is being modified concurrently; split planning aborted.\n'),
     );
-    process.exitCode = 1;
-    return true;
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'The working tree is being modified concurrently; split planning aborted.',
+      { reported: true },
+    );
   }
 
   const protectedInput = protectSensitiveDiff(diff);
@@ -727,6 +736,7 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
   let planningConfig = { ...config, protectUntrackedPreviews: true };
   let protectModelInput = true;
   if (sensitiveFindings.length) {
+    warnings.push('Sensitive data was detected in the split input.');
     console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
     for (const finding of sensitiveFindings) {
       console.log('    ' + chalk.yellow(sanitizeTerminalText(finding)));
@@ -738,8 +748,11 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
           '  Review and stage the intended files explicitly, then use normal --yes mode.\n',
         ),
       );
-      process.exitCode = 1;
-      return true;
+      throw fail(
+        ERROR_CATEGORIES.SENSITIVE_DATA,
+        '--split --yes will not auto-stage sensitive files.',
+        { reported: true },
+      );
     }
     const sensitiveAction = await vimSelect({
       message: 'How should aicommit handle the split-planning request?',
@@ -784,20 +797,21 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
     color: 'cyan',
   }).start();
   let liveReasoning;
-  const stream = reasoningEnabled
-    ? {
-        onReasoningDelta(chunk) {
-          if (!liveReasoning) {
-            spinner.stop();
-            liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-            return;
-          }
-          liveReasoning.append(chunk);
-        },
-      }
-    : null;
+  const stream =
+    reasoningEnabled && !machineOutput
+      ? {
+          onReasoningDelta(chunk) {
+            if (!liveReasoning) {
+              spinner.stop();
+              liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
+              return;
+            }
+            liveReasoning.append(chunk);
+          },
+        }
+      : null;
 
-  let raw, reasoningText;
+  let raw, reasoningText, elapsed, usage;
   // Same Ctrl+C contract as the single-commit flow: interrupting the model
   // call cancels the split cleanly instead of leaving a half-drawn spinner.
   const cancelOnSigint = () => {
@@ -807,7 +821,6 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
   };
   process.on('SIGINT', cancelOnSigint);
   try {
-    let elapsed, usage;
     ({
       raw,
       elapsed,
@@ -829,7 +842,8 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
     if (liveReasoning) await liveReasoning.stop();
     spinner.fail(chalk.red('API call failed'));
     console.log(`\n  ${indentError(err)}\n`);
-    process.exit(1);
+    err.reported = true;
+    throw err;
   } finally {
     process.removeListener('SIGINT', cancelOnSigint);
   }
@@ -849,12 +863,18 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
           '\n',
       ),
     );
-    process.exit(1);
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      `Failed to parse the AI's split plan: ${err.message}`,
+      { cause: err, reported: true },
+    );
   }
 
   if (groups.length === 0) {
     console.log('\n  ' + chalk.red('✗ The AI returned an empty split plan.\n'));
-    process.exit(1);
+    throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'The AI returned an empty split plan.', {
+      reported: true,
+    });
   }
 
   // Review / edit / regenerate loop
@@ -949,8 +969,11 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
               ),
           );
           console.log(chalk.dim('  Review the changes and run aicommit --split again.\n'));
-          process.exitCode = 1;
-          return true;
+          throw fail(
+            ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+            'The working tree changed after split planning; message regeneration aborted.',
+            { reported: true },
+          );
         }
         const rspinner = ora({
           text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
@@ -1010,7 +1033,16 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
 
   if (dryRun) {
     console.log('\n  ' + chalk.green.bold('✓ Dry run complete — no commits were created.\n'));
-    return true;
+    return {
+      plan: groups,
+      provider,
+      model: config.modelId,
+      latencyMs: elapsed,
+      usage,
+      warnings,
+      exitReason: 'dry_run',
+      committed: false,
+    };
   }
 
   if (getSplitStateFingerprint(projectRoot, head) !== plannedStateFingerprint) {
@@ -1019,16 +1051,30 @@ export async function splitFlow(config, projectRoot, { dryRun = false, yes = fal
         chalk.red('✗ The working tree changed after split planning; no commits were created.'),
     );
     console.log(chalk.dim('  Review the changes and run aicommit --split again.\n'));
-    process.exitCode = 1;
-    return true;
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'The working tree changed after split planning; no commits were created.',
+      { reported: true },
+    );
   }
 
   console.log('');
-  const ok = executeSplit(groups, projectRoot, allFiles);
+  const ok = executeSplit(groups, projectRoot, allFiles, machineOutput);
   if (ok) {
     console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${groups.length} commits.\n`));
   } else {
-    process.exitCode = 1;
+    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more split commits failed.', {
+      reported: true,
+    });
   }
-  return true;
+  return {
+    plan: groups,
+    provider,
+    model: config.modelId,
+    latencyMs: elapsed,
+    usage,
+    warnings,
+    exitReason: 'success',
+    committed: true,
+  };
 }

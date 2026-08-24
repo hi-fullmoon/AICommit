@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hi-fullmoon/AICommit/schemas/aicommit-output.schema.json",
+  "title": "aicommit machine output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "ok",
+    "message",
+    "plan",
+    "provider",
+    "model",
+    "latencyMs",
+    "usage",
+    "warnings",
+    "exitReason",
+    "committed",
+    "error"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "ok": { "type": "boolean" },
+    "message": { "type": ["string", "null"] },
+    "plan": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "files"],
+        "properties": {
+          "message": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "provider": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "latencyMs": { "type": ["number", "null"], "minimum": 0 },
+    "usage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": { "type": "number", "minimum": 0 },
+        "outputTokens": { "type": "number", "minimum": 0 },
+        "totalTokens": { "type": "number", "minimum": 0 }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "exitReason": { "type": "string", "minLength": 1 },
+    "committed": { "type": "boolean" },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["category", "message"],
+      "properties": {
+        "category": {
+          "enum": [
+            "config",
+            "git_state",
+            "network",
+            "provider",
+            "response_format",
+            "sensitive_data",
+            "concurrent_modification",
+            "internal"
+          ]
+        },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -13,6 +13,7 @@
     "README.md",
     "SECURITY.md",
     "bin/",
+    "schemas/",
     "src/"
   ],
   "scripts": {

@@ -319,12 +319,15 @@ export function isGitRepo(cwd) {
   }
 }
 
-export function gitCommit(message, projectRoot) {
+export function gitCommit(message, projectRoot, diagnosticsOnly = false) {
   // Pass the message as an argv item instead of a shell string — quoting it
   // for a shell breaks on Windows, where cmd.exe ignores single quotes.
   // Do not swallow failures: the CLI must return a non-zero exit status when
   // Git or a commit hook rejects the commit.
-  execFileSync('git', ['commit', '-m', message], { cwd: projectRoot, stdio: 'inherit' });
+  execFileSync('git', ['commit', '-m', message], {
+    cwd: projectRoot,
+    stdio: diagnosticsOnly ? [process.stdin, process.stderr, process.stderr] : 'inherit',
+  });
   return true;
 }
 
@@ -427,7 +430,13 @@ export function protectSensitiveDiff(diff) {
 
 export function runGit(args, projectRoot, inherit = false) {
   try {
-    execFileSync('git', args, { cwd: projectRoot, stdio: inherit ? 'inherit' : 'pipe' });
+    const stdio =
+      inherit === 'stderr'
+        ? [process.stdin, process.stderr, process.stderr]
+        : inherit
+          ? 'inherit'
+          : 'pipe';
+    execFileSync('git', args, { cwd: projectRoot, stdio });
   } catch (err) {
     const detail =
       typeof err.stderr === 'string' ? err.stderr.trim() : err.stderr?.toString('utf-8').trim();

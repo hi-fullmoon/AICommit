@@ -34,3 +34,10 @@ test('parseArgs accepts reasoning levels and the disable alias', () => {
   assert.equal(parseArgs(['--no-reasoning']).cliReasoning, 'off');
   assert.equal(parseArgs([]).cliReasoning, null);
 });
+
+test('parseArgs accepts text and JSON output modes', () => {
+  assert.equal(parseArgs([]).output, 'text');
+  assert.equal(parseArgs(['--output=json', '--yes']).output, 'json');
+  assert.equal(parseArgs(['--output', 'text']).output, 'text');
+  assert.throws(() => parseArgs(['--output=yaml']), /Invalid output mode/);
+});
