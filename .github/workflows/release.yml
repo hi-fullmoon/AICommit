@@ -6,17 +6,21 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish-npm:
     name: Verify and publish to npm
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -24,10 +28,62 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: node scripts/verify-release.mjs
+      - name: Verify signed annotated release tag
+        run: RELEASE_COMMIT="$(git rev-parse HEAD)" node scripts/verify-github-tag.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: npm run ci
       - run: npm run test:package
       - run: npm audit --omit=dev
+      - name: Build release assets, SBOM, formula, and checksums
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist
+          npm pack --pack-destination dist
+          npm sbom --sbom-format=spdx > "dist/aicommit-${VERSION}.spdx.json"
+          node scripts/release-assets.mjs \
+            --tarball "dist/aicommit-${VERSION}.tgz" \
+            --sbom "dist/aicommit-${VERSION}.spdx.json" \
+            --output dist
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      - name: Sign release assets with GitHub build provenance
+        id: provenance
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Sign the npm tarball SBOM
+        id: sbom
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/aicommit-${{ env.VERSION }}.tgz
+          sbom-path: dist/aicommit-${{ env.VERSION }}.spdx.json
+      - name: Attach signed assets to the GitHub Release
+        run: |
+          cp "${{ steps.provenance.outputs.bundle-path }}" "dist/aicommit-${VERSION}.provenance.sigstore.json"
+          cp "${{ steps.sbom.outputs.bundle-path }}" "dist/aicommit-${VERSION}.sbom.sigstore.json"
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Publish with trusted provenance
-        run: npm publish --access public --tag "$NPM_DIST_TAG"
+        run: npm publish "dist/aicommit-${VERSION}.tgz" --provenance --access public --tag "$NPM_DIST_TAG"
         env:
           NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
+
+  verify-homebrew:
+    name: Verify published Homebrew formula
+    needs: publish-npm
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Install and test the published formula
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install --formula Formula/aicommit.rb
+          aicommit --version
+          aicommit --help >/dev/null
+          HOME="$RUNNER_TEMP/aicommit-home" aicommit config validate --output=json
+      - name: Uninstall smoke formula
+        if: always()
+        run: brew uninstall --force aicommit || true

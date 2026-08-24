@@ -28,6 +28,8 @@
     "coverage": "c8 node --test --test-concurrency=1",
     "eval": "node eval/run.mjs",
     "test:package": "node scripts/package-smoke.mjs",
+    "test:homebrew": "node scripts/homebrew-smoke.mjs",
+    "release:assets": "node scripts/release-assets.mjs",
     "ci": "npm run lint && npm run format:check && npm run eval && npm run coverage"
   },
   "c8": {

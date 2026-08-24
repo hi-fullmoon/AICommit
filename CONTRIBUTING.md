@@ -31,6 +31,8 @@ npm audit --omit=dev
 
 Tests that manipulate Git should create a temporary repository and clean it up. Provider integration tests must use a local stub server or fixtures; routine tests must not call paid or remote model APIs. Add regression coverage for security boundaries, Git restoration, non-interactive behavior, and cross-platform path handling when relevant.
 
+Homebrew formula changes must come from `scripts/release-assets.mjs`, not a hand-edited URL or checksum. The macOS CI job performs the real installation smoke; maintainers can reproduce it only with the explicit `AICOMMIT_HOMEBREW_SMOKE=1` safety opt-in.
+
 ## Pull requests and commits
 
 - Keep a pull request to one coherent outcome and explain user-visible behavior, risks, and verification.

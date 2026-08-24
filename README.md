@@ -8,7 +8,16 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 npm install --global aicommit
 ```
 
+Or install with Homebrew:
+
+```bash
+brew tap hi-fullmoon/aicommit https://github.com/hi-fullmoon/AICommit.git
+brew install hi-fullmoon/aicommit/aicommit
+```
+
 Requires Node.js >= 18.
+
+See the bilingual [installation, upgrade, signature-verification, and rollback guide](docs/distribution.md). Both npm and Homebrew paths have automated install smoke tests.
 
 To install a source checkout instead, run `npm install --global .` from the repository root.
 
@@ -96,6 +105,8 @@ The selected provider's values are deep-merged over the top-level keys, so share
 
 Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
 
+See the bilingual [provider compatibility table](docs/provider-compatibility.md) for streaming, reasoning, token-budget, usage, authentication, preset, and extension-adapter boundaries.
+
 ### Repository policy and bounded context
 
 The default generation contract is structured and versioned instead of being embedded in a free-form prompt. A user config can replace declaration arrays such as `types` and `scope.values` to make them stricter:
@@ -175,6 +186,8 @@ Token spend per call is dominated by the diff; aicommit already strips lock file
 - Lower or disable individual `repositoryContext` categories when their style signal is not useful for your repository.
 
 ## Privacy and data flow
+
+The bilingual [privacy model](docs/privacy.md) maps every local, provider, extension, metric, and distribution trust boundary. The summary below covers the default runtime path.
 
 AICommit has no hosted backend and no metrics-upload implementation. At runtime it only makes generation requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
 
@@ -313,6 +326,8 @@ Stable process exits are shared by text and JSON modes:
 
 `aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Use `aicommit doctor -p <name>` to select a configured provider or `aicommit doctor --output=json` in automation.
 
+For stable error categories, Homebrew/npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
+
 Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. If some changes are staged but others are not, aicommit asks whether to include the rest in this commit.
 
 `--dry-run` follows the same review flow but stops before `git commit`. Any staging performed by aicommit is restored before it exits. Cancellation and failures use the same index transaction; if another process changed the index concurrently, aicommit leaves it untouched instead of overwriting that work.
@@ -350,7 +365,7 @@ Split remains file-level by default. `--split-hunks` opts in to experimental sam
 
 ## Development and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, and [RELEASING.md](RELEASING.md) for SemVer, release notes, tags, npm Trusted Publishing, provenance, and rollback procedures. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, [RELEASING.md](RELEASING.md) for the executable maintainer process, and the bilingual [distribution guide](docs/distribution.md) for npm/Homebrew install, verification, and user rollback. Releases require a GitHub-verified signed tag, Sigstore/GitHub attestations for the exact npm tarball and SPDX SBOM, npm Trusted Publishing provenance, SHA-256-pinned Homebrew formula, and post-publish smoke tests. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
 
 ## License
 

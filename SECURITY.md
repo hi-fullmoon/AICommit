@@ -23,9 +23,11 @@ AICommit is a local CLI that sends selected repository context directly to the c
 - untrusted diff, file, model, and reasoning text must not execute terminal control sequences;
 - common sensitive content should be detected and protected before the default model request;
 - remote endpoints must use HTTPS, while plaintext HTTP is limited to loopback development services.
+- third-party extension API v1 must deny resolved credential access, run out of process with a sanitized environment, and fail instead of falling back to unsandboxed execution;
+- distributed tarballs must be bound to a GitHub-verified signed tag, GitHub/Sigstore build attestation, npm provenance, and the Homebrew formula SHA-256.
 
 Sensitive-content detection is intentionally a defense in depth and cannot replace a dedicated secret scanner. Interactive users can explicitly choose to send original content after a warning. Review the selected endpoint and diff before doing so.
 
 Provider credentials can come from an environment variable or the user config. Environment variables are preferred for CI and ephemeral use. The setup wizard can store a literal key when requested; the config is written atomically with mode `0600` on platforms that support POSIX permissions. Repository-level config is never a credential store.
 
-For the detailed runtime data flow and split recovery limits, see [README.md](README.md#privacy-and-data-flow).
+For the detailed runtime and distribution trust boundaries, see the bilingual [privacy model](docs/privacy.md). For split recovery limits, see [README.md](README.md#privacy-and-data-flow).

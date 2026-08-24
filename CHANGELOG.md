@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Credential-denied extension API v1 with isolated context-provider, message-validator, and provider-adapter interfaces, a strict manifest schema, and bilingual executable documentation.
+- Signed GitHub release assets with SHA-256 checksums, SPDX SBOM, GitHub OIDC/Sigstore attestations, npm Trusted Publishing provenance, and a generated Homebrew formula.
+- Automated npm/Homebrew installation smoke paths plus bilingual distribution, troubleshooting, privacy, and provider-compatibility guides.
 
 ### Security
 
