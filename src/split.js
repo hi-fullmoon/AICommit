@@ -1074,6 +1074,13 @@ function splitStatusSummary(projectRoot, limit = 20) {
   return visible;
 }
 
+function injectTestSplitFault(event) {
+  if (process.env.NODE_ENV !== 'test') return;
+  const [target, signal] = (process.env.AICOMMIT_TEST_SPLIT_FAULT || '').split(':');
+  if (target !== event || !['SIGINT', 'SIGKILL'].includes(signal)) return;
+  process.kill(process.pid, signal);
+}
+
 function reconcileCompletedIndex(projectRoot, checkpoint) {
   if (!checkpoint.completed.length) return;
   const groups = completedGroups(checkpoint);
@@ -1158,6 +1165,7 @@ function executeTransactionalSplit(
           ...checkpoint,
           inFlight: { index: i, parent, tree: groupTree },
         }).checkpoint;
+        injectTestSplitFault('after_checkpoint_before_commit');
         runGitWithIndex(
           ['commit', '-m', group.message],
           projectRoot,
@@ -1177,6 +1185,7 @@ function executeTransactionalSplit(
           parent,
           tree: groupTree,
         });
+        injectTestSplitFault('after_commit_before_checkpoint');
         checkpoint = writeSplitCheckpoint(projectRoot, {
           ...checkpoint,
           completed: [...checkpoint.completed, { index: i, commit, parent, tree: groupTree }],

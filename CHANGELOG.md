@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-24
+
+### Added
+
+- Explicit `--split=staged|all` scope selection plus versioned `aicommit split plan/apply` JSON artifacts with base-HEAD, change-set, and content-fingerprint validation.
+- Code-free, owner-only split checkpoints and `aicommit split --resume`, including reconciliation of the post-commit/pre-checkpoint crash window.
+- Strict split preflight checks for empty or duplicate groups, path coverage, rename/copy sides, conflicts, changed submodules, active hooks, and unborn branches.
+- Opt-in `--split-hunks` support for tracked multi-hunk text modifications, with hunk IDs/ranges/hashes in plans and machine output.
+- A shared end-to-end split fault matrix for SIGINT, process crashes, concurrent edits, hook failures, renames, deletions, binary files, and submodules.
+
+### Changed
+
+- Every split group is now created from an immutable captured object snapshot through a temporary index; later worktree edits cannot silently enter pending commits.
+- Hook and Git failures report checkpointed, in-flight, pending, and current worktree/index state without reordering or duplicating groups.
+- Split apply and resume run without loading provider configuration or credentials.
+
+### Security
+
+- Split plan and checkpoint readers reject unsafe paths, unknown fields, oversized artifacts, and symbolic links; artifacts never contain diffs, patch text, or file content.
+- Experimental hunk execution validates selected patches entirely in temporary indexes and requires the final tree to reproduce every captured target blob exactly; otherwise planning falls back to file-level groups before the first commit.
+
 ## [1.2.0] - 2026-08-24
 
 ### Added
@@ -65,7 +86,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - File-level split planning and execution with Git-state concurrency checks.
 - Provider presets and user/project configuration trust boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.0.0
