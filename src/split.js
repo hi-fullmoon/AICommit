@@ -746,9 +746,10 @@ function readStageZeroEntries(projectRoot) {
 
 function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
   try {
-    execFileSync('git', args, {
+    return execFileSync('git', args, {
       cwd: projectRoot,
       env: { ...process.env, GIT_INDEX_FILE: indexPath },
+      encoding: 'utf8',
       stdio:
         inherit === 'stderr'
           ? [process.stdin, process.stderr, process.stderr]
@@ -762,18 +763,121 @@ function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
   }
 }
 
+function readOptionalGit(args, projectRoot) {
+  try {
+    return execFileSync('git', args, {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function activeCommitHooks(projectRoot) {
+  const configured = readOptionalGit(['config', '--path', 'core.hooksPath'], projectRoot);
+  const rawDirectory =
+    configured || readGit(['rev-parse', '--git-path', 'hooks'], projectRoot).trim();
+  const directory = isAbsolute(rawDirectory) ? rawDirectory : resolve(projectRoot, rawDirectory);
+  const names = ['pre-commit', 'prepare-commit-msg', 'commit-msg', 'post-commit'];
+  return names.filter((name) => {
+    try {
+      const stat = lstatSync(join(directory, name));
+      return (
+        (stat.isFile() || stat.isSymbolicLink()) &&
+        (process.platform === 'win32' || (stat.mode & 0o111) !== 0)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function submodulePaths(projectRoot, paths) {
+  const found = new Set();
+  const index = readGit(['ls-files', '--stage', '-z', '--', ...paths], projectRoot);
+  for (const entry of index.split('\0')) {
+    const match = entry.match(/^160000 [0-9a-f]+ \d\t([\s\S]+)$/);
+    if (match) found.add(match[1]);
+  }
+  if (hasHead(projectRoot)) {
+    const tree = readGit(['ls-tree', '-rz', 'HEAD', '--', ...paths], projectRoot);
+    for (const entry of tree.split('\0')) {
+      const match = entry.match(/^160000 commit [0-9a-f]+\t([\s\S]+)$/);
+      if (match) found.add(match[1]);
+    }
+  }
+  return [...found];
+}
+
+export function preflightSplit(groups, projectRoot, allFiles, scope = 'all') {
+  if (!['staged', 'all'].includes(scope)) throw new Error(`Unsupported split scope: ${scope}`);
+  if (!Array.isArray(groups) || !groups.length) throw new Error('Split plan has no groups.');
+  if (!Array.isArray(allFiles) || !allFiles.length) throw new Error('Split plan has no changes.');
+
+  const known = new Map();
+  const realPaths = new Map();
+  for (const [index, change] of allFiles.entries()) {
+    if (!change?.path || !Array.isArray(change.addPaths) || !change.addPaths.length) {
+      throw new Error(`Split change ${index + 1} is malformed.`);
+    }
+    if (known.has(change.path)) throw new Error(`Duplicate split change: ${change.path}`);
+    known.set(change.path, change);
+    if (/^[RC]/.test(change.status) && change.addPaths.length !== 2) {
+      throw new Error(`Rename/copy must keep both paths together: ${change.path}`);
+    }
+    for (const path of change.addPaths) {
+      if (realPaths.has(path)) {
+        throw new Error(`Real path appears in multiple split changes: ${path}`);
+      }
+      realPaths.set(path, change.path);
+    }
+  }
+
+  const assigned = new Set();
+  for (const [index, group] of groups.entries()) {
+    if (!group?.message?.trim()) throw new Error(`Split group ${index + 1} has no message.`);
+    if (!Array.isArray(group.files) || !group.files.length) {
+      throw new Error(`Split group ${index + 1} is empty.`);
+    }
+    for (const path of group.files) {
+      if (!known.has(path))
+        throw new Error(`Split group ${index + 1} references unknown path: ${path}`);
+      if (assigned.has(path)) throw new Error(`Split path is assigned more than once: ${path}`);
+      assigned.add(path);
+    }
+  }
+  const missing = [...known.keys()].filter((path) => !assigned.has(path));
+  if (missing.length) throw new Error(`Split plan leaves paths unassigned: ${missing.join(', ')}`);
+
+  const conflicts = readGit(['ls-files', '-u', '-z'], projectRoot);
+  if (conflicts) throw new Error('Split apply refuses a repository with unresolved conflicts.');
+  const submodules = submodulePaths(projectRoot, [...realPaths.keys()]);
+  if (submodules.length) {
+    throw new Error(`Split apply does not support submodule changes: ${submodules.join(', ')}`);
+  }
+  return {
+    scope,
+    groups: groups.length,
+    changes: allFiles.length,
+    unborn: !hasHead(projectRoot),
+    hooks: activeCommitHooks(projectRoot),
+  };
+}
+
 function resetCommittedPaths(projectRoot, groups, allFiles) {
   const paths = [...new Set(groups.flatMap((group) => expandPaths(group.files, allFiles)))];
   if (paths.length && hasHead(projectRoot))
     runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
 }
 
-// Commit the exact index snapshot through a temporary index. This preserves
-// unstaged edits, including a newer working-tree version of a staged file.
-// The real index is reconciled only after each successful commit, so a
-// failure before group one leaves it byte-for-byte untouched.
-function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
-  const snapshot = readStageZeroEntries(projectRoot);
+// Build and commit each group through a temporary index. Staged scope copies
+// the reviewed index blobs; all scope stages only the group's working-tree
+// paths into that temporary index. The real index and worktree are untouched
+// until Git has successfully created the corresponding commit.
+function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, scope) {
+  const snapshot = scope === 'staged' ? readStageZeroEntries(projectRoot) : null;
   const tempDir = mkdtempSync(join(tmpdir(), 'aicommit-split-index-'));
   const indexPath = join(tempDir, 'index');
   const completed = [];
@@ -785,6 +889,7 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
           chalk.dim(`[${i + 1}/${groups.length}] `) +
           highlightMessage(group.message.split('\n')[0]),
       );
+      let committedThisRound = false;
       try {
         rmSync(indexPath, { force: true });
         runGitWithIndex(
@@ -792,17 +897,31 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
           projectRoot,
           indexPath,
         );
-        for (const path of expandPaths(group.files, allFiles)) {
-          const entry = snapshot.get(path);
-          if (entry) {
-            runGitWithIndex(
-              ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
-              projectRoot,
-              indexPath,
-            );
-          } else {
-            runGitWithIndex(['update-index', '--force-remove', '--', path], projectRoot, indexPath);
+        const baseTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
+        const paths = expandPaths(group.files, allFiles);
+        if (scope === 'staged') {
+          for (const path of paths) {
+            const entry = snapshot.get(path);
+            if (entry) {
+              runGitWithIndex(
+                ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+                projectRoot,
+                indexPath,
+              );
+            } else {
+              runGitWithIndex(
+                ['update-index', '--force-remove', '--', path],
+                projectRoot,
+                indexPath,
+              );
+            }
           }
+        } else {
+          runGitWithIndex(['add', '-A', '--', ...paths], projectRoot, indexPath);
+        }
+        const groupTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
+        if (groupTree === baseTree) {
+          throw new Error(`Split group ${i + 1} would create an empty commit.`);
         }
         runGitWithIndex(
           ['commit', '-m', group.message],
@@ -810,6 +929,7 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
           indexPath,
           diagnosticsOnly ? 'stderr' : true,
         );
+        committedThisRound = true;
         completed.push(group);
         resetCommittedPaths(projectRoot, [group], allFiles);
       } catch (err) {
@@ -818,7 +938,8 @@ function executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly) {
         console.log(
           chalk.dim(`  ${completed.length} commit(s) already made. Remaining groups stay staged:`),
         );
-        for (let j = i; j < groups.length; j++) {
+        const pendingIndex = committedThisRound ? i + 1 : i;
+        for (let j = pendingIndex; j < groups.length; j++) {
           console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
         }
         console.log(
@@ -844,48 +965,23 @@ export function executeSplit(
   diagnosticsOnly = false,
   scope = 'all',
 ) {
-  if (scope === 'staged') {
-    return executeStagedSplit(groups, projectRoot, allFiles, diagnosticsOnly);
+  let report;
+  try {
+    report = preflightSplit(groups, projectRoot, allFiles, scope);
+  } catch (err) {
+    throw fail(ERROR_CATEGORIES.GIT_STATE, `Split preflight failed: ${err.message}`, {
+      cause: err,
+    });
   }
-  runGit(['add', '-A'], projectRoot);
-
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
-    console.log(
-      '  ' + chalk.dim(`[${i + 1}/${groups.length}] `) + highlightMessage(g.message.split('\n')[0]),
-    );
-    try {
-      // Re-check HEAD every round: the first commit creates HEAD, so an
-      // unborn index only needs `git rm --cached .` on the first round and
-      // `git reset` (which requires HEAD) from the second round on. Keeping
-      // the initial `head` value here would re-run `git rm --cached .` and
-      // turn every previously committed file into a deletion.
-      if (hasHead(projectRoot)) runGit(['reset', '-q'], projectRoot);
-      else runGit(['rm', '-r', '-q', '--cached', '.'], projectRoot);
-      runGit(['add', '--', ...expandPaths(g.files, allFiles)], projectRoot);
-      runGit(['commit', '-m', g.message], projectRoot, diagnosticsOnly ? 'stderr' : true);
-    } catch (err) {
-      // Re-stage the remaining groups' files so the user isn't left with an
-      // empty index and can finish with plain `git commit` once the issue
-      // (usually a hook) is resolved. Best effort — the working tree still
-      // holds everything even if this add fails.
-      const rest = groups.slice(i).flatMap((g) => expandPaths(g.files, allFiles));
-      try {
-        runGit(['add', '--', ...rest], projectRoot);
-      } catch {
-        /* best effort */
-      }
-      console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
-      console.log('  ' + chalk.red(sanitizeTerminalText(err.message)));
-      console.log(chalk.dim(`  ${i} commit(s) already made. Remaining groups (files re-staged):`));
-      for (let j = i; j < groups.length; j++) {
-        console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
-      }
-      console.log(chalk.dim('  Resolve the issue and commit the rest manually.\n'));
-      return false;
-    }
-  }
-  return true;
+  const hookSummary = report.hooks.length ? report.hooks.join(',') : 'none';
+  console.log(
+    '  ' +
+      chalk.dim(
+        `Preflight: scope ${scope}, ${report.groups} group(s), ` +
+          `${report.unborn ? 'unborn HEAD' : 'HEAD ready'}, hooks: ${hookSummary}`,
+      ),
+  );
+  return executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, scope);
 }
 
 // Returns a structured result when split mode handled the run; false means

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ import {
   generateSplitPlan,
   getSplitStateFingerprint,
   captureUntrackedSnapshots,
+  preflightSplit,
 } from '../src/split.js';
 import { decodeUntrustedData } from '../src/trust.js';
 
@@ -433,4 +434,114 @@ test('executeSplit staged scope commits index blobs and preserves newer worktree
   );
   assert.equal(execFileSync('git', ['diff', '--cached'], { cwd: repo, encoding: 'utf8' }), '');
   assert.match(execFileSync('git', ['diff'], { cwd: repo, encoding: 'utf8' }), /\+unstaged/);
+});
+
+test('split preflight rejects empty, duplicate, malformed rename, conflict, and submodule plans', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'app.txt'), 'base\n');
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'next\n');
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  const files = getStagedChangedFiles(repo);
+
+  assert.throws(() => preflightSplit([], repo, files, 'staged'), /no groups/);
+  assert.throws(
+    () =>
+      preflightSplit(
+        [
+          { message: 'fix: first', files: ['app.txt'] },
+          { message: 'fix: second', files: ['app.txt'] },
+        ],
+        repo,
+        files,
+        'staged',
+      ),
+    /more than once/,
+  );
+  assert.throws(
+    () =>
+      preflightSplit(
+        [{ message: 'fix: rename', files: ['old → new'] }],
+        repo,
+        [{ status: 'R', path: 'old → new', addPaths: ['new'] }],
+        'staged',
+      ),
+    /both paths together/,
+  );
+
+  const stageOne = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: repo,
+    encoding: 'utf8',
+    input: 'one\n',
+  }).trim();
+  const stageTwo = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: repo,
+    encoding: 'utf8',
+    input: 'two\n',
+  }).trim();
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd: repo,
+    input: `0 0000000000000000000000000000000000000000\tapp.txt\n100644 ${stageOne} 1\tapp.txt\n100644 ${stageTwo} 2\tapp.txt\n`,
+  });
+  assert.throws(
+    () =>
+      preflightSplit(
+        [{ message: 'fix: conflict', files: ['app.txt'] }],
+        repo,
+        [{ status: 'U', path: 'app.txt', addPaths: ['app.txt'] }],
+        'staged',
+      ),
+    /unresolved conflicts/,
+  );
+
+  execFileSync('git', ['reset', '--hard', '-q', 'HEAD'], { cwd: repo });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+  execFileSync('git', ['update-index', '--add', '--cacheinfo', `160000,${head},vendor/sub`], {
+    cwd: repo,
+  });
+  assert.throws(
+    () =>
+      preflightSplit(
+        [{ message: 'chore: update submodule', files: ['vendor/sub'] }],
+        repo,
+        [{ status: 'A', path: 'vendor/sub', addPaths: ['vendor/sub'] }],
+        'staged',
+      ),
+    /does not support submodule/,
+  );
+});
+
+test('all-scope hook failure before group one preserves the exact index and worktree', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'a.txt'), 'base a\n');
+  writeFileSync(join(repo, 'b.txt'), 'base b\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'a.txt'), 'next a\n');
+  execFileSync('git', ['add', 'a.txt'], { cwd: repo });
+  writeFileSync(join(repo, 'b.txt'), 'next b\n');
+  const files = getAllChangedFiles(repo);
+  const groups = [
+    { message: 'fix: update a', files: ['a.txt'] },
+    { message: 'fix: update b', files: ['b.txt'] },
+  ];
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, '#!/bin/sh\nexit 1\n');
+  chmodSync(hook, 0o755);
+  const report = preflightSplit(groups, repo, files, 'all');
+  assert.deepEqual(report.hooks, ['pre-commit']);
+  const indexBefore = readFileSync(join(repo, '.git', 'index'));
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' });
+
+  assert.equal(executeSplit(groups, repo, files, false, 'all'), false);
+  assert.deepEqual(readFileSync(join(repo, '.git', 'index')), indexBefore);
+  assert.equal(
+    execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }),
+    headBefore,
+  );
+  assert.equal(readFileSync(join(repo, 'a.txt'), 'utf8'), 'next a\n');
+  assert.equal(readFileSync(join(repo, 'b.txt'), 'utf8'), 'next b\n');
 });
