@@ -21,6 +21,7 @@ function showHelp() {
     doctor                Diagnose runtime, config, credentials, and connectivity
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
+    split --resume        Resume the repository's unfinished transaction
     stats [action]        Show quality/cost trends; show, clear, enable, disable
     metrics [action]      Manage local metrics: status, clear, enable, disable
 
@@ -57,6 +58,7 @@ function showHelp() {
     aicommit --split=all --yes  Split the complete working tree non-interactively
     aicommit split plan --scope=staged --file=.aicommit-plan.json --yes
     aicommit split apply --file=.aicommit-plan.json --yes
+    aicommit split --resume --yes  Resume pending groups from the checkpoint
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit --yes        Commit already staged changes without prompts
@@ -143,9 +145,9 @@ export function parseArgs(args = process.argv.slice(2)) {
 
   let splitCommand = null;
   if (args[0] === 'split') {
-    splitCommand = args[1];
-    if (!['plan', 'apply'].includes(splitCommand)) {
-      throw fail(ERROR_CATEGORIES.CONFIG, 'split requires one command: plan or apply.');
+    splitCommand = args[1] === '--resume' ? 'resume' : args[1];
+    if (!['plan', 'apply', 'resume'].includes(splitCommand)) {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'split requires plan, apply, or --resume.');
     }
     args = args.slice(2);
   }
@@ -337,7 +339,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     );
   }
   if (splitCommand) {
-    if (!splitPlanFile) {
+    if (splitCommand !== 'resume' && !splitPlanFile) {
       throw fail(ERROR_CATEGORIES.CONFIG, `split ${splitCommand} requires --file=<path>.`);
     }
     if (targetPath) {
@@ -346,7 +348,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     if (splitCommand === 'plan') {
       split ||= 'prompt';
       dryRun = true;
-    } else {
+    } else if (splitCommand === 'apply') {
       if (split) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
@@ -357,6 +359,13 @@ export function parseArgs(args = process.argv.slice(2)) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
           'split apply accepts only --file, --yes, --output, and --debug.',
+        );
+      }
+    } else {
+      if (splitPlanFile || split || cliProvider || cliLang || cliReasoning || check || dryRun) {
+        throw fail(
+          ERROR_CATEGORIES.CONFIG,
+          'split --resume accepts only --yes, --output, and --debug.',
         );
       }
     }

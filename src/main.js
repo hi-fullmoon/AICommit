@@ -41,7 +41,7 @@ import {
   sanitizeTerminalText,
   stringifyConfigRedacted,
 } from './utils.js';
-import { applySplitPlan, splitFlow } from './split.js';
+import { applySplitPlan, resumeSplit, splitFlow } from './split.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
@@ -118,12 +118,14 @@ export async function main() {
   console.log('  ' + chalk.dim('─'.repeat(45)));
   console.log('  ' + chalk.dim(`Working directory: ${sanitizeTerminalText(process.cwd())}`));
 
-  if (splitCommand === 'apply') {
+  if (splitCommand === 'apply' || splitCommand === 'resume') {
     const projectRoot = getProjectRoot();
     if (!isGitRepo(projectRoot)) {
       throw fail(ERROR_CATEGORIES.GIT_STATE, `Not a git repository: ${process.cwd()}`);
     }
-    return applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
+    return splitCommand === 'resume'
+      ? resumeSplit(projectRoot, { yes, machineOutput })
+      : applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
   }
 
   if (doctor) return runDoctor(cliProvider);

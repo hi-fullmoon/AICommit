@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +27,9 @@ import {
   getSplitStateFingerprint,
   captureUntrackedSnapshots,
   preflightSplit,
+  resumeSplit,
 } from '../src/split.js';
+import { readSplitCheckpoint, splitCheckpointPath } from '../src/split-checkpoint.js';
 import { decodeUntrustedData } from '../src/trust.js';
 
 // Fresh git repo for exercising the real git index operations behind
@@ -544,4 +555,98 @@ test('all-scope hook failure before group one preserves the exact index and work
   );
   assert.equal(readFileSync(join(repo, 'a.txt'), 'utf8'), 'next a\n');
   assert.equal(readFileSync(join(repo, 'b.txt'), 'utf8'), 'next b\n');
+});
+
+test('checkpoint resumes after a later hook failure without duplicate or omitted commits', async (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'a.txt'), 'base a\n');
+  writeFileSync(join(repo, 'b.txt'), 'base b\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'a.txt'), 'next a checkpoint-secret-marker\n');
+  writeFileSync(join(repo, 'b.txt'), 'next b checkpoint-secret-marker\n');
+  const files = getAllChangedFiles(repo);
+  const groups = [
+    { message: 'fix: update a', files: ['a.txt'] },
+    { message: 'fix: update b', files: ['b.txt'] },
+  ];
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  writeFileSync(
+    hook,
+    '#!/bin/sh\nif test "$(git diff --cached --name-only)" = "b.txt"; then exit 1; fi\n',
+  );
+  chmodSync(hook, 0o755);
+
+  assert.equal(executeSplit(groups, repo, files, false, 'all'), false);
+  assert.equal(
+    execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
+    '2',
+  );
+  const interrupted = readSplitCheckpoint(repo);
+  assert.equal(interrupted.checkpoint.completed.length, 1);
+  assert.equal(interrupted.checkpoint.inFlight.index, 1);
+  assert.equal(statSync(interrupted.path).mode & 0o777, 0o600);
+  assert.doesNotMatch(readFileSync(interrupted.path, 'utf8'), /checkpoint-secret-marker/);
+
+  rmSync(hook);
+  const result = await resumeSplit(repo, { yes: true });
+  assert.equal(result.committed, true);
+  assert.equal(
+    execFileSync('git', ['log', '--reverse', '--format=%s'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim(),
+    'init\nfix: update a\nfix: update b',
+  );
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }), '');
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
+});
+
+test('resume reconciles a commit created in the checkpoint crash window exactly once', async (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'a.txt'), 'base a\n');
+  writeFileSync(join(repo, 'b.txt'), 'base b\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'a.txt'), 'next a\n');
+  writeFileSync(join(repo, 'b.txt'), 'next b\n');
+  const files = getAllChangedFiles(repo);
+  const groups = [
+    { message: 'fix: update a', files: ['a.txt'] },
+    { message: 'fix: update b', files: ['b.txt'] },
+  ];
+
+  assert.equal(
+    executeSplit(groups, repo, files, false, 'all', {
+      faultInjector(event, context) {
+        if (event === 'after_commit_before_checkpoint' && context.index === 0) {
+          throw new Error('simulated process crash');
+        }
+      },
+    }),
+    false,
+  );
+  const interrupted = readSplitCheckpoint(repo).checkpoint;
+  assert.equal(interrupted.completed.length, 0);
+  assert.equal(interrupted.inFlight.index, 0);
+  assert.equal(
+    execFileSync('git', ['log', '--reverse', '--format=%s'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim(),
+    'init\nfix: update a',
+  );
+
+  await resumeSplit(repo, { yes: true });
+  assert.equal(
+    execFileSync('git', ['log', '--reverse', '--format=%s'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim(),
+    'init\nfix: update a\nfix: update b',
+  );
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }), '');
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
 });

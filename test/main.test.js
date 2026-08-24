@@ -389,6 +389,84 @@ test('split plan exports JSON and split apply commits it without provider config
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
+test('split --resume finishes a checkpointed apply without provider configuration', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-resume-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
+  git(repo, ['add', 'extra.js']);
+  const planPath = join(root, 'split.json');
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  { subject: 'fix: checkpoint app change', files: ['app.js'] },
+                  { subject: 'feat: checkpoint extra module', files: ['extra.js'] },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  const configPath = join(home, '.aicommit.config.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+  const planned = await runCli(repo, home, [
+    'split',
+    'plan',
+    '--scope=staged',
+    `--file=${planPath}`,
+    '--yes',
+    '--no-reasoning',
+  ]);
+  assert.equal(planned.code, 0, planned.stdout + planned.stderr);
+
+  rmSync(configPath);
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  writeFileSync(
+    hook,
+    '#!/bin/sh\nif test "$(git diff --cached --name-only)" = "extra.js"; then exit 1; fi\n',
+  );
+  chmodSync(hook, 0o755);
+  const interrupted = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
+  assert.equal(interrupted.code, 3, interrupted.stdout + interrupted.stderr);
+  assert.match(interrupted.stdout, /Completed: 1 checkpointed commit/);
+  assert.match(interrupted.stdout, /Current worktree\/index status/);
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
+
+  rmSync(hook);
+  const resumed = await runCli(repo, home, ['split', '--resume', '--yes']);
+  assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
+  assert.match(resumed.stdout, /1 completed, 1 pending/);
+  assert.match(resumed.stdout, /Resume complete/);
+  assert.equal(
+    git(repo, ['log', '--reverse', '--format=%s']).trim(),
+    'init\nfix: checkpoint app change\nfeat: checkpoint extra module',
+  );
+  assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
+});
+
 test('split apply rejects a stale fingerprint before mutating the index', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-stale-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

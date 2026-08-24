@@ -49,7 +49,7 @@ import {
   sanitizeTerminalText,
 } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
-import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
+import { DEFAULT_COMMIT_POLICY, normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -61,6 +61,12 @@ import {
   readSplitPlanArtifact,
   writeSplitPlanArtifact,
 } from './split-plan.js';
+import {
+  createSplitCheckpoint,
+  readSplitCheckpoint,
+  removeSplitCheckpoint,
+  writeSplitCheckpoint,
+} from './split-checkpoint.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -733,15 +739,19 @@ function getGroupDiff(
   return 'Changed files (new files, no diff available):\n' + parts.join('\n');
 }
 
-function readStageZeroEntries(projectRoot) {
+function parseStageZeroEntries(text) {
   const entries = new Map();
-  for (const field of readGit(['ls-files', '--stage', '-z'], projectRoot).split('\0')) {
+  for (const field of text.split('\0')) {
     if (!field) continue;
     const match = field.match(/^(\d+) ([0-9a-f]+) (\d)\t([\s\S]+)$/);
     if (!match || match[3] !== '0') continue;
     entries.set(match[4], { mode: match[1], oid: match[2] });
   }
   return entries;
+}
+
+function readStageZeroEntries(projectRoot) {
+  return parseStageZeroEntries(readGit(['ls-files', '--stage', '-z'], projectRoot));
 }
 
 function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
@@ -872,24 +882,123 @@ function resetCommittedPaths(projectRoot, groups, allFiles) {
     runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
 }
 
-// Build and commit each group through a temporary index. Staged scope copies
-// the reviewed index blobs; all scope stages only the group's working-tree
-// paths into that temporary index. The real index and worktree are untouched
-// until Git has successfully created the corresponding commit.
-function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, scope) {
-  const snapshot = scope === 'staged' ? readStageZeroEntries(projectRoot) : null;
+function captureTargetEntries(projectRoot, scope, paths) {
+  if (scope === 'staged') return readStageZeroEntries(projectRoot);
+  const tempDir = mkdtempSync(join(tmpdir(), 'aicommit-split-snapshot-'));
+  const indexPath = join(tempDir, 'index');
+  try {
+    runGitWithIndex(
+      hasHead(projectRoot) ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'],
+      projectRoot,
+      indexPath,
+    );
+    runGitWithIndex(['add', '-A', '--', ...paths], projectRoot, indexPath);
+    return parseStageZeroEntries(
+      runGitWithIndex(['ls-files', '--stage', '-z'], projectRoot, indexPath),
+    );
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function captureCheckpointSnapshots(projectRoot, scope, allFiles) {
+  const paths = [...new Set(allFiles.flatMap((change) => change.addPaths))].sort();
+  const target = captureTargetEntries(projectRoot, scope, paths);
+  const index = readStageZeroEntries(projectRoot);
+  return paths.map((path) => ({
+    path,
+    target: target.get(path) || null,
+    index: index.get(path) || null,
+  }));
+}
+
+function currentHead(projectRoot) {
+  return hasHead(projectRoot) ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null;
+}
+
+function currentHeadTree(projectRoot) {
+  return hasHead(projectRoot) ? readGit(['rev-parse', 'HEAD^{tree}'], projectRoot).trim() : null;
+}
+
+function currentHeadParent(projectRoot) {
+  if (!hasHead(projectRoot)) return null;
+  const fields = readGit(['rev-list', '--parents', '-n', '1', 'HEAD'], projectRoot)
+    .trim()
+    .split(/\s+/);
+  return fields[1] || null;
+}
+
+function readHeadEntries(projectRoot, paths) {
+  const entries = new Map();
+  if (!hasHead(projectRoot) || !paths.length) return entries;
+  const text = readGit(['ls-tree', '-rz', 'HEAD', '--', ...paths], projectRoot);
+  for (const field of text.split('\0')) {
+    if (!field) continue;
+    const match = field.match(/^(\d+) \S+ ([0-9a-f]+)\t([\s\S]+)$/);
+    if (match) entries.set(match[3], { mode: match[1], oid: match[2] });
+  }
+  return entries;
+}
+
+function entriesEqual(left, right) {
+  if (left === null || left === undefined) return right === null || right === undefined;
+  if (right === null || right === undefined) return false;
+  return left.mode === right.mode && left.oid === right.oid;
+}
+
+function completedGroups(checkpoint) {
+  return checkpoint.completed.map((record) => checkpoint.plan.groups[record.index]);
+}
+
+function splitStatusSummary(projectRoot, limit = 20) {
+  const lines = readGit(['status', '--short', '--untracked-files=all'], projectRoot)
+    .split('\n')
+    .filter(Boolean);
+  if (!lines.length) return ['    (clean)'];
+  const visible = lines.slice(0, limit).map((line) => `    ${sanitizeTerminalText(line)}`);
+  if (lines.length > limit) visible.push(`    ... and ${lines.length - limit} more path(s)`);
+  return visible;
+}
+
+function reconcileCompletedIndex(projectRoot, checkpoint) {
+  if (!checkpoint.completed.length) return;
+  const groups = completedGroups(checkpoint);
+  const paths = [
+    ...new Set(groups.flatMap((group) => expandPaths(group.files, checkpoint.plan.changes))),
+  ];
+  const current = readStageZeroEntries(projectRoot);
+  const head = readHeadEntries(projectRoot, paths);
+  const snapshots = new Map(checkpoint.snapshots.map((snapshot) => [snapshot.path, snapshot]));
+  for (const path of paths) {
+    const actual = current.get(path) || null;
+    const headEntry = head.get(path) || null;
+    const original = snapshots.get(path)?.index || null;
+    if (!entriesEqual(actual, headEntry) && !entriesEqual(actual, original)) {
+      throw new Error(`Index path changed after the split interruption: ${path}`);
+    }
+  }
+  resetCommittedPaths(projectRoot, groups, checkpoint.plan.changes);
+}
+
+// Build and commit each group through a temporary index using only the object
+// snapshots captured before the first commit. This keeps both scopes immune to
+// later worktree edits. The real index is reconciled only after Git has
+// successfully created and checkpointed the corresponding commit.
+function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, transaction) {
+  const snapshot = new Map(
+    transaction.checkpoint.snapshots.map((entry) => [entry.path, entry.target]),
+  );
   const tempDir = mkdtempSync(join(tmpdir(), 'aicommit-split-index-'));
   const indexPath = join(tempDir, 'index');
-  const completed = [];
+  let checkpoint = transaction.checkpoint;
   try {
-    for (let i = 0; i < groups.length; i++) {
+    for (let i = checkpoint.completed.length; i < groups.length; i++) {
       const group = groups[i];
       console.log(
         '  ' +
           chalk.dim(`[${i + 1}/${groups.length}] `) +
           highlightMessage(group.message.split('\n')[0]),
       );
-      let committedThisRound = false;
       try {
         rmSync(indexPath, { force: true });
         runGitWithIndex(
@@ -899,55 +1008,81 @@ function executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnl
         );
         const baseTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
         const paths = expandPaths(group.files, allFiles);
-        if (scope === 'staged') {
-          for (const path of paths) {
-            const entry = snapshot.get(path);
-            if (entry) {
-              runGitWithIndex(
-                ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
-                projectRoot,
-                indexPath,
-              );
-            } else {
-              runGitWithIndex(
-                ['update-index', '--force-remove', '--', path],
-                projectRoot,
-                indexPath,
-              );
-            }
+        for (const path of paths) {
+          const entry = snapshot.get(path);
+          if (entry) {
+            runGitWithIndex(
+              ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+              projectRoot,
+              indexPath,
+            );
+          } else {
+            runGitWithIndex(['update-index', '--force-remove', '--', path], projectRoot, indexPath);
           }
-        } else {
-          runGitWithIndex(['add', '-A', '--', ...paths], projectRoot, indexPath);
         }
         const groupTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
         if (groupTree === baseTree) {
           throw new Error(`Split group ${i + 1} would create an empty commit.`);
         }
+        const parent = currentHead(projectRoot);
+        checkpoint = writeSplitCheckpoint(projectRoot, {
+          ...checkpoint,
+          inFlight: { index: i, parent, tree: groupTree },
+        }).checkpoint;
         runGitWithIndex(
           ['commit', '-m', group.message],
           projectRoot,
           indexPath,
           diagnosticsOnly ? 'stderr' : true,
         );
-        committedThisRound = true;
-        completed.push(group);
+        const commit = currentHead(projectRoot);
+        if (
+          currentHeadTree(projectRoot) !== groupTree ||
+          currentHeadParent(projectRoot) !== parent
+        ) {
+          throw new Error(`Split group ${i + 1} created an unexpected commit graph.`);
+        }
+        transaction.faultInjector?.('after_commit_before_checkpoint', {
+          index: i,
+          commit,
+          parent,
+          tree: groupTree,
+        });
+        checkpoint = writeSplitCheckpoint(projectRoot, {
+          ...checkpoint,
+          completed: [...checkpoint.completed, { index: i, commit, parent, tree: groupTree }],
+          inFlight: null,
+        }).checkpoint;
         resetCommittedPaths(projectRoot, [group], allFiles);
       } catch (err) {
         console.log('\n  ' + chalk.red(`✗ Commit ${i + 1}/${groups.length} failed.`));
         console.log('  ' + chalk.red(sanitizeTerminalText(err.message)));
+        const inFlight = checkpoint.inFlight;
         console.log(
-          chalk.dim(`  ${completed.length} commit(s) already made. Remaining groups stay staged:`),
+          chalk.dim(
+            `  Completed: ${checkpoint.completed.length} checkpointed commit(s).` +
+              (inFlight
+                ? ` Group ${inFlight.index + 1} is in flight and will be reconciled on resume.`
+                : ''),
+          ),
         );
-        const pendingIndex = committedThisRound ? i + 1 : i;
+        console.log(chalk.dim('  Pending groups:'));
+        const pendingIndex = inFlight?.index ?? checkpoint.completed.length;
         for (let j = pendingIndex; j < groups.length; j++) {
           console.log(`    ${j + 1}. ${groups[j].message.split('\n')[0]}`);
         }
+        console.log(chalk.dim('  Current worktree/index status:'));
+        for (const line of splitStatusSummary(projectRoot)) console.log(line);
         console.log(
-          chalk.dim('  Resolve the issue; checkpoint/resume support arrives in this v1.3 stage.\n'),
+          chalk.dim(
+            `  Checkpoint: ${transaction.path}\n` +
+              '  Resolve the issue, then run: aicommit split --resume\n',
+          ),
         );
         return false;
       }
     }
+    removeSplitCheckpoint(projectRoot);
     return true;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
@@ -964,6 +1099,7 @@ export function executeSplit(
   allFiles,
   diagnosticsOnly = false,
   scope = 'all',
+  options = {},
 ) {
   let report;
   try {
@@ -981,7 +1117,32 @@ export function executeSplit(
           `${report.unborn ? 'unborn HEAD' : 'HEAD ready'}, hooks: ${hookSummary}`,
       ),
   );
-  return executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, scope);
+  let transaction = options.transaction || null;
+  if (!transaction) {
+    try {
+      const plan =
+        options.planArtifact ||
+        createSplitPlanArtifact({
+          scope,
+          baseHead: currentHead(projectRoot),
+          fingerprint: getSplitStateFingerprint(projectRoot, hasHead(projectRoot), allFiles, scope),
+          language: 'en',
+          commitPolicy: DEFAULT_COMMIT_POLICY,
+          changes: allFiles,
+          groups,
+        });
+      const snapshots = captureCheckpointSnapshots(projectRoot, scope, allFiles);
+      transaction = {
+        ...createSplitCheckpoint(projectRoot, plan, snapshots),
+        faultInjector: options.faultInjector,
+      };
+    } catch (err) {
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `Failed to create split checkpoint: ${err.message}`, {
+        cause: err,
+      });
+    }
+  }
+  return executeTransactionalSplit(groups, projectRoot, allFiles, diagnosticsOnly, transaction);
 }
 
 // Returns a structured result when split mode handled the run; false means
@@ -1403,18 +1564,18 @@ export async function splitFlow(
     break; // commit, or finish the dry run
   }
 
+  const reviewedPlan = createSplitPlanArtifact({
+    scope,
+    baseHead: head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null,
+    fingerprint: plannedStateFingerprint,
+    language: config.language,
+    commitPolicy: config.commitPolicy,
+    changes: allFiles,
+    groups,
+  });
   let writtenPlanPath = null;
   if (exportPlanPath) {
-    const artifact = createSplitPlanArtifact({
-      scope,
-      baseHead: head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null,
-      fingerprint: plannedStateFingerprint,
-      language: config.language,
-      commitPolicy: config.commitPolicy,
-      changes: allFiles,
-      groups,
-    });
-    writtenPlanPath = await writeSplitPlanArtifact(exportPlanPath, artifact);
+    writtenPlanPath = await writeSplitPlanArtifact(exportPlanPath, reviewedPlan);
     console.log('  ' + chalk.green('✓') + chalk.dim(` Split plan written: ${writtenPlanPath}`));
   }
 
@@ -1449,7 +1610,9 @@ export async function splitFlow(
   }
 
   console.log('');
-  const ok = executeSplit(groups, projectRoot, allFiles, machineOutput, scope);
+  const ok = executeSplit(groups, projectRoot, allFiles, machineOutput, scope, {
+    planArtifact: reviewedPlan,
+  });
   if (ok) {
     console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${groups.length} commits.\n`));
   } else {
@@ -1479,6 +1642,168 @@ function canonicalChanges(changes) {
       addPaths: [...change.addPaths],
     }))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function reconcileInFlight(projectRoot, checkpoint) {
+  const inFlight = checkpoint.inFlight;
+  if (!inFlight) {
+    const expected = checkpoint.completed.at(-1)?.commit || checkpoint.plan.baseHead;
+    if (currentHead(projectRoot) !== expected) {
+      throw new Error('HEAD no longer matches the last recorded split commit.');
+    }
+    return checkpoint;
+  }
+
+  const head = currentHead(projectRoot);
+  if (head === inFlight.parent) {
+    return writeSplitCheckpoint(projectRoot, { ...checkpoint, inFlight: null }).checkpoint;
+  }
+  if (
+    head &&
+    currentHeadParent(projectRoot) === inFlight.parent &&
+    currentHeadTree(projectRoot) === inFlight.tree
+  ) {
+    return writeSplitCheckpoint(projectRoot, {
+      ...checkpoint,
+      completed: [
+        ...checkpoint.completed,
+        {
+          index: inFlight.index,
+          commit: head,
+          parent: inFlight.parent,
+          tree: inFlight.tree,
+        },
+      ],
+      inFlight: null,
+    }).checkpoint;
+  }
+  throw new Error('HEAD cannot be reconciled with the in-flight split group.');
+}
+
+function validateRemainingSnapshot(projectRoot, checkpoint) {
+  const remainingGroups = checkpoint.plan.groups.slice(checkpoint.completed.length);
+  const remainingDisplays = new Set(remainingGroups.flatMap((group) => group.files));
+  const remainingChanges = checkpoint.plan.changes.filter((change) =>
+    remainingDisplays.has(change.path),
+  );
+  const currentChanges = getSplitChangedFiles(projectRoot, checkpoint.plan.scope);
+  if (
+    JSON.stringify(canonicalChanges(currentChanges)) !==
+    JSON.stringify(canonicalChanges(remainingChanges))
+  ) {
+    throw new Error('Remaining split change set no longer matches the checkpoint.');
+  }
+  const paths = [...new Set(remainingChanges.flatMap((change) => change.addPaths))];
+  const currentTarget = captureTargetEntries(projectRoot, checkpoint.plan.scope, paths);
+  const snapshots = new Map(checkpoint.snapshots.map((snapshot) => [snapshot.path, snapshot]));
+  for (const path of paths) {
+    if (!entriesEqual(currentTarget.get(path) || null, snapshots.get(path)?.target || null)) {
+      throw new Error(`Remaining split content changed after interruption: ${path}`);
+    }
+  }
+  return { remainingGroups, remainingChanges };
+}
+
+export async function resumeSplit(projectRoot, { yes = false, machineOutput = false } = {}) {
+  let transaction;
+  try {
+    transaction = readSplitCheckpoint(projectRoot);
+    transaction.checkpoint = reconcileInFlight(projectRoot, transaction.checkpoint);
+    reconcileCompletedIndex(projectRoot, transaction.checkpoint);
+  } catch (err) {
+    const category = /no split checkpoint/i.test(err.message)
+      ? ERROR_CATEGORIES.CONFIG
+      : ERROR_CATEGORIES.CONCURRENT_MODIFICATION;
+    throw fail(category, `Cannot resume split: ${err.message}`, { cause: err });
+  }
+  const checkpoint = transaction.checkpoint;
+  if (checkpoint.completed.length === checkpoint.plan.groups.length) {
+    removeSplitCheckpoint(projectRoot);
+    console.log(
+      '\n  ' +
+        chalk.green.bold('✓ The final in-flight group was already committed; checkpoint closed.\n'),
+    );
+    return {
+      plan: checkpoint.plan.groups,
+      warnings: [],
+      exitReason: 'success',
+      committed: true,
+      edited: false,
+      rewrites: 0,
+    };
+  }
+
+  let remaining;
+  try {
+    remaining = validateRemainingSnapshot(projectRoot, checkpoint);
+  } catch (err) {
+    throw fail(ERROR_CATEGORIES.CONCURRENT_MODIFICATION, `Cannot resume split: ${err.message}`, {
+      cause: err,
+    });
+  }
+  console.log(
+    '\n  ' +
+      chalk.green('✓') +
+      chalk.dim(
+        ` Resuming transaction ${checkpoint.transactionId.slice(0, 12)}: ` +
+          `${checkpoint.completed.length} completed, ${remaining.remainingGroups.length} pending`,
+      ),
+  );
+  displayPlan(remaining.remainingGroups, checkpoint.plan.changes);
+  if (!yes) {
+    const action = await vimSelect({
+      message: 'Resume the pending split groups?',
+      choices: [
+        {
+          name: 'Resume pending groups',
+          value: 'resume',
+          description: `Create ${remaining.remainingGroups.length} remaining commit(s)`,
+        },
+        { name: 'Cancel', value: 'cancel', description: 'Keep the checkpoint' },
+      ],
+    });
+    if (action === 'cancel') {
+      console.log(chalk.dim('\n  Split resume cancelled; checkpoint retained.\n'));
+      return {
+        plan: remaining.remainingGroups,
+        warnings: [],
+        exitReason: 'cancelled',
+        committed: false,
+      };
+    }
+  }
+
+  const ok = executeSplit(
+    checkpoint.plan.groups,
+    projectRoot,
+    checkpoint.plan.changes,
+    machineOutput,
+    checkpoint.plan.scope,
+    { transaction: { path: transaction.path, checkpoint } },
+  );
+  if (!ok) {
+    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more resumed split commits failed.', {
+      reported: true,
+    });
+  }
+  console.log(
+    '\n  ' +
+      chalk.green.bold(
+        `✓ Resume complete! Created ${remaining.remainingGroups.length} commit(s).\n`,
+      ),
+  );
+  return {
+    plan: checkpoint.plan.groups,
+    provider: null,
+    model: null,
+    latencyMs: null,
+    usage: null,
+    warnings: [],
+    exitReason: 'success',
+    committed: true,
+    edited: false,
+    rewrites: 0,
+  };
 }
 
 export async function applySplitPlan(
@@ -1569,6 +1894,7 @@ export async function applySplitPlan(
     artifact.changes,
     machineOutput,
     artifact.scope,
+    { planArtifact: artifact },
   );
   if (!ok) {
     throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more split commits failed.', {

@@ -40,8 +40,16 @@ test('parseArgs recognizes split plan/apply artifact commands', () => {
   assert.equal(apply.splitPlanFile, 'plan.json');
   assert.throws(() => parseArgs(['split', 'plan', '--scope=all']), /requires --file/);
   assert.throws(() => parseArgs(['split', 'apply', '--file=x', '--scope=all']), /reads its scope/);
-  assert.throws(() => parseArgs(['split', 'unknown', '--file=x']), /plan or apply/);
+  assert.throws(() => parseArgs(['split', 'unknown', '--file=x']), /plan, apply, or/);
   assert.throws(() => parseArgs(['--scope=all']), /only valid/);
+
+  const resume = parseArgs(['split', '--resume', '--yes']);
+  assert.equal(resume.splitCommand, 'resume');
+  assert.equal(resume.splitPlanFile, null);
+  assert.throws(
+    () => parseArgs(['split', '--resume', '--file=x']),
+    /accepts only --yes, --output, and --debug/,
+  );
 });
 
 test('parseArgs keeps dry-run disabled by default and for setup', () => {

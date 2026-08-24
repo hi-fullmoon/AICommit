@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hi-fullmoon/AICommit/schemas/aicommit-split-checkpoint.schema.json",
+  "title": "aicommit split checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "transactionId",
+    "createdAt",
+    "updatedAt",
+    "plan",
+    "snapshots",
+    "completed",
+    "inFlight"
+  ],
+  "properties": {
+    "kind": { "const": "aicommit-split-checkpoint" },
+    "version": { "const": 1 },
+    "transactionId": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "plan": { "$ref": "./aicommit-split-plan.schema.json" },
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "target", "index"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "target": { "$ref": "#/$defs/indexEntry" },
+          "index": { "$ref": "#/$defs/indexEntry" }
+        }
+      }
+    },
+    "completed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "commit", "parent", "tree"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "commit": { "$ref": "#/$defs/objectId" },
+          "parent": {
+            "anyOf": [{ "$ref": "#/$defs/objectId" }, { "type": "null" }]
+          },
+          "tree": { "$ref": "#/$defs/objectId" }
+        }
+      }
+    },
+    "inFlight": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["index", "parent", "tree"],
+          "properties": {
+            "index": { "type": "integer", "minimum": 0 },
+            "parent": {
+              "anyOf": [{ "$ref": "#/$defs/objectId" }, { "type": "null" }]
+            },
+            "tree": { "$ref": "#/$defs/objectId" }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "objectId": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "indexEntry": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "oid"],
+          "properties": {
+            "mode": { "type": "string", "pattern": "^[0-9]{6}$" },
+            "oid": { "$ref": "#/$defs/objectId" }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  }
+}

@@ -177,12 +177,17 @@ aicommit stats           # show local quality, latency, and token trends
 aicommit stats clear     # permanently clear local metric history
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
-aicommit --split         # split changes into multiple logical commits
+aicommit --split         # choose staged/all scope, then split logical commits
+aicommit --split=staged  # split only the reviewed index snapshot
+aicommit --split=all     # split the complete working-tree snapshot
 aicommit --dry-run       # generate and review without creating a commit
 aicommit --split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
 aicommit --yes --dry-run # non-interactively preview all changes; restores staging
-aicommit --split --yes   # non-interactively plan and commit all working-tree changes
+aicommit --split=all --yes # non-interactively plan and commit all working-tree changes
+aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
+aicommit split apply --file=/tmp/split-plan.json --yes
+aicommit split --resume --yes # resume an interrupted split transaction
 aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
@@ -197,7 +202,9 @@ aicommit -h              # help
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                               |
 | `-p`, `--provider` | Use the named provider from `providers`                                                              |
-| `-s`, `--split`    | Split changes into multiple logical commits                                                          |
+| `-s`, `--split`    | Choose a scope and split changes; use `--split=staged\|all` to select it explicitly                  |
+| `--scope`          | `staged` or `all` scope for `aicommit split plan`                                                    |
+| `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`                                  |
 | `--dry-run`        | Generate and review a message or split plan without creating commits                                 |
 | `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes                               |
 | `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                              |
@@ -280,9 +287,13 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`--split` groups all changes (staged, unstaged, and untracked) into logical commits by feature/module. It intentionally crosses the current index boundary. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. `--split --yes` approves that complete working-tree scope non-interactively, except that sensitive-content detection fails closed before any provider request or automatic staging.
+`--split` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--split=staged` or `--split=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
 
-Current split behavior is file-level: one file cannot be divided across multiple commits. If execution fails after one or more groups, completed commits remain in history; AICommit does not rewrite or roll them back. The remaining groups' files are re-staged and printed, the CLI exits non-zero, and you should inspect `git status` plus `git diff --staged` before finishing them with plain `git commit`. If planning fails before execution, no split commit is created. Run split mode only from a worktree whose complete set of changes you intend to review and commit.
+For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
+
+Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split --resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
+
+Current split behavior is file-level: one file cannot yet be divided across multiple commits.
 
 ## Development and releases
 
