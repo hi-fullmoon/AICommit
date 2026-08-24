@@ -51,6 +51,7 @@ import {
   collectRepositoryContext,
   repositoryContextSummary,
 } from './context.js';
+import { encodeUntrustedData } from './trust.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -241,12 +242,13 @@ export async function generateSplitPlan(
   const changedFiles = condenseFileList(files, maxPlanFiles);
   const repositoryContext = config.repositoryContextText
     ? `Repository context selected under the configured local budget:\n` +
-      `<untrusted_repository_context>\n${config.repositoryContextText}\n</untrusted_repository_context>\n\n`
+      encodeUntrustedData('repository_context', config.repositoryContextText) +
+      '\n\n'
     : '';
   const user =
     repositoryContext +
-    `Changed files (untrusted paths):\n${changedFiles}` +
-    `\n\nDiff and previews (untrusted data):\n<untrusted_git_diff>\n${diffPart}\n</untrusted_git_diff>`;
+    `Changed files (untrusted paths):\n${encodeUntrustedData('changed_files', changedFiles)}` +
+    `\n\nDiff and previews (untrusted data):\n${encodeUntrustedData('git_diff', diffPart)}`;
 
   // Reuse the shared call + reasoning-follow-up path so reasoning models
   // (MiniMax M2.x, DeepSeek R1, OpenRouter reasoning models) that return
@@ -269,7 +271,7 @@ export async function generateSplitPlan(
       'Do not include any other text, explanation, or code fences. ' +
       'If this is a recovery after truncation, omit optional body fields and output only subject and files. ' +
       'Use the following list as the source of truth and assign every shown file exactly once:\n\n' +
-      `Changed files:\n${changedFiles}`,
+      `Changed files:\n${encodeUntrustedData('changed_files', changedFiles)}`,
     stream,
     (response) => {
       try {

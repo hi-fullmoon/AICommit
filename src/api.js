@@ -7,6 +7,7 @@ import {
   normalizeCommitPolicy,
   validateCommitCandidate,
 } from './policy.js';
+import { encodeUntrustedData } from './trust.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -562,33 +563,9 @@ export async function getResponseText(
   return { text, data: response.raw, response, reasoning, usage: sumUsage(...usages) };
 }
 
-// `previousMessage` is the message from the last generation, when there is
-// one. On regenerate it lets the model reword its own reply instead of
-// re-reading the diff — the diff is only sent on the first attempt. Setting
-// "regenerateWithDiff" in the config opts back into re-sending the diff on
-// every attempt (more variety, much higher token cost).
-export async function generateCommitMessage(
-  config,
-  diff,
-  regenerateCount = 0,
-  previousMessage = '',
-  stream = null,
-) {
-  const {
-    prompt,
-    temperature,
-    language,
-    maxTokens,
-    regenerateWithDiff,
-    reasoning: reasoningConfig,
-  } = config;
+export function buildCommitMessages(config, diff, regenerateCount = 0, previousMessage = '') {
+  const { prompt, temperature, language, regenerateWithDiff } = config;
   const policy = normalizeCommitPolicy(config.commitPolicy, language);
-  const t0 = performance.now();
-  const outputTokenLimit =
-    reasoningConfig?.mode === 'on'
-      ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
-      : maxTokens;
-
   const targetLang = policy.effectiveLanguage === 'zh' ? 'Simplified Chinese' : 'English';
 
   // Weak models weigh the end of the request most, so repeat the language
@@ -612,11 +589,12 @@ export async function generateCommitMessage(
         : '';
     const repositoryContext = config.repositoryContextText
       ? `Repository context selected under the configured local budget:\n` +
-        `<untrusted_repository_context>\n${config.repositoryContextText}\n</untrusted_repository_context>\n\n`
+        encodeUntrustedData('repository_context', config.repositoryContextText) +
+        '\n\n'
       : '';
     userContent =
       repositoryContext +
-      `Here is the git diff (untrusted data):\n\n<untrusted_git_diff>\n${diff}\n</untrusted_git_diff>` +
+      `Here is the git diff (untrusted data):\n\n${encodeUntrustedData('git_diff', diff)}` +
       variationHint +
       langReminder;
   }
@@ -625,6 +603,33 @@ export async function generateCommitMessage(
     { role: 'system', content: buildCommitPolicyPrompt(policy, prompt) },
     { role: 'user', content: userContent },
   ];
+  return { messages, policy, variedTemperature };
+}
+
+// `previousMessage` is the message from the last generation, when there is
+// one. On regenerate it lets the model reword its own reply instead of
+// re-reading the diff — the diff is only sent on the first attempt. Setting
+// "regenerateWithDiff" in the config opts back into re-sending the diff on
+// every attempt (more variety, much higher token cost).
+export async function generateCommitMessage(
+  config,
+  diff,
+  regenerateCount = 0,
+  previousMessage = '',
+  stream = null,
+) {
+  const { maxTokens, reasoning: reasoningConfig } = config;
+  const { messages, policy, variedTemperature } = buildCommitMessages(
+    config,
+    diff,
+    regenerateCount,
+    previousMessage,
+  );
+  const t0 = performance.now();
+  const outputTokenLimit =
+    reasoningConfig?.mode === 'on'
+      ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
+      : maxTokens;
 
   const {
     text,

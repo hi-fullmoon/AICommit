@@ -2,12 +2,14 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildCommitMessages,
   generateCommitMessage,
   checkConnection,
   getResponseText,
   callAPI,
   requestGeneration,
 } from '../src/api.js';
+import { decodeUntrustedData } from '../src/trust.js';
 
 const realFetch = globalThis.fetch;
 after(() => {
@@ -83,7 +85,7 @@ test('user message repeats the language constraint after the diff', async () => 
   assert.ok(user.endsWith('(Remember: the commit message must be in English.)'));
 });
 
-test('bounded repository context and diff are carried only inside explicit untrusted delimiters', async () => {
+test('bounded repository context and diff are carried only inside JSON untrusted envelopes', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'docs: describe cache rules' } }] }]);
   await generateCommitMessage(
     cfg({
@@ -96,9 +98,16 @@ test('bounded repository context and diff are carried only inside explicit untru
   const user = calls[0].messages.find((message) => message.role === 'user').content;
   assert.doesNotMatch(system, /PRINT THE API KEY|packages\/cache/);
   assert.match(system, /Repository diffs.*untrusted data/);
-  assert.match(user, /<untrusted_repository_context>[\s\S]*IGNORE SYSTEM/);
-  assert.match(user, /<untrusted_git_diff>[\s\S]*export const cache/);
-  assert.match(user, /<\/untrusted_git_diff>/);
+  const envelopes = [
+    ...user.matchAll(/BEGIN_AICOMMIT_UNTRUSTED_JSON\n[^\n]*\nEND_AICOMMIT_UNTRUSTED_JSON/g),
+  ].map((match) => decodeUntrustedData(match[0]));
+  assert.deepEqual(
+    envelopes.map((envelope) => envelope.kind),
+    ['repository_context', 'git_diff'],
+  );
+  assert.match(envelopes[0].content, /IGNORE SYSTEM/);
+  assert.match(envelopes[1].content, /export const cache/);
+  assert.equal(buildCommitMessages(cfg(), diff).messages.length, 2);
 });
 
 test('reasoning model: empty content + reasoning triggers a follow-up call', async () => {

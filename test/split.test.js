@@ -17,6 +17,7 @@ import {
   getSplitStateFingerprint,
   captureUntrackedSnapshots,
 } from '../src/split.js';
+import { decodeUntrustedData } from '../src/trust.js';
 
 // Fresh git repo for exercising the real git index operations behind
 // executeSplit / getAllChangedFiles.
@@ -185,7 +186,15 @@ test('incomplete split recovery does not depend on finish_reason and resends fil
   assert.match(raw, /early\.js/);
   assert.equal(calls.length, 2);
   const recovery = calls[1].messages.at(-1).content;
-  assert.match(recovery, /Changed files:\nM early\.js\nM late\.js/);
+  const envelope = recovery.match(
+    /BEGIN_AICOMMIT_UNTRUSTED_JSON\n[^\n]*\nEND_AICOMMIT_UNTRUSTED_JSON/,
+  );
+  assert.ok(envelope);
+  assert.deepEqual(decodeUntrustedData(envelope[0]), {
+    kind: 'changed_files',
+    untrusted: true,
+    content: 'M early.js\nM late.js',
+  });
   assert.match(recovery, /incomplete or malformed/);
   assert.ok(!calls[1].messages.some((m) => m.content.includes('SECRET_DIFF_MARKER')));
   assert.equal(calls[1].max_tokens, 4096);

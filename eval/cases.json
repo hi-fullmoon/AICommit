@@ -1,0 +1,121 @@
+[
+  {
+    "id": "single-change",
+    "category": "single",
+    "language": "en",
+    "diff": "diff --git a/src/session.js b/src/session.js\n+export function expireSession() {}",
+    "candidates": [
+      { "message": "feat(session): add session expiry", "expectedValid": true },
+      { "message": "fix: expire stale sessions", "expectedValid": true },
+      { "message": "feature: add session expiry", "expectedValid": false },
+      { "message": "Updated session code", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "mixed-change",
+    "category": "mixed",
+    "language": "en",
+    "diff": "diff --git a/src/cache.js b/src/cache.js\n+export const cacheLimit = 10;\ndiff --git a/src/queue.js b/src/queue.js\n+export const queueLimit = 20;",
+    "candidates": [
+      { "message": "refactor: centralize cache and queue limits", "expectedValid": true },
+      {
+        "message": "chore: align runtime limits\n\n- update cache and queue defaults",
+        "expectedValid": true
+      },
+      { "message": "refactor centralize settings", "expectedValid": false },
+      { "message": "misc: update everything", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "rename-change",
+    "category": "rename",
+    "language": "en",
+    "policy": {
+      "scope": { "mode": "required", "values": ["parser"] }
+    },
+    "diff": "diff --git a/src/parser/tokenizer.js b/src/parser/scanner.js\nsimilarity index 100%\nrename from src/parser/tokenizer.js\nrename to src/parser/scanner.js",
+    "candidates": [
+      { "message": "refactor(parser): rename token scanner", "expectedValid": true },
+      { "message": "chore(parser): align scanner naming", "expectedValid": true },
+      { "message": "refactor: rename token scanner", "expectedValid": false },
+      { "message": "refactor(other): rename token scanner", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "generated-artifact",
+    "category": "generated",
+    "language": "en",
+    "policy": {
+      "body": { "mode": "forbidden", "maxLines": 0 }
+    },
+    "diff": "diff --git a/generated/client.js b/generated/client.js\n(generated file — content omitted)",
+    "candidates": [
+      { "message": "build: refresh generated client", "expectedValid": true },
+      { "message": "chore: update generated artifacts", "expectedValid": true },
+      { "message": "build: refresh client\n\n- regenerate API bindings", "expectedValid": false },
+      { "message": "generated: refresh client", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "long-diff",
+    "category": "long_diff",
+    "language": "en",
+    "policy": {
+      "subject": { "maxLength": 30 }
+    },
+    "diff": "diff --git a/src/catalog.js b/src/catalog.js\n+catalogIndex.set(item.id, item);\n",
+    "repeatDiff": 600,
+    "candidates": [
+      { "message": "perf: index catalog items", "expectedValid": true },
+      { "message": "fix: bound catalog lookup", "expectedValid": true },
+      {
+        "message": "perf: introduce a comprehensive catalog indexing implementation",
+        "expectedValid": false
+      },
+      { "message": "perf:index catalog items", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "simplified-chinese",
+    "category": "zh",
+    "language": "zh",
+    "policy": { "language": "zh" },
+    "diff": "diff --git a/src/retry.js b/src/retry.js\n+export const retryLimit = 3;",
+    "candidates": [
+      { "message": "fix: 限制网络重试次数", "expectedValid": true },
+      { "message": "feat: 增加可配置的重试上限", "expectedValid": true },
+      { "message": "fix: bound network retries", "expectedValid": false },
+      { "message": "修复网络重试次数", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "english-output",
+    "category": "en",
+    "language": "en",
+    "policy": { "language": "en" },
+    "diff": "diff --git a/src/config.js b/src/config.js\n+export const timeout = 1000;",
+    "candidates": [
+      { "message": "fix(config): validate timeout values", "expectedValid": true },
+      { "message": "docs: explain timeout configuration", "expectedValid": true },
+      { "message": "fix: 校验超时配置", "expectedValid": false },
+      { "message": "docs：explain timeout configuration", "expectedValid": false }
+    ]
+  },
+  {
+    "id": "weak-model-anomalies",
+    "category": "weak_model",
+    "language": "en",
+    "diff": "diff --git a/src/parser.js b/src/parser.js\n+export function recoverParserOutput() {}",
+    "candidates": [
+      {
+        "message": "```text\nfix(parser): recover parser output\n```",
+        "expectedValid": true
+      },
+      { "message": "fix: handle parser recovery", "expectedValid": true },
+      { "message": "\"fix: recover parser output\"", "expectedValid": false },
+      { "message": "Here is your commit message: fix: recover output", "expectedValid": false },
+      { "message": "fix(parser): recover output\n- add fallback", "expectedValid": false },
+      { "message": "", "expectedValid": false }
+    ]
+  }
+]
