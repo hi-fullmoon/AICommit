@@ -320,6 +320,175 @@ test('--split=staged commits the index snapshot and leaves newer worktree edits 
   assert.match(git(repo, ['status', '--porcelain']), /^ M app\.js$/m);
 });
 
+test('split plan exports JSON and split apply commits it without provider configuration', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-apply-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
+  git(repo, ['add', 'extra.js']);
+  const planPath = join(root, 'plans', 'split.json');
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  { subject: 'fix: apply planned app change', files: ['app.js'] },
+                  { subject: 'feat: apply planned extra module', files: ['extra.js'] },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  const configPath = join(home, '.aicommit.config.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const planned = await runCli(repo, home, [
+    'split',
+    'plan',
+    '--scope=staged',
+    `--file=${planPath}`,
+    '--yes',
+    '--no-reasoning',
+  ]);
+  assert.equal(planned.code, 0, planned.stdout + planned.stderr);
+  assert.match(planned.stdout, /Split plan written/);
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '1');
+  const artifact = JSON.parse(readFileSync(planPath, 'utf8'));
+  assert.equal(artifact.kind, 'aicommit-split-plan');
+  assert.equal(artifact.scope, 'staged');
+  assert.equal(artifact.groups.length, 2);
+  assert.ok(!Object.hasOwn(artifact, 'diff'));
+
+  rmSync(configPath);
+  const applied = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
+  assert.equal(applied.code, 0, applied.stdout + applied.stderr);
+  assert.match(applied.stdout, /Loaded split plan/);
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '3');
+  assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
+});
+
+test('split apply rejects a stale fingerprint before mutating the index', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-stale-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  const planPath = join(root, 'split.json');
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  { subject: 'fix: retain planned snapshot', files: ['app.js'] },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  const configPath = join(home, '.aicommit.config.json');
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+  const planned = await runCli(repo, home, [
+    'split',
+    'plan',
+    '--scope=staged',
+    `--file=${planPath}`,
+    '--yes',
+    '--no-reasoning',
+  ]);
+  assert.equal(planned.code, 0, planned.stdout + planned.stderr);
+
+  writeFileSync(join(repo, 'app.js'), 'export const value = 99;\n');
+  git(repo, ['add', 'app.js']);
+  const indexBefore = git(repo, ['diff', '--cached', '--binary', '--full-index']);
+  rmSync(configPath);
+  const applied = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
+  assert.equal(applied.code, 8, applied.stdout + applied.stderr);
+  assert.match(applied.stderr, /no longer matches/);
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '1');
+  assert.equal(git(repo, ['diff', '--cached', '--binary', '--full-index']), indexBefore);
+});
+
+test('split plan rejects output inside the working tree before a provider request', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-location-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  let requests = 0;
+  const server = createServer((req, res) => {
+    requests++;
+    req.resume();
+    res.writeHead(500);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, [
+    'split',
+    'plan',
+    '--scope=staged',
+    `--file=${join(repo, 'plan.json')}`,
+    '--yes',
+    '--no-reasoning',
+  ]);
+  assert.equal(result.code, 2, result.stdout + result.stderr);
+  assert.equal(requests, 0);
+  assert.match(result.stderr, /outside the working tree or inside the repository Git directory/);
+});
+
 test('--split=all --yes scans complete untracked files before auto-staging', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-sensitive-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

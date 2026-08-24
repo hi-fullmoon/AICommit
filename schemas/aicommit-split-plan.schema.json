@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hi-fullmoon/AICommit/schemas/aicommit-split-plan.schema.json",
+  "title": "aicommit split plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "createdAt",
+    "scope",
+    "baseHead",
+    "fingerprint",
+    "language",
+    "commitPolicy",
+    "changes",
+    "groups"
+  ],
+  "properties": {
+    "kind": { "const": "aicommit-split-plan" },
+    "version": { "const": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "scope": { "enum": ["staged", "all"] },
+    "baseHead": {
+      "type": ["string", "null"],
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "language": { "enum": ["zh", "en"] },
+    "commitPolicy": { "type": "object" },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "path", "addPaths"],
+        "properties": {
+          "status": { "type": "string", "minLength": 1, "maxLength": 8 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "addPaths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "files"],
+        "properties": {
+          "message": { "type": "string", "minLength": 1, "maxLength": 10000 },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      }
+    }
+  }
+}

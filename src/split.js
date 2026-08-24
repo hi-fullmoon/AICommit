@@ -13,7 +13,7 @@ import {
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import chalk from 'chalk';
 import ora from 'ora';
@@ -56,6 +56,11 @@ import {
   repositoryContextSummary,
 } from './context.js';
 import { encodeUntrustedData } from './trust.js';
+import {
+  createSplitPlanArtifact,
+  readSplitPlanArtifact,
+  writeSplitPlanArtifact,
+} from './split-plan.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -71,6 +76,42 @@ const SPLIT_MAX_DIFF_CHARS = 16000;
 // plan mid-array. Files beyond the cap are dropped from the prompt; any file
 // the model does not list is swept into the catch-all group by normalizePlan.
 const SPLIT_MAX_PLAN_FILES = 100;
+
+function pathIsWithin(parent, candidate) {
+  const rel = relative(parent, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function canonicalDestination(path) {
+  let cursor = resolve(path);
+  const suffix = [];
+  while (true) {
+    try {
+      return join(realpathSync(cursor), ...suffix);
+    } catch {
+      const parent = dirname(cursor);
+      if (parent === cursor) return resolve(path);
+      suffix.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+function safeExportPlanPath(projectRoot, path) {
+  const absolute = resolve(path);
+  const rawGitDir = readGit(['rev-parse', '--git-dir'], projectRoot).trim();
+  const gitDir = isAbsolute(rawGitDir) ? rawGitDir : resolve(projectRoot, rawGitDir);
+  const canonicalRoot = realpathSync(projectRoot);
+  const canonicalGitDir = canonicalDestination(gitDir);
+  const canonicalPlan = canonicalDestination(absolute);
+  if (pathIsWithin(canonicalRoot, canonicalPlan) && !pathIsWithin(canonicalGitDir, canonicalPlan)) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'Split plan output must be outside the working tree or inside the repository Git directory.',
+    );
+  }
+  return absolute;
+}
 
 // Condense a changed-file list for the grouping prompt: keep the first `cap`
 // files and note the rest. The model is told the hidden files are collected
@@ -423,7 +464,7 @@ function expandPaths(groupFiles, allFiles) {
   return out;
 }
 
-function displayPlan(groups, allFiles) {
+export function displayPlan(groups, allFiles) {
   const byPath = new Map(allFiles.map((f) => [f.path, f]));
   console.log(
     '\n  ' + chalk.cyan.bold(`Split plan: ${groups.length} commit${groups.length > 1 ? 's' : ''}`),
@@ -852,9 +893,17 @@ export function executeSplit(
 export async function splitFlow(
   config,
   projectRoot,
-  { scope = 'prompt', dryRun = false, yes = false, machineOutput = false, provider = null } = {},
+  {
+    scope = 'prompt',
+    dryRun = false,
+    yes = false,
+    machineOutput = false,
+    provider = null,
+    exportPlanPath = null,
+  } = {},
 ) {
   const reasoningEnabled = config.reasoning.mode === 'on';
+  if (exportPlanPath) exportPlanPath = safeExportPlanPath(projectRoot, exportPlanPath);
   if (scope === 'prompt') {
     scope = await vimSelect({
       message: 'Which changes should split mode include?',
@@ -888,7 +937,7 @@ export async function splitFlow(
     throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
   }
 
-  if (allFiles.length === 1 && !yes) {
+  if (allFiles.length === 1 && !yes && !exportPlanPath) {
     console.log('\n  ' + chalk.dim('Only one changed file — falling back to single-commit mode.'));
     return false;
   }
@@ -1258,10 +1307,26 @@ export async function splitFlow(
     break; // commit, or finish the dry run
   }
 
+  let writtenPlanPath = null;
+  if (exportPlanPath) {
+    const artifact = createSplitPlanArtifact({
+      scope,
+      baseHead: head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null,
+      fingerprint: plannedStateFingerprint,
+      language: config.language,
+      commitPolicy: config.commitPolicy,
+      changes: allFiles,
+      groups,
+    });
+    writtenPlanPath = await writeSplitPlanArtifact(exportPlanPath, artifact);
+    console.log('  ' + chalk.green('✓') + chalk.dim(` Split plan written: ${writtenPlanPath}`));
+  }
+
   if (dryRun) {
     console.log('\n  ' + chalk.green.bold('✓ Dry run complete — no commits were created.\n'));
     return {
       plan: groups,
+      planFile: writtenPlanPath,
       provider,
       model: config.modelId,
       latencyMs: elapsed,
@@ -1307,5 +1372,124 @@ export async function splitFlow(
     committed: true,
     edited: planEdited,
     rewrites: rewriteCount,
+  };
+}
+
+function canonicalChanges(changes) {
+  return [...changes]
+    .map((change) => ({
+      status: change.status,
+      path: change.path,
+      addPaths: [...change.addPaths],
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export async function applySplitPlan(
+  projectRoot,
+  planPath,
+  { yes = false, machineOutput = false } = {},
+) {
+  let loaded;
+  try {
+    loaded = await readSplitPlanArtifact(planPath);
+  } catch (err) {
+    throw fail(ERROR_CATEGORIES.CONFIG, err.message, { cause: err });
+  }
+  const { artifact } = loaded;
+  const head = hasHead(projectRoot);
+  const currentHead = head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null;
+  if (currentHead !== artifact.baseHead) {
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'Split plan base HEAD no longer matches this repository; no commits were created.',
+    );
+  }
+  const currentChanges = getSplitChangedFiles(projectRoot, artifact.scope);
+  if (
+    JSON.stringify(canonicalChanges(currentChanges)) !==
+    JSON.stringify(canonicalChanges(artifact.changes))
+  ) {
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'Split plan change set no longer matches this repository; no commits were created.',
+    );
+  }
+  const currentFingerprint = getSplitStateFingerprint(
+    projectRoot,
+    head,
+    currentChanges,
+    artifact.scope,
+  );
+  if (currentFingerprint !== artifact.fingerprint) {
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'Split plan fingerprint no longer matches this repository; no commits were created.',
+    );
+  }
+
+  console.log(
+    '\n  ' +
+      chalk.green('✓') +
+      chalk.dim(` Loaded split plan: ${loaded.path} (scope: ${artifact.scope})`),
+  );
+  displayPlan(artifact.groups, artifact.changes);
+  if (!yes) {
+    const action = await vimSelect({
+      message: 'Apply this validated split plan?',
+      choices: [
+        {
+          name: 'Apply all groups',
+          value: 'apply',
+          description: `Create ${artifact.groups.length} commits`,
+        },
+        { name: 'Cancel', value: 'cancel', description: 'Create no commits' },
+      ],
+    });
+    if (action === 'cancel') {
+      console.log(chalk.dim('\n  Split apply cancelled.\n'));
+      return {
+        plan: artifact.groups,
+        warnings: [],
+        exitReason: 'cancelled',
+        committed: false,
+      };
+    }
+  }
+
+  // Recheck immediately before the first index mutation. A plan can sit on
+  // disk for days, and even the interactive confirmation creates a race.
+  if (
+    getSplitStateFingerprint(projectRoot, head, undefined, artifact.scope) !== artifact.fingerprint
+  ) {
+    throw fail(
+      ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+      'Split state changed during apply confirmation; no commits were created.',
+    );
+  }
+  const ok = executeSplit(
+    artifact.groups,
+    projectRoot,
+    artifact.changes,
+    machineOutput,
+    artifact.scope,
+  );
+  if (!ok) {
+    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more split commits failed.', {
+      reported: true,
+    });
+  }
+  console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${artifact.groups.length} commits.\n`));
+  return {
+    plan: artifact.groups,
+    provider: null,
+    model: null,
+    latencyMs: null,
+    usage: null,
+    warnings: [],
+    exitReason: 'success',
+    committed: true,
+    edited: false,
+    rewrites: 0,
   };
 }

@@ -14,10 +14,13 @@ function showHelp() {
   ${chalk.bold('Usage:')}
     ${chalk.dim('$')} aicommit [path] [options]
     ${chalk.dim('$')} aicommit setup
+    ${chalk.dim('$')} aicommit split <plan|apply> --file=<path> [options]
 
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
     doctor                Diagnose runtime, config, credentials, and connectivity
+    split plan            Generate and export a fingerprinted JSON plan
+    split apply           Validate and apply an exported JSON plan
     stats [action]        Show quality/cost trends; show, clear, enable, disable
     metrics [action]      Manage local metrics: status, clear, enable, disable
 
@@ -31,6 +34,8 @@ function showHelp() {
     -p, --provider=<name> Use the named provider from config "providers"
     -s, --split           Choose a split scope interactively
     --split=<scope>       Split staged changes or all changes: staged, all
+    --scope=<scope>       Scope for "split plan": staged, all
+    --file=<path>         Plan artifact path for "split plan/apply"
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
@@ -50,6 +55,8 @@ function showHelp() {
     aicommit --split      Choose staged/all scope, then plan logical commits
     aicommit --split=staged  Split only the reviewed index snapshot
     aicommit --split=all --yes  Split the complete working tree non-interactively
+    aicommit split plan --scope=staged --file=.aicommit-plan.json --yes
+    aicommit split apply --file=.aicommit-plan.json --yes
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit --yes        Commit already staged changes without prompts
@@ -84,6 +91,8 @@ function parsedDefaults(overrides = {}) {
     output: 'text',
     debug: false,
     split: null,
+    splitCommand: null,
+    splitPlanFile: null,
     dryRun: false,
     yes: false,
     check: false,
@@ -132,6 +141,15 @@ export function parseArgs(args = process.argv.slice(2)) {
     return parsedDefaults({ statsAction: action });
   }
 
+  let splitCommand = null;
+  if (args[0] === 'split') {
+    splitCommand = args[1];
+    if (!['plan', 'apply'].includes(splitCommand)) {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'split requires one command: plan or apply.');
+    }
+    args = args.slice(2);
+  }
+
   const doctor = args[0] === 'doctor';
   if (doctor) args = args.slice(1);
 
@@ -142,6 +160,8 @@ export function parseArgs(args = process.argv.slice(2)) {
   let output = 'text';
   let debug = false;
   let split = null;
+  let splitPlanFile = null;
+  let splitScopeOption = false;
   let dryRun = false;
   let yes = false;
   let check = false;
@@ -187,6 +207,37 @@ export function parseArgs(args = process.argv.slice(2)) {
       if (!['staged', 'all'].includes(split)) {
         throw fail(ERROR_CATEGORIES.CONFIG, `Invalid split scope: "${split}". Use staged or all.`);
       }
+      continue;
+    }
+
+    if (arg === '--scope') {
+      splitScopeOption = true;
+      split = takeValue(args, i, arg, 'staged|all');
+      i++;
+      if (!['staged', 'all'].includes(split)) {
+        throw fail(ERROR_CATEGORIES.CONFIG, `Invalid split scope: "${split}". Use staged or all.`);
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--scope=')) {
+      splitScopeOption = true;
+      split = arg.slice('--scope='.length);
+      if (!['staged', 'all'].includes(split)) {
+        throw fail(ERROR_CATEGORIES.CONFIG, `Invalid split scope: "${split}". Use staged or all.`);
+      }
+      continue;
+    }
+
+    if (arg === '--file') {
+      splitPlanFile = takeValue(args, i, arg, 'path');
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith('--file=')) {
+      splitPlanFile = arg.slice('--file='.length);
+      if (!splitPlanFile) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --file.');
       continue;
     }
 
@@ -285,6 +336,34 @@ export function parseArgs(args = process.argv.slice(2)) {
       'Non-interactive split requires an explicit scope: use --split=staged or --split=all.',
     );
   }
+  if (splitCommand) {
+    if (!splitPlanFile) {
+      throw fail(ERROR_CATEGORIES.CONFIG, `split ${splitCommand} requires --file=<path>.`);
+    }
+    if (targetPath) {
+      throw fail(ERROR_CATEGORIES.CONFIG, `split ${splitCommand} does not accept a target path.`);
+    }
+    if (splitCommand === 'plan') {
+      split ||= 'prompt';
+      dryRun = true;
+    } else {
+      if (split) {
+        throw fail(
+          ERROR_CATEGORIES.CONFIG,
+          'split apply reads its scope from the plan; do not pass --scope or --split.',
+        );
+      }
+      if (cliProvider || cliLang || cliReasoning || check || dryRun) {
+        throw fail(
+          ERROR_CATEGORIES.CONFIG,
+          'split apply accepts only --file, --yes, --output, and --debug.',
+        );
+      }
+    }
+  }
+  if (splitScopeOption && splitCommand !== 'plan') {
+    throw fail(ERROR_CATEGORIES.CONFIG, '--scope is only valid with "aicommit split plan".');
+  }
   if (doctor && (targetPath || cliLang || cliReasoning || split || dryRun || yes || check)) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
@@ -300,6 +379,8 @@ export function parseArgs(args = process.argv.slice(2)) {
     output,
     debug,
     split,
+    splitCommand,
+    splitPlanFile,
     dryRun,
     yes,
     check,

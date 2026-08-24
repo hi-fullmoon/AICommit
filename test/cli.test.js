@@ -21,6 +21,29 @@ test('parseArgs requires an explicit staged/all scope for non-interactive split'
   assert.throws(() => parseArgs(['--split', '--yes']), /requires an explicit scope/);
 });
 
+test('parseArgs recognizes split plan/apply artifact commands', () => {
+  const plan = parseArgs([
+    'split',
+    'plan',
+    '--scope=staged',
+    '--file=.aicommit-plan.json',
+    '--yes',
+  ]);
+  assert.equal(plan.splitCommand, 'plan');
+  assert.equal(plan.split, 'staged');
+  assert.equal(plan.splitPlanFile, '.aicommit-plan.json');
+  assert.equal(plan.dryRun, true);
+
+  const apply = parseArgs(['split', 'apply', '--file', 'plan.json', '--yes']);
+  assert.equal(apply.splitCommand, 'apply');
+  assert.equal(apply.split, null);
+  assert.equal(apply.splitPlanFile, 'plan.json');
+  assert.throws(() => parseArgs(['split', 'plan', '--scope=all']), /requires --file/);
+  assert.throws(() => parseArgs(['split', 'apply', '--file=x', '--scope=all']), /reads its scope/);
+  assert.throws(() => parseArgs(['split', 'unknown', '--file=x']), /plan or apply/);
+  assert.throws(() => parseArgs(['--scope=all']), /only valid/);
+});
+
 test('parseArgs keeps dry-run disabled by default and for setup', () => {
   assert.equal(parseArgs([]).dryRun, false);
   assert.equal(parseArgs(['setup']).dryRun, false);

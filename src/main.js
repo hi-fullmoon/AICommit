@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 
 import { parseArgs } from './cli.js';
-import { loadConfig } from './config.js';
+import { getProjectRoot, loadConfig } from './config.js';
 import {
   getStagedDiff,
   getChangedFiles,
@@ -41,7 +41,7 @@ import {
   sanitizeTerminalText,
   stringifyConfigRedacted,
 } from './utils.js';
-import { splitFlow } from './split.js';
+import { applySplitPlan, splitFlow } from './split.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
@@ -64,6 +64,8 @@ export async function main() {
     output,
     debug,
     split,
+    splitCommand,
+    splitPlanFile,
     dryRun,
     yes,
     check,
@@ -115,6 +117,14 @@ export async function main() {
   );
   console.log('  ' + chalk.dim('─'.repeat(45)));
   console.log('  ' + chalk.dim(`Working directory: ${sanitizeTerminalText(process.cwd())}`));
+
+  if (splitCommand === 'apply') {
+    const projectRoot = getProjectRoot();
+    if (!isGitRepo(projectRoot)) {
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `Not a git repository: ${process.cwd()}`);
+    }
+    return applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
+  }
 
   if (doctor) return runDoctor(cliProvider);
 
@@ -311,6 +321,7 @@ export async function main() {
       yes,
       machineOutput,
       provider: selectedProvider,
+      exportPlanPath: splitCommand === 'plan' ? splitPlanFile : null,
     });
     if (handled) return handled === true ? { exitReason: 'success' } : handled;
     // Only one changed file — continue with the normal single-commit flow.
