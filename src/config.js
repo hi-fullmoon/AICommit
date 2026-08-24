@@ -18,6 +18,7 @@ import {
 } from './context.js';
 import { readTeamPolicy } from './team-policy.js';
 import { isProviderType, PROVIDER_TYPES } from './providers.js';
+import { isExtensionProviderType, validateExtensionsConfig } from './extensions.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -36,6 +37,7 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'credentialHelper',
   'metrics',
   'allowProjectPrompt',
+  'extensions',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
@@ -141,6 +143,14 @@ export const DEFAULT_CONFIG = {
   },
   // Minimal local-only run metrics. There is deliberately no upload target.
   metrics: { ...DEFAULT_METRICS },
+  // Executable extensions are selected only from the user-owned config.
+  // Their v1 manifests must explicitly deny credential access and run in a
+  // permissioned child process instead of sharing this process.
+  extensions: {
+    manifests: [],
+    timeoutMs: 3000,
+    maxContextChars: 2000,
+  },
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
   // change set doesn't burn tokens on lines the model doesn't need.
@@ -296,10 +306,15 @@ export function validateConfig(config) {
   }
   if (
     typeof config.providerType !== 'string' ||
-    (config.providerType !== '' && !isProviderType(config.providerType))
+    (config.providerType !== '' &&
+      !isProviderType(config.providerType) &&
+      !isExtensionProviderType(config.providerType))
   ) {
-    throw new Error(`Invalid config "providerType": expected ${PROVIDER_TYPES.join(', ')}, or "".`);
+    throw new Error(
+      `Invalid config "providerType": expected ${PROVIDER_TYPES.join(', ')}, extension:<id>, or "".`,
+    );
   }
+  validateExtensionsConfig(config.extensions);
   if (!config.metrics || typeof config.metrics !== 'object' || Array.isArray(config.metrics)) {
     throw new Error('Invalid config "metrics": expected an object.');
   }

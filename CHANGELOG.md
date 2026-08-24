@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Credential-denied extension API v1 with isolated context-provider, message-validator, and provider-adapter interfaces, a strict manifest schema, and bilingual executable documentation.
+
+### Security
+
+- Third-party extension code runs in a permissioned child process with a sanitized environment and no credential value; project config cannot enable extensions, v1 rejects credential permission requests, and Node.js 18 never falls back to unsandboxed execution.
+
 ## [1.3.0] - 2026-08-24
 
 ### Added

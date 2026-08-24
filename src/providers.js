@@ -23,6 +23,7 @@ function endpoint(apiUrl) {
 export function detectProviderType(apiUrl, explicitType = '') {
   if (explicitType) {
     const normalized = explicitType.toLowerCase();
+    if (/^extension:[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized)) return normalized;
     if (!PROVIDER_TYPE_SET.has(normalized)) {
       throw new Error(
         `Unknown providerType "${explicitType}". Use one of: ${PROVIDER_TYPES.join(', ')}.`,

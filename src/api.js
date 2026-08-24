@@ -8,6 +8,7 @@ import {
   validateCommitCandidate,
 } from './policy.js';
 import { encodeUntrustedData } from './trust.js';
+import { extensionHostFor, resolveProviderAdapter } from './extensions.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -166,8 +167,8 @@ async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) 
 export async function requestGeneration(config, request) {
   secureEndpoint(config.apiUrl);
   const timeout = config.timeoutMs || DEFAULT_TIMEOUT_MS;
-  const adapter = getProviderAdapter(config);
-  const payload = adapter.buildRequest({
+  const adapter = await resolveProviderAdapter(config, getProviderAdapter);
+  const payload = await adapter.buildRequest({
     messages: request.messages,
     temperature: request.temperature,
     maxTokens: request.maxTokens,
@@ -211,7 +212,7 @@ export async function requestGeneration(config, request) {
   );
 
   const { data, eventStream } = consumed;
-  const normalized = adapter.normalizeResponse(data);
+  const normalized = await adapter.normalizeResponse(data);
   if (request.stream?.onReasoningDelta && !eventStream && normalized.reasoning) {
     request.stream.onReasoningDelta(normalized.reasoning);
   }
@@ -368,8 +369,9 @@ function hitTokenLimit(data) {
 // A formatting follow-up does not need to repeat reasoning that has already
 // happened. Disable it only for providers where we know the switch is valid;
 // unknown compatible endpoints keep their configured behavior.
-function reasoningForFollowUp(config) {
-  return getProviderAdapter(config).reasoningForFollowUp(config.reasoning);
+async function reasoningForFollowUp(config) {
+  const adapter = await resolveProviderAdapter(config, getProviderAdapter);
+  return adapter.reasoningForFollowUp(config.reasoning);
 }
 
 // Prompt for a regenerate request: the model already saw the diff on the
@@ -549,7 +551,7 @@ export async function getResponseText(
       messages: recoveryMessages,
       temperature,
       maxTokens,
-      reasoning: reasoningForFollowUp(config),
+      reasoning: await reasoningForFollowUp(config),
       stream,
     });
     usages.push(response.usage);
@@ -658,7 +660,25 @@ export async function generateCommitMessage(
   // Validate against the versioned policy and give the provider exactly one
   // cheap correction attempt. The diff is never re-sent: the prior reply plus
   // concrete violations are sufficient to repair formatting and constraints.
-  let validation = validateCommitCandidate(message, { policy, diff });
+  const validate = async (candidate) => {
+    const builtIn = validateCommitCandidate(candidate, { policy, diff });
+    const host = extensionHostFor(config);
+    if (!host) return builtIn;
+    const extensionIssues = await host.validateMessage(candidate, policy);
+    const issues = [...builtIn.issues, ...extensionIssues];
+    const errors = issues.filter((item) => item.severity === 'error');
+    const warnings = issues.filter((item) => item.severity === 'warning');
+    return {
+      ...builtIn,
+      valid: errors.length === 0,
+      needsCorrection: errors.length > 0,
+      issues,
+      errors,
+      warnings,
+    };
+  };
+
+  let validation = await validate(message);
   if (message.trim() && validation.needsCorrection) {
     corrections = 1;
     const retry = await getResponseText(
@@ -685,7 +705,7 @@ export async function generateCommitMessage(
     if (fixed.trim()) {
       message = fixed;
     }
-    validation = validateCommitCandidate(message, { policy, diff });
+    validation = await validate(message);
   }
 
   const elapsed = performance.now() - t0;

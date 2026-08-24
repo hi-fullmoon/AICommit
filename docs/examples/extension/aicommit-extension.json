@@ -1,0 +1,9 @@
+{
+  "kind": "aicommit-extension",
+  "apiVersion": 1,
+  "id": "team-rules",
+  "version": "1.0.0",
+  "entry": "./index.mjs",
+  "capabilities": ["contextProvider", "messageValidator", "providerAdapter"],
+  "permissions": { "credentials": false }
+}

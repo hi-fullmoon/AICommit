@@ -44,6 +44,7 @@ import {
 import { applySplitPlan, resumeSplit, splitFlow } from './split.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
+import { configureExtensionHost } from './extensions.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
 import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.js';
@@ -176,6 +177,7 @@ export async function main() {
   // ── 1. Config ───────────────────────────────────────────────────────
 
   const { config, projectRoot, loaded, providerName } = await loadConfig(cliProvider);
+  const extensionHost = await configureExtensionHost(config);
   const selectedProvider = providerName || detectProviderType(config.apiUrl, config.providerType);
   const warnings = [];
 
@@ -645,8 +647,12 @@ export async function main() {
     contextReport.constraints,
     config.language,
   );
-  config.repositoryContextText = contextReport.text;
+  const extensionContext = await extensionHost.collectContext({ files: changedFiles, branch });
+  config.repositoryContextText = [contextReport.text, extensionContext.text]
+    .filter(Boolean)
+    .join('\n\n');
   warnings.push(...contextReport.warnings);
+  warnings.push(...extensionContext.warnings);
   console.log(
     '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
   );

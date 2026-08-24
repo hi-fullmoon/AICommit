@@ -91,6 +91,11 @@
     "path": "",
     "maxEntries": 500
   },
+  "extensions": {
+    "manifests": [],
+    "timeoutMs": 3000,
+    "maxContextChars": 2000
+  },
   "maxDiffChars": 30000,
   "maxFileDiffChars": 3000,
   "splitMaxDiffChars": 16000,

@@ -71,7 +71,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `apiKey`             | API key (empty string allowed for local models)                                                                                                                                                                              |
 | `apiKeyEnv`          | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                 |
 | `modelId`            | Model identifier                                                                                                                                                                                                             |
-| `providerType`       | Optional adapter override: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, or `custom`; otherwise inferred from the endpoint                                                                                        |
+| `providerType`       | Optional adapter override: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, `custom`, or a user-installed `extension:<id>`; otherwise inferred from the endpoint                                                     |
 | `commitPolicy`       | Versioned commit rules for types, scope, subject length, body, breaking changes, and language                                                                                                                                |
 | `prompt`             | Optional user-approved guidance appended to the authoritative structured policy (default: empty)                                                                                                                             |
 | `allowProjectPrompt` | User-owned opt-in for accepting `prompt` from project config (default: `false`)                                                                                                                                              |
@@ -83,6 +83,7 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `retry`              | Transient retry limits: `maxAttempts`, `baseDelayMs`, and `maxDelayMs` (defaults: `3`, `500`, and `5000`)                                                                                                                    |
 | `credentialHelper`   | Opt in to `git credential fill` with `enabled` and `username` (defaults: `false` and `aicommit`)                                                                                                                             |
 | `metrics`            | Local-only metrics controls: `enabled`, absolute `path` or empty for the default, and `maxEntries` (defaults: `true`, empty, and `500`)                                                                                      |
+| `extensions`         | User-owned absolute manifest paths plus execution timeout/context ceiling; repository config cannot enable or redirect extensions                                                                                            |
 | `maxDiffChars`       | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`)                                                                                                        |
 | `maxFileDiffChars`   | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`)                                                                        |
 | `splitMaxDiffChars`  | Diff chars sent to the split-planning call; split mode needs less hunk detail than final message generation (default: `16000`)                                                                                               |
@@ -159,6 +160,10 @@ aicommit preset rollback
 ```
 
 The active user manifest is `~/.aicommit/provider-presets.json`; each update keeps the previous valid version for rollback. Manifests declare their own semantic version, supported core range, and adapter-contract version, and cannot contain credentials. See the bilingual [preset compatibility/update guide](docs/provider-presets.md) and [published schema](schemas/aicommit-provider-presets.schema.json).
+
+### Credential-denied extensions
+
+Three minimal extension interfaces are available: bounded repository context, commit-message validation, and provider request/response adaptation. User-installed single-file ESM extensions run outside the CLI process under Node's permission model and declare `credentials: false`; they receive neither resolved credentials nor inherited secret environment variables. Repository config cannot install or select extension code. Node.js 20+ is required only when executable extensions are enabled; the core CLI remains compatible with Node.js 18. See the bilingual [extension contract, security model, and executable example](docs/extensions.md), plus the [manifest schema](schemas/aicommit-extension.schema.json).
 
 ### Saving tokens
 

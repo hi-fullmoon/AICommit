@@ -73,6 +73,7 @@ import {
   stripHunkCatalog,
   validateHunkTransaction,
 } from './split-hunks.js';
+import { extensionHostFor } from './extensions.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode (--split): group changes into multiple logical commits
@@ -1405,6 +1406,10 @@ export async function splitFlow(
   }
 
   const contextReport = collectRepositoryContext(projectRoot, allFiles, config.repositoryContext);
+  const extensionContext = await extensionHostFor(config)?.collectContext({
+    files: allFiles,
+    branch,
+  });
   config = {
     ...config,
     commitPolicy: applyCommitlintPolicy(
@@ -1412,9 +1417,12 @@ export async function splitFlow(
       contextReport.constraints,
       config.language,
     ),
-    repositoryContextText: contextReport.text,
+    repositoryContextText: [contextReport.text, extensionContext?.text]
+      .filter(Boolean)
+      .join('\n\n'),
   };
   warnings.push(...contextReport.warnings);
+  warnings.push(...(extensionContext?.warnings || []));
   console.log(
     '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
   );
@@ -1627,7 +1635,32 @@ export async function splitFlow(
   let planEdited = false;
   let rewriteCount = 0;
 
+  const validateExtensionMessages = async () => {
+    const host = extensionHostFor(config);
+    if (!host) return;
+    for (const [index, group] of groups.entries()) {
+      const issues = await host.validateMessage(
+        group.message,
+        normalizeCommitPolicy(config.commitPolicy, config.language),
+      );
+      const errors = issues.filter((item) => item.severity === 'error');
+      for (const issue of issues.filter((item) => item.severity === 'warning')) {
+        const warning = `Split group ${index + 1}: ${issue.message}`;
+        if (!warnings.includes(warning)) warnings.push(warning);
+      }
+      if (errors.length) {
+        throw fail(
+          ERROR_CATEGORIES.RESPONSE_FORMAT,
+          `Split group ${index + 1} failed extension validation: ${errors
+            .map((item) => item.message)
+            .join(' ')}`,
+        );
+      }
+    }
+  };
+
   while (true) {
+    await validateExtensionMessages();
     displayPlan(groups, allFiles);
 
     const action = yes

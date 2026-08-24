@@ -12,7 +12,7 @@ import {
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NPM_CLI = process.env.npm_execpath;
@@ -104,12 +104,18 @@ async function main() {
       'docs/examples/commit-msg',
       'docs/examples/aicommit-policy.yml',
       'docs/provider-presets.md',
+      'docs/extensions.md',
+      'docs/examples/extension/aicommit-extension.json',
+      'docs/examples/extension/index.mjs',
       'package.json',
       'presets/provider-presets.json',
       'schemas/aicommit-provider-presets.schema.json',
       'schemas/aicommit-output.schema.json',
+      'schemas/aicommit-extension.schema.json',
       'schemas/aicommit-team-policy.schema.json',
       'src/completion.js',
+      'src/extension-runner.mjs',
+      'src/extensions.js',
       'src/config-command.js',
       'src/policy-command.js',
       'src/preset-command.js',
@@ -144,6 +150,25 @@ async function main() {
     );
     const entry = installedCli(prefix);
     const manifest = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
+
+    if (Number(process.versions.node.split('.')[0]) >= 20) {
+      const installedRoot = dirname(dirname(entry));
+      const { createExtensionHost } = await import(
+        pathToFileURL(join(installedRoot, 'src', 'extensions.js'))
+      );
+      const extensionHost = await createExtensionHost({
+        manifests: [
+          join(installedRoot, 'docs', 'examples', 'extension', 'aicommit-extension.json'),
+        ],
+        timeoutMs: 3000,
+        maxContextChars: 1000,
+      });
+      const extensionContext = await extensionHost.collectContext({
+        files: [{ status: 'M', path: 'packages/app/index.js' }],
+      });
+      assert.match(extensionContext.text, /Changed top-level areas: packages/);
+      assert.equal(extensionHost.extensions[0].id, 'team-rules');
+    }
 
     assert.match(run(process.execPath, [entry, '--help']), /Usage:/);
     assert.equal(
