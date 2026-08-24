@@ -92,6 +92,22 @@ async function main() {
     assert.equal(packResult.length, 1, 'npm pack should produce exactly one tarball');
     const tarball = join(root, packResult[0].filename);
     assert.ok(existsSync(tarball), `npm pack did not create ${tarball}`);
+    const packedPaths = new Set(packResult[0].files.map((file) => file.path));
+    for (const expected of [
+      '.aicommit.config.example.json',
+      'CHANGELOG.md',
+      'LICENSE',
+      'README.md',
+      'SECURITY.md',
+      'bin/aicommit.js',
+      'package.json',
+      'src/main.js',
+    ]) {
+      assert.ok(packedPaths.has(expected), `published package is missing ${expected}`);
+    }
+    for (const path of packedPaths) {
+      assert.doesNotMatch(path, /^(?:\.github|coverage|scripts|test)\//);
+    }
 
     const prefix = join(root, 'global');
     npm(

@@ -5,10 +5,12 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 ## Install
 
 ```bash
-npm install -g .
+npm install --global aicommit
 ```
 
 Requires Node.js >= 18.
+
+To install a source checkout instead, run `npm install --global .` from the repository root.
 
 ## Configure
 
@@ -89,6 +91,22 @@ Token spend per call is dominated by the diff; aicommit already strips lock file
 - Lower `maxDiffChars` (e.g. `15000`) if your commits are usually small.
 - `diffContextLines` defaults to `1`; set it to `0` to send only changed lines with no context.
 
+## Privacy and data flow
+
+AICommit has no hosted backend and does not upload telemetry. At runtime it only makes network requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
+
+Commit-generation requests can contain:
+
+- the configured system prompt and requested commit language;
+- changed file paths/statuses and the staged diff in normal mode;
+- changed file paths/statuses, tracked diffs, and bounded text previews of untracked files in split mode;
+- the previous generated message when asking for a lower-cost rewrite;
+- a small fixed prompt when running `aicommit --check`.
+
+AICommit does not intentionally send unrelated repository files, Git history, environment variables, or its local configuration file. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection is a guardrail, not a complete secret scanner.
+
+Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
+
 ## Usage
 
 ```bash
@@ -150,7 +168,13 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`--split` groups all changes (staged, unstaged, untracked) into logical commits by feature/module. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Splitting is file-level; if a commit fails mid-way, the remaining groups' files are re-staged and printed so you can finish with plain `git commit`, and the CLI exits non-zero.
+`--split` groups all changes (staged, unstaged, and untracked) into logical commits by feature/module. It intentionally crosses the current index boundary. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. `--split --yes` approves that complete working-tree scope non-interactively, except that sensitive-content detection fails closed before any provider request or automatic staging.
+
+Current split behavior is file-level: one file cannot be divided across multiple commits. If execution fails after one or more groups, completed commits remain in history; AICommit does not rewrite or roll them back. The remaining groups' files are re-staged and printed, the CLI exits non-zero, and you should inspect `git status` plus `git diff --staged` before finishing them with plain `git commit`. If planning fails before execution, no split commit is created. Run split mode only from a worktree whose complete set of changes you intend to review and commit.
+
+## Development and releases
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, and [RELEASING.md](RELEASING.md) for SemVer, release notes, tags, npm Trusted Publishing, provenance, and rollback procedures.
 
 ## License
 

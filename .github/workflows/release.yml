@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-npm:
+    name: Verify and publish to npm
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - run: node scripts/verify-release.mjs
+      - run: npm run ci
+      - run: npm run test:package
+      - run: npm audit --omit=dev
+      - name: Publish with trusted provenance
+        run: npm publish --access public --tag "$NPM_DIST_TAG"
+        env:
+          NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}

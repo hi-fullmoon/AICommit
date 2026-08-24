@@ -1,13 +1,17 @@
 {
   "name": "aicommit",
   "version": "1.0.0",
-  "description": "AI-powered git commit message generator",
+  "description": "Safe, local-first AI commit message generator for Git workflows",
   "type": "module",
   "bin": {
     "aicommit": "./bin/aicommit.js"
   },
   "files": [
     ".aicommit.config.example.json",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
     "bin/",
     "src/"
   ],
@@ -51,11 +55,26 @@
     "git",
     "commit",
     "ai",
+    "cli",
+    "conventional-commits",
     "openai",
     "deepseek",
-    "claude"
+    "openrouter",
+    "ollama"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hi-fullmoon/AICommit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hi-fullmoon/AICommit/issues"
+  },
+  "homepage": "https://github.com/hi-fullmoon/AICommit#readme",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=18"
   },
