@@ -1,7 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { mergeSetupConfig } from '../src/setup.js';
+import { mergeSetupConfig, runSetup } from '../src/setup.js';
 
 const entry = {
   apiUrl: 'https://api.deepseek.com/v1/chat/completions',
@@ -18,7 +29,13 @@ test('mergeSetupConfig creates a fresh config from an empty file', () => {
 
 test('mergeSetupConfig preserves existing providers and unrelated settings', () => {
   const existing = {
-    providers: { openai: { apiUrl: 'https://api.openai.com/v1/chat/completions', apiKey: 'sk-old', modelId: 'gpt-4o' } },
+    providers: {
+      openai: {
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        apiKey: 'sk-old',
+        modelId: 'gpt-4o',
+      },
+    },
     defaultProvider: 'openai',
     maxTokens: 2048,
     stripFiles: ['*.map'],
@@ -60,4 +77,78 @@ test('mergeSetupConfig does not mutate the input', () => {
   const existing = { providers: { openai: { apiKey: 'sk-old' } }, apiKey: 'sk-flat' };
   mergeSetupConfig(existing, { providerName: 'deepseek', entry, language: 'zh' });
   assert.deepEqual(existing, { providers: { openai: { apiKey: 'sk-old' } }, apiKey: 'sk-flat' });
+});
+
+test('runSetup saves a preset provider atomically with environment credentials', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const targetPath = join(root, '.aicommit.config.json');
+  const previousKey = process.env.AICOMMIT_SETUP_TEST_KEY;
+  process.env.AICOMMIT_SETUP_TEST_KEY = 'secret-from-env';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.AICOMMIT_SETUP_TEST_KEY;
+    else process.env.AICOMMIT_SETUP_TEST_KEY = previousKey;
+  });
+
+  const selections = ['openai', 'en'];
+  await runSetup({
+    targetPath,
+    selectPrompt: async () => selections.shift(),
+    inputPrompt: async () => 'gpt-test',
+    passwordPrompt: async () => 'env:AICOMMIT_SETUP_TEST_KEY',
+    confirmPrompt: async () => false,
+  });
+
+  const saved = JSON.parse(readFileSync(targetPath, 'utf-8'));
+  assert.equal(saved.defaultProvider, 'openai');
+  assert.equal(saved.language, 'en');
+  assert.deepEqual(saved.providers.openai, {
+    apiUrl: 'https://api.openai.com/v1/chat/completions',
+    apiKey: '',
+    apiKeyEnv: 'AICOMMIT_SETUP_TEST_KEY',
+    modelId: 'gpt-test',
+  });
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(targetPath).mode & 0o777, 0o600);
+  }
+  assert.deepEqual(readdirSync(root), ['.aicommit.config.json']);
+});
+
+test('runSetup preserves invalid config and cancels after a failed connection test', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-invalid-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const targetPath = join(root, '.aicommit.config.json');
+  writeFileSync(targetPath, '{invalid json\n');
+  chmodSync(targetPath, 0o600);
+
+  const selections = ['deepseek', 'zh'];
+  const confirmations = [true, false];
+  const spinnerEvents = [];
+  await runSetup({
+    targetPath,
+    selectPrompt: async () => selections.shift(),
+    inputPrompt: async () => 'deepseek-test',
+    passwordPrompt: async () => '',
+    confirmPrompt: async () => confirmations.shift(),
+    connectionCheck: async () => {
+      throw new Error('offline test provider');
+    },
+    spinnerFactory: () => ({
+      start() {
+        return this;
+      },
+      succeed(message) {
+        spinnerEvents.push(['succeed', message]);
+      },
+      fail(message) {
+        spinnerEvents.push(['fail', message]);
+      },
+    }),
+  });
+
+  assert.equal(readFileSync(targetPath, 'utf-8'), '{invalid json\n');
+  const backup = readdirSync(root).find((name) => name.includes('.invalid-'));
+  assert.ok(backup, 'invalid source config is backed up');
+  assert.equal(readFileSync(join(root, backup), 'utf-8'), '{invalid json\n');
+  assert.deepEqual(spinnerEvents, [['fail', 'Connection failed']]);
 });

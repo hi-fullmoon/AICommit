@@ -27,17 +27,19 @@ function openAIReasoningEffort(modelId, enabled, effort) {
   const supported = openAIReasoningEfforts(modelId);
   if (!supported || supported.includes(requested)) return requested;
 
-  const action = enabled
-    ? `reasoning effort "${requested}"`
-    : 'disabling reasoning';
+  const action = enabled ? `reasoning effort "${requested}"` : 'disabling reasoning';
   throw new Error(
     `OpenAI model "${modelId}" does not support ${action}. ` +
-    `Supported reasoning efforts: ${supported.join(', ')}.`,
+      `Supported reasoning efforts: ${supported.join(', ')}.`,
   );
 }
 
 function endpointHost(apiUrl) {
-  try { return new URL(apiUrl).hostname.toLowerCase(); } catch { return ''; }
+  try {
+    return new URL(apiUrl).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 function mergeRequestExtensions(payload, extensions) {
@@ -118,16 +120,27 @@ function applyReasoningOptions(payload, apiUrl, modelId, reasoning) {
 }
 
 export async function callAPI(
-  apiUrl, apiKey, modelId, messages, temperature, maxTokens, timeoutMs,
-  extraBody = {}, reasoning = null, stream = null,
+  apiUrl,
+  apiKey,
+  modelId,
+  messages,
+  temperature,
+  maxTokens,
+  timeoutMs,
+  extraBody = {},
+  reasoning = null,
+  stream = null,
 ) {
   const endpoint = new URL(apiUrl);
-  const loopback = endpoint.hostname === 'localhost'
-    || endpoint.hostname === '127.0.0.1'
-    || endpoint.hostname.startsWith('127.')
-    || endpoint.hostname === '[::1]';
+  const loopback =
+    endpoint.hostname === 'localhost' ||
+    endpoint.hostname === '127.0.0.1' ||
+    endpoint.hostname.startsWith('127.') ||
+    endpoint.hostname === '[::1]';
   if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
-    throw new Error('Refusing insecure API endpoint: use HTTPS, or HTTP only for localhost/loopback.');
+    throw new Error(
+      'Refusing insecure API endpoint: use HTTPS, or HTTP only for localhost/loopback.',
+    );
   }
   const timeout = timeoutMs || DEFAULT_TIMEOUT_MS;
   const payload = { model: modelId, messages };
@@ -171,7 +184,7 @@ export async function callAPI(
     if (err.name === 'TimeoutError') {
       throw new Error(
         `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
-        `Raise "timeoutMs" in your config if this keeps happening.`,
+          `Raise "timeoutMs" in your config if this keeps happening.`,
       );
     }
     throw err;
@@ -200,7 +213,7 @@ export async function callAPI(
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       throw new Error(
         `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
-        `Raise "timeoutMs" in your config if this keeps happening.`,
+          `Raise "timeoutMs" in your config if this keeps happening.`,
       );
     }
     throw err;
@@ -210,7 +223,10 @@ export async function callAPI(
 function streamContent(value) {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
-    return value.map(part => part?.text ?? part?.content ?? '').filter(Boolean).join('');
+    return value
+      .map((part) => part?.text ?? part?.content ?? '')
+      .filter(Boolean)
+      .join('');
   }
   return value?.text ?? '';
 }
@@ -254,7 +270,7 @@ async function consumeEventStream(response, onReasoningDelta) {
 
     model ||= event.model || null;
     if (event.usage) usage = event.usage;
-    const finishedChoice = event?.choices?.find(choice => choice?.finish_reason != null);
+    const finishedChoice = event?.choices?.find((choice) => choice?.finish_reason != null);
     if (finishedChoice) {
       completed = true;
       finishReason ||= finishedChoice.finish_reason;
@@ -295,7 +311,7 @@ async function consumeEventStream(response, onReasoningDelta) {
   if (!completed) {
     throw new Error(
       'Streaming response ended before the provider sent [DONE] or a finish_reason. ' +
-      'The partial response was discarded; retry the request.',
+        'The partial response was discarded; retry the request.',
     );
   }
 
@@ -365,11 +381,11 @@ function reasoningForFollowUp(config) {
 
   const host = endpointHost(config.apiUrl);
   if (
-    host.includes('minimax')
-    || host === 'api.deepseek.com'
-    || host.endsWith('.deepseek.com')
-    || host === 'openrouter.ai'
-    || reasoning.disabledBody !== undefined
+    host.includes('minimax') ||
+    host === 'api.deepseek.com' ||
+    host.endsWith('.deepseek.com') ||
+    host === 'openrouter.ai' ||
+    reasoning.disabledBody !== undefined
   ) {
     return { ...reasoning, mode: 'off' };
   }
@@ -384,7 +400,8 @@ function reasoningForFollowUp(config) {
 // worthwhile: a conventional commit starts with a known type, an optional
 // scope, optional "!", then ": ". Weak models often return prose ("Updated
 // the login page") or a quoted message — both fail here and earn one retry.
-const CONVENTIONAL_SUBJECT_RE = /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
+const CONVENTIONAL_SUBJECT_RE =
+  /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
 
 // Prompt for the corrective retry: the model already produced the right
 // content in the wrong shape, so the diff is NOT re-sent — reformatting the
@@ -396,9 +413,9 @@ function correctivePrompt(badReply) {
     badReply.slice(0, 1000),
     '',
     'Rewrite it as a conventional commit message: first line "<type>: <subject>" ' +
-    '(type one of feat, fix, chore, docs, refactor, test, style, perf, ci, build), ' +
-    'then an optional body after a blank line. ' +
-    'Output ONLY the rewritten message — no explanation, no quotes, no code fences.',
+      '(type one of feat, fix, chore, docs, refactor, test, style, perf, ci, build), ' +
+      'then an optional body after a blank line. ' +
+      'Output ONLY the rewritten message — no explanation, no quotes, no code fences.',
   ].join('\n');
 }
 
@@ -413,9 +430,9 @@ function regeneratePrompt(previousMessage) {
     previousMessage.slice(0, 1000),
     '',
     'Generate a DIFFERENT commit message for the same change — different wording or emphasis. ' +
-    'Keep the conventional commit format: first line "<type>: <subject>", ' +
-    'then an optional body after a blank line. ' +
-    'Output ONLY the new message — no explanation, no quotes, no code fences.',
+      'Keep the conventional commit format: first line "<type>: <subject>", ' +
+      'then an optional body after a blank line. ' +
+      'Output ONLY the new message — no explanation, no quotes, no code fences.',
   ].join('\n');
 }
 
@@ -425,7 +442,11 @@ function regeneratePrompt(previousMessage) {
 function extractMessage(data) {
   const oai = data?.choices?.[0]?.message?.content;
   if (typeof oai === 'string') return oai;
-  if (Array.isArray(oai)) return oai.map(p => p?.text ?? '').filter(Boolean).join('');
+  if (Array.isArray(oai))
+    return oai
+      .map((p) => p?.text ?? '')
+      .filter(Boolean)
+      .join('');
   return data?.content?.[0]?.text ?? '';
 }
 
@@ -445,10 +466,12 @@ function reasoningText(value) {
 }
 
 function extractReasoning(msg0) {
-  return reasoningText(msg0?.reasoning_content)
-    || reasoningText(msg0?.reasoning)
-    || reasoningText(msg0?.reasoning_details)
-    || null;
+  return (
+    reasoningText(msg0?.reasoning_content) ||
+    reasoningText(msg0?.reasoning) ||
+    reasoningText(msg0?.reasoning_details) ||
+    null
+  );
 }
 
 // Last-ditch extraction from raw reasoning text: prefer the first line that
@@ -460,7 +483,7 @@ function extractFromReasoning(reasoning) {
     const idx = line.search(COMMIT_TYPE_RE);
     if (idx !== -1) return line.slice(idx).trim();
   }
-  const nonEmpty = lines.filter(l => l.trim());
+  const nonEmpty = lines.filter((l) => l.trim());
   return nonEmpty[nonEmpty.length - 1]?.trim() || '';
 }
 
@@ -478,7 +501,13 @@ function sumUsage(...usages) {
   const total = {};
   for (const u of usages) {
     if (!u) continue;
-    for (const key of ['prompt_tokens', 'completion_tokens', 'input_tokens', 'output_tokens', 'total_tokens']) {
+    for (const key of [
+      'prompt_tokens',
+      'completion_tokens',
+      'input_tokens',
+      'output_tokens',
+      'total_tokens',
+    ]) {
       if (typeof u[key] === 'number') total[key] = (total[key] || 0) + u[key];
     }
   }
@@ -495,12 +524,25 @@ function sumUsage(...usages) {
 // Shared by the commit flow and the split flow. `usage` aggregates the token
 // counts of every call made in the round.
 export async function getResponseText(
-  config, messages, temperature, maxTokens, followUpPrompt, stream = null,
+  config,
+  messages,
+  temperature,
+  maxTokens,
+  followUpPrompt,
+  stream = null,
   responseValidator = null,
 ) {
   let data = await callAPI(
-    config.apiUrl, config.apiKey, config.modelId, messages, temperature, maxTokens,
-    config.timeoutMs, config.extraBody, config.reasoning, stream,
+    config.apiUrl,
+    config.apiKey,
+    config.modelId,
+    messages,
+    temperature,
+    maxTokens,
+    config.timeoutMs,
+    config.extraBody,
+    config.reasoning,
+    stream,
   );
   const usages = [data?.usage];
   let reasoning = extractReasoning(data?.choices?.[0]?.message);
@@ -509,24 +551,27 @@ export async function getResponseText(
   const invalidResponse = typeof responseValidator === 'function' && !responseValidator(text);
 
   if ((!text.trim() && reasoning) || truncatedByLimit || invalidResponse) {
-    const truncated = (reasoning || '').length > MAX_REASONING_CHARS
-      ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
-      : (reasoning || '');
+    const truncated =
+      (reasoning || '').length > MAX_REASONING_CHARS
+        ? '…' + reasoning.slice(-MAX_REASONING_CHARS)
+        : reasoning || '';
 
     const partial = text.trim();
-    const recoveryPrompt = truncatedByLimit || invalidResponse
-      ? `The previous response was ${truncatedByLimit
-        ? 'cut off by the provider token limit'
-        : 'incomplete or malformed'}. ` +
-        'Reproduce the COMPLETE answer from the beginning; do not continue from the cut-off point. ' +
-        'Keep the answer concise.\n\n' + followUpPrompt
-      : followUpPrompt;
+    const recoveryPrompt =
+      truncatedByLimit || invalidResponse
+        ? `The previous response was ${
+            truncatedByLimit ? 'cut off by the provider token limit' : 'incomplete or malformed'
+          }. ` +
+          'Reproduce the COMPLETE answer from the beginning; do not continue from the cut-off point. ' +
+          'Keep the answer concise.\n\n' +
+          followUpPrompt
+        : followUpPrompt;
 
     // With reasoning, its conclusion plus the partial answer is enough to
     // reconstruct the output without paying to send the original diff again.
     // A non-reasoning model has no such summary, so retain the original
     // messages for the rare case where its response itself hit the limit.
-    const systemMsg = messages.find(m => m.role === 'system');
+    const systemMsg = messages.find((m) => m.role === 'system');
     const recoveryMessages = reasoning
       ? [
           ...(systemMsg ? [systemMsg] : []),
@@ -548,9 +593,16 @@ export async function getResponseText(
     // switched to formatting-only mode above, and the recovery prompt asks for
     // a compact answer, so the same budget has substantially more useful room.
     data = await callAPI(
-      config.apiUrl, config.apiKey, config.modelId, recoveryMessages,
-      temperature, maxTokens, config.timeoutMs, config.extraBody,
-      reasoningForFollowUp(config), stream,
+      config.apiUrl,
+      config.apiKey,
+      config.modelId,
+      recoveryMessages,
+      temperature,
+      maxTokens,
+      config.timeoutMs,
+      config.extraBody,
+      reasoningForFollowUp(config),
+      stream,
     );
     usages.push(data?.usage);
     const followUpReasoning = extractReasoning(data?.choices?.[0]?.message);
@@ -569,13 +621,25 @@ export async function getResponseText(
 // "regenerateWithDiff" in the config opts back into re-sending the diff on
 // every attempt (more variety, much higher token cost).
 export async function generateCommitMessage(
-  config, diff, regenerateCount = 0, previousMessage = '', stream = null,
+  config,
+  diff,
+  regenerateCount = 0,
+  previousMessage = '',
+  stream = null,
 ) {
-  const { prompt, temperature, language, maxTokens, regenerateWithDiff, reasoning: reasoningConfig } = config;
+  const {
+    prompt,
+    temperature,
+    language,
+    maxTokens,
+    regenerateWithDiff,
+    reasoning: reasoningConfig,
+  } = config;
   const t0 = performance.now();
-  const outputTokenLimit = reasoningConfig?.mode === 'on'
-    ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
-    : maxTokens;
+  const outputTokenLimit =
+    reasoningConfig?.mode === 'on'
+      ? Math.max(maxTokens, reasoningConfig.maxTokens || 4096)
+      : maxTokens;
 
   // Build the language directive — appended after the (possibly custom)
   // prompt so it takes priority over conflicting language instructions in it.
@@ -603,19 +667,31 @@ export async function generateCommitMessage(
   if (regenerateCount > 0 && previousMessage && !regenerateWithDiff) {
     userContent = regeneratePrompt(previousMessage) + langReminder;
   } else {
-    const variationHint = regenerateCount > 0
-      ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
-      : '';
-    userContent = `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder;
+    const variationHint =
+      regenerateCount > 0
+        ? `\n(Attempt #${regenerateCount + 1}: please produce a DIFFERENT commit message than before.)`
+        : '';
+    userContent =
+      `Here is the git diff:\n\n\`\`\`diff\n${diff}\n\`\`\`` + variationHint + langReminder;
   }
 
   const messages = [
     { role: 'system', content: prompt + langHint },
-    { role: 'user',    content: userContent },
+    { role: 'user', content: userContent },
   ];
 
-  const { text, data, reasoning: initialReasoning, usage: firstUsage } = await getResponseText(
-    config, messages, variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT, stream,
+  const {
+    text,
+    data,
+    reasoning: initialReasoning,
+    usage: firstUsage,
+  } = await getResponseText(
+    config,
+    messages,
+    variedTemperature,
+    outputTokenLimit,
+    FOLLOWUP_COMMIT_PROMPT,
+    stream,
   );
   let usage = firstUsage;
   let reasoning = initialReasoning;
@@ -634,7 +710,10 @@ export async function generateCommitMessage(
     const retry = await getResponseText(
       config,
       [messages[0], { role: 'user', content: correctivePrompt(message) }],
-      variedTemperature, outputTokenLimit, FOLLOWUP_COMMIT_PROMPT, stream,
+      variedTemperature,
+      outputTokenLimit,
+      FOLLOWUP_COMMIT_PROMPT,
+      stream,
     );
     const fixed = cleanCommitMessage(retry.text);
     // The retry is a real API call that cost tokens regardless of whether it
@@ -654,16 +733,16 @@ export async function generateCommitMessage(
     const snippet = JSON.stringify(data, null, 2).slice(0, 600);
     throw new Error(
       `API returned an empty commit message.\n` +
-      `  The request succeeded but no text came back — the model may have spent ` +
-      `its token budget on reasoning (maxTokens: ${outputTokenLimit}).\n` +
-      `  Try raising "maxTokens" in your config.\n\nRaw response:\n${snippet}`,
+        `  The request succeeded but no text came back — the model may have spent ` +
+        `its token budget on reasoning (maxTokens: ${outputTokenLimit}).\n` +
+        `  Try raising "maxTokens" in your config.\n\nRaw response:\n${snippet}`,
     );
   }
 
   if (!isValidCommitMessage(message)) {
     throw new Error(
       'API returned an invalid conventional commit message after the corrective retry. ' +
-      'Retry generation or edit the provider/prompt configuration.',
+        'Retry generation or edit the provider/prompt configuration.',
     );
   }
 

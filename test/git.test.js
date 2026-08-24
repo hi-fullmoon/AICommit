@@ -6,10 +6,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  getDiffStats, isLockFile, matchStripPattern, stripLockFileContent, condenseDiff,
-  unifiedArg, getChangedFiles, getUnstagedFiles, getUntrackedFiles, getStagedDiff,
-  getIndexFingerprint, createIndexTransaction, protectSensitiveDiff, protectSensitiveText,
-  isSensitiveFile, gitCommit,
+  getDiffStats,
+  isLockFile,
+  matchStripPattern,
+  stripLockFileContent,
+  condenseDiff,
+  unifiedArg,
+  getChangedFiles,
+  getUnstagedFiles,
+  getUntrackedFiles,
+  getStagedDiff,
+  getIndexFingerprint,
+  createIndexTransaction,
+  protectSensitiveDiff,
+  protectSensitiveText,
+  isSensitiveFile,
+  gitCommit,
 } from '../src/git.js';
 
 function makeRepo() {
@@ -30,8 +42,14 @@ test('getChangedFiles lists only staged paths; getUnstagedFiles only working-tre
     execSync('git add a.txt', { cwd: dir });
     writeFileSync(join(dir, 'b.txt'), 'two changed\n');
 
-    assert.deepEqual(getChangedFiles(dir).map(f => f.path), ['a.txt']);
-    assert.deepEqual(getUnstagedFiles(dir).map(f => f.path), ['b.txt']);
+    assert.deepEqual(
+      getChangedFiles(dir).map((f) => f.path),
+      ['a.txt'],
+    );
+    assert.deepEqual(
+      getUnstagedFiles(dir).map((f) => f.path),
+      ['b.txt'],
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -77,7 +95,12 @@ test('git file lists preserve Unicode and whitespace paths for selective staging
     // The values returned by the helpers must be safe to pass directly back
     // to git, which was the failing path in the interactive picker.
     execFileSync('git', ['add', '--', ...modified.addPaths, untracked], { cwd: dir });
-    assert.deepEqual(getChangedFiles(dir).map((f) => f.path).sort(), [tracked, untracked].sort());
+    assert.deepEqual(
+      getChangedFiles(dir)
+        .map((f) => f.path)
+        .sort(),
+      [tracked, untracked].sort(),
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -166,7 +189,10 @@ test('index fingerprint changes with staged content and transaction restores pri
     assert.equal(tx.restore(), true);
 
     assert.equal(getIndexFingerprint(dir), before);
-    assert.deepEqual(getChangedFiles(dir).map((file) => file.path), ['a.txt']);
+    assert.deepEqual(
+      getChangedFiles(dir).map((file) => file.path),
+      ['a.txt'],
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -183,7 +209,12 @@ test('index transaction does not overwrite a concurrent index change', () => {
     writeFileSync(join(dir, 'b.txt'), 'external change\n');
     execFileSync('git', ['add', 'b.txt'], { cwd: dir });
     assert.equal(tx.restore(), false);
-    assert.deepEqual(getChangedFiles(dir).map((file) => file.path).sort(), ['a.txt', 'b.txt']);
+    assert.deepEqual(
+      getChangedFiles(dir)
+        .map((file) => file.path)
+        .sort(),
+      ['a.txt', 'b.txt'],
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -331,22 +362,23 @@ test('condenseDiff keeps complete sections up to the budget and prepends stat', 
 });
 
 test('condenseDiff with a single oversized section returns just the marker', () => {
-  const one = 'diff --git a/big.txt b/big.txt\nindex 1..2 100644\n--- a/big.txt\n+++ b/big.txt\n@@ -1 +1 @@\n+x\n';
+  const one =
+    'diff --git a/big.txt b/big.txt\nindex 1..2 100644\n--- a/big.txt\n+++ b/big.txt\n@@ -1 +1 @@\n+x\n';
   const cut = condenseDiff(one, 50, '');
   assert.equal(cut.truncated, true);
   assert.ok(cut.diff.includes('diff truncated'));
 });
 
-
 test('condenseDiff caps a single oversized file section, keeping other files', () => {
-  const bigSection = [
-    'diff --git a/big.txt b/big.txt',
-    'index 1..2 100644',
-    '--- a/big.txt',
-    '+++ b/big.txt',
-    '@@ -1 +1 @@',
-    '+' + 'x'.repeat(500),
-  ].join('\n') + '\n';
+  const bigSection =
+    [
+      'diff --git a/big.txt b/big.txt',
+      'index 1..2 100644',
+      '--- a/big.txt',
+      '+++ b/big.txt',
+      '@@ -1 +1 @@',
+      '+' + 'x'.repeat(500),
+    ].join('\n') + '\n';
   const smallSection = [
     'diff --git a/small.txt b/small.txt',
     'index 3..4 100644',
@@ -373,14 +405,16 @@ test('condenseDiff caps a single oversized file section, keeping other files', (
 test('condenseDiff per-file cap feeds into the total-budget pass when still over', () => {
   const sections = [];
   for (let i = 0; i < 5; i++) {
-    sections.push([
-      `diff --git a/f${i}.txt b/f${i}.txt`,
-      'index 1..2 100644',
-      `--- a/f${i}.txt`,
-      `+++ b/f${i}.txt`,
-      '@@ -1 +1 @@',
-      '+' + 'y'.repeat(200),
-    ].join('\n'));
+    sections.push(
+      [
+        `diff --git a/f${i}.txt b/f${i}.txt`,
+        'index 1..2 100644',
+        `--- a/f${i}.txt`,
+        `+++ b/f${i}.txt`,
+        '@@ -1 +1 @@',
+        '+' + 'y'.repeat(200),
+      ].join('\n'),
+    );
   }
   const diff = sections.join('\n');
 

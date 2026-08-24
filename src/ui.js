@@ -13,12 +13,12 @@ import { sanitizeTerminalText } from './utils.js';
 
 // Shared status → color/icon maps (A/M/D/R/C/T from git, '?' = untracked)
 export const statusColor = {
-  A: chalk.green,   // Added
-  M: chalk.yellow,  // Modified
-  D: chalk.red,     // Deleted
-  R: chalk.cyan,    // Renamed
+  A: chalk.green, // Added
+  M: chalk.yellow, // Modified
+  D: chalk.red, // Deleted
+  R: chalk.cyan, // Renamed
   C: chalk.magenta, // Copied
-  T: chalk.blue,    // Type changed
+  T: chalk.blue, // Type changed
   '?': chalk.green, // Untracked
 };
 export const statusIcon = { A: '+', M: '~', D: '-', R: '→', C: '©', T: 'Δ', '?': '+' };
@@ -26,21 +26,22 @@ export const statusIcon = { A: '+', M: '~', D: '-', R: '→', C: '©', T: 'Δ', 
 export function highlightMessage(msg) {
   return sanitizeTerminalText(msg).replace(
     /^(\w[\w-]*)([!:])(\s*)/,
-    (_, type, punct, rest) =>
-      chalk.cyan.bold(type) + chalk.yellow(punct) + rest,
+    (_, type, punct, rest) => chalk.cyan.bold(type) + chalk.yellow(punct) + rest,
   );
 }
 
 export function displayMessage(message) {
   const colored = sanitizeTerminalText(message).split('\n').map(highlightMessage).join('\n');
-  console.log(boxen(colored, {
-    title:      'Suggested commit message',
-    titleAlignment: 'center',
-    padding:    { top: 1, right: 2, bottom: 1, left: 2 },
-    margin:     { top: 1, left: 2 },
-    borderColor: 'cyan',
-    borderStyle: 'round',
-  }));
+  console.log(
+    boxen(colored, {
+      title: 'Suggested commit message',
+      titleAlignment: 'center',
+      padding: { top: 1, right: 2, bottom: 1, left: 2 },
+      margin: { top: 1, left: 2 },
+      borderColor: 'cyan',
+      borderStyle: 'round',
+    }),
+  );
 }
 
 // Reasoning is provider-generated, untrusted terminal text. Strip escape and
@@ -87,9 +88,7 @@ export function getReasoningView(
     ? Math.max(1, Math.floor(maxExpandedLines))
     : lines.length;
   const maxOffset = Math.max(0, lines.length - pageSize);
-  const pageOffset = expanded
-    ? Math.min(Math.max(0, Math.floor(offset)), maxOffset)
-    : 0;
+  const pageOffset = expanded ? Math.min(Math.max(0, Math.floor(offset)), maxOffset) : 0;
   const visibleLines = expanded
     ? lines.slice(pageOffset, pageOffset + pageSize)
     : previewLines.slice(-2);
@@ -98,7 +97,9 @@ export function getReasoningView(
     text: visibleLines.join('\n'),
     totalLines: lines.length,
     truncated: !expanded && previewLines.length > visibleLines.length,
-    startLine: expanded ? pageOffset + 1 : Math.max(1, previewLines.length - visibleLines.length + 1),
+    startLine: expanded
+      ? pageOffset + 1
+      : Math.max(1, previewLines.length - visibleLines.length + 1),
     endLine: expanded ? pageOffset + visibleLines.length : previewLines.length,
   };
 }
@@ -111,13 +112,17 @@ export function formatReasoningPanel(reasoning, options = {}) {
     return chalk.dim('  ◇ Thinking unavailable');
   }
 
-  const page = expanded && view.totalLines > view.text.split('\n').length
-    ? ` · ${view.startLine}-${view.endLine}/${view.totalLines} · PgUp/PgDn`
-    : '';
+  const page =
+    expanded && view.totalLines > view.text.split('\n').length
+      ? ` · ${view.startLine}-${view.endLine}/${view.totalLines} · PgUp/PgDn`
+      : '';
   const state = expanded
     ? `Ctrl+O collapse${page}`
     : `Ctrl+O expand${view.truncated ? ` · ${view.totalLines} lines` : ''}`;
-  const body = view.text.split('\n').map((line) => `  ${chalk.dim(line)}`).join('\n');
+  const body = view.text
+    .split('\n')
+    .map((line) => `  ${chalk.dim(line)}`)
+    .join('\n');
   return `${chalk.yellow('  ◇ Thinking')}  ${chalk.dim(`[${state}]`)}\n${body}`;
 }
 
@@ -215,8 +220,13 @@ export function startReasoningStream(maxChars = 12000, initialText = '') {
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return {
-      append(chunk) { accumulated += String(chunk || ''); },
-      async stop() { stopped = true; return accumulated; },
+      append(chunk) {
+        accumulated += String(chunk || '');
+      },
+      async stop() {
+        stopped = true;
+        return accumulated;
+      },
     };
   }
 
@@ -353,12 +363,12 @@ const reasoningSelect = createPrompt((config, done) => {
     maxExpandedLines: pageSize,
     offset: reasoningOffset,
   });
-  const rows = choices.map((choice, index) => {
-    if (choice.disabled) return chalk.dim(`  - ${choice.name}`);
-    return index === active
-      ? chalk.cyan(`  ❯ ${choice.name}`)
-      : `    ${choice.name}`;
-  }).join('\n');
+  const rows = choices
+    .map((choice, index) => {
+      if (choice.disabled) return chalk.dim(`  - ${choice.name}`);
+      return index === active ? chalk.cyan(`  ❯ ${choice.name}`) : `    ${choice.name}`;
+    })
+    .join('\n');
   const description = selected.description ? `\n  ${chalk.cyan(selected.description)}` : '';
   const pageHelp = expanded && maxOffset > 0 ? ' · PgUp/PgDn reasoning' : '';
   const help = chalk.dim(`  ↑↓/j k navigate · Enter select · Ctrl+O reasoning${pageHelp}`);
@@ -382,13 +392,21 @@ async function withVimKeys(promptFn, options) {
     if (key.name === 'j') {
       inTranslate = true;
       process.stdin.emit('keypress', undefined, {
-        name: 'down', sequence: '\x1B\x5B\x42', ctrl: false, meta: false, shift: false,
+        name: 'down',
+        sequence: '\x1B\x5B\x42',
+        ctrl: false,
+        meta: false,
+        shift: false,
       });
       inTranslate = false;
     } else if (key.name === 'k') {
       inTranslate = true;
       process.stdin.emit('keypress', undefined, {
-        name: 'up', sequence: '\x1B\x5B\x41', ctrl: false, meta: false, shift: false,
+        name: 'up',
+        sequence: '\x1B\x5B\x41',
+        ctrl: false,
+        meta: false,
+        shift: false,
       });
       inTranslate = false;
     }
@@ -418,15 +436,30 @@ export async function vimCheckbox(options) {
 export async function confirmAction(message, reasoning) {
   displayMessage(message);
 
-  const action = await vimSelect({
-    message: 'What would you like to do?',
-    choices: [
-      { name:  'Use this message',     value: 'use',        description: 'Commit with the suggested message' },
-      { name:  'Regenerate',           value: 'regenerate', description: 'Ask AI to generate a different message' },
-      { name:  'Edit message',         value: 'edit',       description: 'Modify the message before committing' },
-      { name:  'Cancel',               value: 'cancel',     description: 'Abort the commit' },
-    ],
-  }, reasoning);
+  const action = await vimSelect(
+    {
+      message: 'What would you like to do?',
+      choices: [
+        {
+          name: 'Use this message',
+          value: 'use',
+          description: 'Commit with the suggested message',
+        },
+        {
+          name: 'Regenerate',
+          value: 'regenerate',
+          description: 'Ask AI to generate a different message',
+        },
+        {
+          name: 'Edit message',
+          value: 'edit',
+          description: 'Modify the message before committing',
+        },
+        { name: 'Cancel', value: 'cancel', description: 'Abort the commit' },
+      ],
+    },
+    reasoning,
+  );
 
   return action;
 }
@@ -435,9 +468,9 @@ export async function editMessage(message) {
   // `postfix` is the temp file's extension (not a help text) — ".md" gives
   // the editor markdown highlighting; guidance belongs in `message`.
   const edited = await editor({
-    message:   'Edit your commit message (save and close to continue, leave empty to cancel)',
-    default:   message,
-    postfix:   '.md',
+    message: 'Edit your commit message (save and close to continue, leave empty to cancel)',
+    default: message,
+    postfix: '.md',
     waitForUseInput: false,
   });
 
@@ -448,7 +481,7 @@ export async function editMessage(message) {
   const reconfirm = await confirm({
     message: 'Commit with this edited message?',
     default: true,
-    theme:   { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
+    theme: { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
   });
 
   return reconfirm ? cleaned : null;

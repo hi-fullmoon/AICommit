@@ -1,15 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import {
-  mkdtempSync, writeFileSync, rmSync, symlinkSync,
-} from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  normalizePlan, getAllChangedFiles, executeSplit, condenseFileList, parsePlan,
-  buildSplitPlanningContext, getSplitDiff, generateSplitPlan, getSplitStateFingerprint,
+  normalizePlan,
+  getAllChangedFiles,
+  executeSplit,
+  condenseFileList,
+  parsePlan,
+  buildSplitPlanningContext,
+  getSplitDiff,
+  generateSplitPlan,
+  getSplitStateFingerprint,
   captureUntrackedSnapshots,
 } from '../src/split.js';
 
@@ -23,7 +28,7 @@ function makeRepo() {
   return dir;
 }
 
-const M = s => ({ status: 'M', path: s });
+const M = (s) => ({ status: 'M', path: s });
 
 test('normalizePlan assembles a subject+body message from subject/body fields', () => {
   const groups = [
@@ -49,11 +54,13 @@ test('normalizePlan uses the subject alone when no body is given', () => {
 });
 
 test('normalizePlan sanitizes subject and body fields before returning them', () => {
-  const groups = [{
-    subject: 'feat: safe\u001b[2J title',
-    body: '- keep this\u001b]52;c;YQ==\u0007 body',
-    files: ['a.js'],
-  }];
+  const groups = [
+    {
+      subject: 'feat: safe\u001b[2J title',
+      body: '- keep this\u001b]52;c;YQ==\u0007 body',
+      files: ['a.js'],
+    },
+  ];
   const result = normalizePlan(groups, [M('a.js')], 'en');
   assert.equal(result.length, 1);
   assert.equal(result[0].message, 'feat: safe title\n\n- keep this body');
@@ -72,9 +79,9 @@ test('normalizePlan drops unknown, duplicate, and empty groups', () => {
   const allFiles = [M('a.js')];
   const groups = [
     { subject: 'feat: a', body: 'x', files: ['a.js', 'ghost.js'] }, // ghost dropped
-    { subject: 'feat: dup', files: ['a.js'] },                      // already assigned → empty → dropped
-    { subject: '', files: ['a.js'] },                               // no subject → dropped
-    { files: ['a.js'] },                                            // no subject/body → dropped
+    { subject: 'feat: dup', files: ['a.js'] }, // already assigned → empty → dropped
+    { subject: '', files: ['a.js'] }, // no subject → dropped
+    { files: ['a.js'] }, // no subject/body → dropped
   ];
   const result = normalizePlan(groups, allFiles, 'en');
   assert.equal(result.length, 1);
@@ -122,25 +129,31 @@ test('parsePlan distinguishes prose from a truncated plan', () => {
 
 test('incomplete split recovery does not depend on finish_reason and resends files without the diff', async (t) => {
   const realFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = realFetch; });
+  t.after(() => {
+    globalThis.fetch = realFetch;
+  });
   const calls = [];
   const replies = [
     {
-      choices: [{
-        finish_reason: 'stop',
-        message: {
-          content: '[{"subject":"feat: partial"',
-          reasoning_content: 'The tail only mentions late.js.',
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: '[{"subject":"feat: partial"',
+            reasoning_content: 'The tail only mentions late.js.',
+          },
         },
-      }],
+      ],
     },
     {
-      choices: [{
-        finish_reason: 'stop',
-        message: {
-          content: '[{"subject":"feat: group files","files":["early.js","late.js"]}]',
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            content: '[{"subject":"feat: group files","files":["early.js","late.js"]}]',
+          },
         },
-      }],
+      ],
     },
   ];
   let replyIndex = 0;
@@ -149,27 +162,32 @@ test('incomplete split recovery does not depend on finish_reason and resends fil
     return new Response(JSON.stringify(replies[replyIndex++]));
   };
 
-  const { raw } = await generateSplitPlan({
-    apiUrl: 'https://example.test/v1/chat/completions',
-    apiKey: '',
-    modelId: 'mock-model',
-    temperature: 0.3,
-    language: 'en',
-    maxTokens: 1024,
-    timeoutMs: 1000,
-    splitMaxDiffChars: 1000,
-    splitMaxPlanFiles: 100,
-    stripFiles: [],
-    extraBody: {},
-    reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
-  }, [M('early.js'), M('late.js')], 'SECRET_DIFF_MARKER', process.cwd());
+  const { raw } = await generateSplitPlan(
+    {
+      apiUrl: 'https://example.test/v1/chat/completions',
+      apiKey: '',
+      modelId: 'mock-model',
+      temperature: 0.3,
+      language: 'en',
+      maxTokens: 1024,
+      timeoutMs: 1000,
+      splitMaxDiffChars: 1000,
+      splitMaxPlanFiles: 100,
+      stripFiles: [],
+      extraBody: {},
+      reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+    },
+    [M('early.js'), M('late.js')],
+    'SECRET_DIFF_MARKER',
+    process.cwd(),
+  );
 
   assert.match(raw, /early\.js/);
   assert.equal(calls.length, 2);
   const recovery = calls[1].messages.at(-1).content;
   assert.match(recovery, /Changed files:\nM early\.js\nM late\.js/);
   assert.match(recovery, /incomplete or malformed/);
-  assert.ok(!calls[1].messages.some(m => m.content.includes('SECRET_DIFF_MARKER')));
+  assert.ok(!calls[1].messages.some((m) => m.content.includes('SECRET_DIFF_MARKER')));
   assert.equal(calls[1].max_tokens, 4096);
 });
 
@@ -201,7 +219,7 @@ test('untracked snapshot scans past the preview limit and across read boundaries
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   writeFileSync(
     join(repo, 'notes.txt'),
-    'x'.repeat((64 * 1024) - 5) + '\nAPI_KEY=deep-secret-value\n',
+    'x'.repeat(64 * 1024 - 5) + '\nAPI_KEY=deep-secret-value\n',
   );
   const files = getAllChangedFiles(repo);
 
@@ -219,9 +237,7 @@ test('split planning reuses captured untracked bytes instead of reopening the fi
   const before = getSplitStateFingerprint(repo, false, files);
 
   writeFileSync(join(repo, 'notes.txt'), 'API_KEY=changed-after-scan\n');
-  const context = buildSplitPlanningContext(
-    repo, files, '', 1000, [], true, snapshot.previews,
-  );
+  const context = buildSplitPlanningContext(repo, files, '', 1000, [], true, snapshot.previews);
 
   assert.match(context, /safe snapshot/);
   assert.doesNotMatch(context, /changed-after-scan/);
@@ -320,9 +336,15 @@ test('executeSplit on an unborn branch commits every group without deleting earl
 
   executeSplit(groups, repo, allFiles);
 
-  const tracked = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf-8' }).trim().split('\n').sort();
+  const tracked = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf-8' })
+    .trim()
+    .split('\n')
+    .sort();
   assert.deepEqual(tracked, ['a.txt', 'b.txt']);
-  const status = execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf-8' }).trim();
+  const status = execFileSync('git', ['status', '--porcelain'], {
+    cwd: repo,
+    encoding: 'utf-8',
+  }).trim();
   assert.equal(status, '');
 });
 
@@ -340,8 +362,14 @@ test('executeSplit commits a rename as one unit (both paths)', (t) => {
   executeSplit(groups, repo, allFiles);
 
   // No leftover deletion, and only the destination remains tracked.
-  const status = execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf-8' }).trim();
+  const status = execFileSync('git', ['status', '--porcelain'], {
+    cwd: repo,
+    encoding: 'utf-8',
+  }).trim();
   assert.equal(status, '');
-  const tracked = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf-8' }).trim().split('\n').sort();
+  const tracked = execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf-8' })
+    .trim()
+    .split('\n')
+    .sort();
   assert.deepEqual(tracked, ['new.txt']);
 });

@@ -45,8 +45,12 @@ function runCli(cwd, home, args, extraEnv = {}) {
     let stderr = '';
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
     child.on('error', reject);
     child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
@@ -63,42 +67,51 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   const server = createServer((req, res) => {
     let body = '';
     req.setEncoding('utf-8');
-    req.on('data', (chunk) => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', () => {
       requests.push({ headers: req.headers, body: JSON.parse(body) });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        choices: [{ message: { content: 'fix: preserve failure exit status' } }],
-        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-      }));
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: 'fix: preserve failure exit status' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      );
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
 
-  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-    apiKey: '',
-    apiKeyEnv: 'AICOMMIT_E2E_API_KEY',
-    modelId: 'local-test-model',
-    reasoning: { mode: 'off' },
-  }));
-  writeFileSync(join(repo, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: 'https://attacker.example/v1/chat/completions',
-    apiKey: 'project-key',
-    modelId: 'attacker-model',
-    language: 'en',
-  }));
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      apiKeyEnv: 'AICOMMIT_E2E_API_KEY',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+  writeFileSync(
+    join(repo, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: 'https://attacker.example/v1/chat/completions',
+      apiKey: 'project-key',
+      modelId: 'attacker-model',
+      language: 'en',
+    }),
+  );
 
   const hook = join(repo, '.git', 'hooks', 'pre-commit');
   writeFileSync(hook, '#!/bin/sh\nexit 1\n');
   chmodSync(hook, 0o755);
 
-  const result = await runCli(
-    repo, home, ['--yes', '--no-reasoning'],
-    { AICOMMIT_E2E_API_KEY: 'user-owned-secret' },
-  );
+  const result = await runCli(repo, home, ['--yes', '--no-reasoning'], {
+    AICOMMIT_E2E_API_KEY: 'user-owned-secret',
+  });
   assert.equal(result.signal, null);
   assert.equal(result.code, 1, result.stdout + result.stderr);
   assert.equal(requests.length, 1);
@@ -125,21 +138,26 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
     req.on('end', () => {
       requests++;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        choices: [{ message: { content: 'fix: preview worktree changes safely' } }],
-      }));
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: 'fix: preview worktree changes safely' } }],
+        }),
+      );
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
 
-  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-    apiKey: '',
-    modelId: 'local-test-model',
-    reasoning: { mode: 'off' },
-  }));
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
 
   const result = await runCli(repo, home, ['--yes', '--dry-run', '--no-reasoning']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -161,20 +179,25 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
     req.resume();
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        choices: [{ message: { content: 'fix: commit the stable staged snapshot' } }],
-      }));
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: 'fix: commit the stable staged snapshot' } }],
+        }),
+      );
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-    apiKey: '',
-    modelId: 'local-test-model',
-    reasoning: { mode: 'off' },
-  }));
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
 
   const result = await runCli(repo, home, ['--yes', '--no-reasoning']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -198,27 +221,36 @@ test('single-file --split --yes keeps split semantics and stages the worktree ch
     req.resume();
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        choices: [{
-          message: {
-            content: JSON.stringify([{
-              subject: 'fix: commit one split file',
-              files: ['app.js'],
-            }]),
-          },
-        }],
-      }));
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify([
+                  {
+                    subject: 'fix: commit one split file',
+                    files: ['app.js'],
+                  },
+                ]),
+              },
+            },
+          ],
+        }),
+      );
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-    apiKey: '',
-    modelId: 'local-test-model',
-    reasoning: { mode: 'off' },
-  }));
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
 
   const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -248,12 +280,15 @@ test('--split --yes scans complete untracked files before auto-staging', async (
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  writeFileSync(join(home, '.aicommit.config.json'), JSON.stringify({
-    apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-    apiKey: '',
-    modelId: 'local-test-model',
-    reasoning: { mode: 'off' },
-  }));
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
 
   const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
   assert.equal(result.code, 1, result.stdout + result.stderr);

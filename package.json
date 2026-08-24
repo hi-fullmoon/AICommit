@@ -13,15 +13,33 @@
   ],
   "scripts": {
     "start": "node bin/aicommit.js",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "coverage": "c8 node --test --test-concurrency=1",
+    "ci": "npm run lint && npm run format:check && npm run coverage"
+  },
+  "c8": {
+    "all": true,
+    "include": [
+      "src/**/*.js",
+      "bin/**/*.js"
+    ],
+    "reporter": [
+      "text",
+      "lcov"
+    ],
+    "check-coverage": true,
+    "lines": 70
   },
   "dependencies": {
     "@inquirer/checkbox": "^4.3.2",
-    "@inquirer/core": "^10.3.2",
     "@inquirer/confirm": "^5.1.0",
+    "@inquirer/core": "^10.3.2",
     "@inquirer/editor": "^4.1.0",
-    "@inquirer/input": "^5.1.2",
-    "@inquirer/password": "^5.1.1",
+    "@inquirer/input": "^4.3.1",
+    "@inquirer/password": "^4.0.23",
     "@inquirer/select": "^4.1.0",
     "boxen": "^8.0.1",
     "chalk": "^5.4.0",
@@ -39,5 +57,10 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "c8": "10.1.3",
+    "eslint": "9.39.5",
+    "prettier": "3.9.6"
   }
 }

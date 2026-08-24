@@ -2,7 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  formatReasoningForTerminal, formatReasoningPanel, getReasoningView,
+  displayMessage,
+  formatReasoningForTerminal,
+  formatReasoningPanel,
+  getReasoningView,
+  highlightMessage,
+  startReasoningStream,
 } from '../src/ui.js';
 
 test('formatReasoningForTerminal strips terminal control sequences', () => {
@@ -40,7 +45,10 @@ test('reasoning panel advertises Ctrl+O expand and collapse states', () => {
   assert.doesNotMatch(formatReasoningPanel(reasoning, { columns: 80 }), /line 2/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /line 3/);
   assert.match(formatReasoningPanel(reasoning, { columns: 80 }), /line 4/);
-  assert.match(formatReasoningPanel(reasoning, { columns: 80, expanded: true }), /Ctrl\+O collapse/);
+  assert.match(
+    formatReasoningPanel(reasoning, { columns: 80, expanded: true }),
+    /Ctrl\+O collapse/,
+  );
   assert.match(formatReasoningPanel(reasoning, { columns: 80, expanded: true }), /line 3/);
 });
 
@@ -51,10 +59,15 @@ test('empty reasoning uses the Thinking title', () => {
 test('expanded reasoning is paged to stay within the terminal viewport', () => {
   const reasoning = Array.from({ length: 30 }, (_, i) => `step ${i + 1}`).join('\n');
   const firstPage = getReasoningView(reasoning, {
-    columns: 80, expanded: true, maxExpandedLines: 8,
+    columns: 80,
+    expanded: true,
+    maxExpandedLines: 8,
   });
   const lastPage = getReasoningView(reasoning, {
-    columns: 80, expanded: true, maxExpandedLines: 8, offset: 999,
+    columns: 80,
+    expanded: true,
+    maxExpandedLines: 8,
+    offset: 999,
   });
 
   assert.equal(firstPage.text.split('\n').length, 8);
@@ -63,7 +76,37 @@ test('expanded reasoning is paged to stay within the terminal viewport', () => {
   assert.equal(lastPage.text.split('\n').length, 8);
   assert.equal(lastPage.startLine, 23);
   assert.equal(lastPage.endLine, 30);
-  assert.match(formatReasoningPanel(reasoning, {
-    columns: 80, expanded: true, maxExpandedLines: 8,
-  }), /1-8\/30 · PgUp\/PgDn/);
+  assert.match(
+    formatReasoningPanel(reasoning, {
+      columns: 80,
+      expanded: true,
+      maxExpandedLines: 8,
+    }),
+    /1-8\/30 · PgUp\/PgDn/,
+  );
+});
+
+test('displayMessage sanitizes model text before rendering the review box', () => {
+  const originalLog = console.log;
+  let rendered = '';
+  console.log = (value) => {
+    rendered += String(value);
+  };
+  try {
+    displayMessage('feat: safe title\x1b]52;c;YQ==\x07\n\nbody');
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(rendered, /Suggested commit message/);
+  assert.match(rendered, /feat: safe title/);
+  assert.doesNotMatch(rendered, /52;c|YQ==/);
+  assert.match(highlightMessage('fix: clean\x00 subject'), /fix: clean subject/);
+});
+
+test('startReasoningStream accumulates text without terminal rendering in non-TTY mode', async () => {
+  const stream = startReasoningStream(100, 'first');
+  stream.append(' second');
+  stream.append(' third');
+  assert.equal(await stream.stop(), 'first second third');
 });

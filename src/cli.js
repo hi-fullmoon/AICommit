@@ -65,7 +65,6 @@ function takeValue(args, i, arg, hint) {
 }
 
 export function parseArgs(args = process.argv.slice(2)) {
-
   // "setup" is a standalone subcommand — it doesn't combine with the
   // commit-flow options, so short-circuit before parsing them.
   if (args[0] === 'setup') {
@@ -74,9 +73,16 @@ export function parseArgs(args = process.argv.slice(2)) {
       process.exit(1);
     }
     return {
-      targetPath: null, cliLang: null, cliProvider: null,
+      targetPath: null,
+      cliLang: null,
+      cliProvider: null,
       cliReasoning: null,
-      debug: false, split: false, dryRun: false, yes: false, check: false, setup: true,
+      debug: false,
+      split: false,
+      dryRun: false,
+      yes: false,
+      check: false,
+      setup: true,
     };
   }
 
@@ -184,7 +190,9 @@ export function parseArgs(args = process.argv.slice(2)) {
     if (!arg.startsWith('-')) {
       if (targetPath) {
         console.error(chalk.red(`  Unexpected extra argument: ${arg}`));
-        console.error(chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'));
+        console.error(
+          chalk.dim('  Use ') + chalk.bold('aicommit --help') + chalk.dim(' for usage.'),
+        );
         process.exit(1);
       }
       targetPath = arg;
@@ -203,7 +211,15 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
 
   return {
-    targetPath, cliLang, cliProvider, cliReasoning,
-    debug, split, dryRun, yes, check, setup,
+    targetPath,
+    cliLang,
+    cliProvider,
+    cliReasoning,
+    debug,
+    split,
+    dryRun,
+    yes,
+    check,
+    setup,
   };
 }

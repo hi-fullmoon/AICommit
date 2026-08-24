@@ -1,7 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -23,9 +21,8 @@ export function readGit(args, cwd, maxBuffer = MAX_BUFFER) {
       cwd,
     });
   } catch (err) {
-    const detail = typeof err.stderr === 'string'
-      ? err.stderr.trim()
-      : err.stderr?.toString('utf-8').trim();
+    const detail =
+      typeof err.stderr === 'string' ? err.stderr.trim() : err.stderr?.toString('utf-8').trim();
     const suffix = detail ? `: ${detail}` : '';
     throw new Error(`git ${args.join(' ')} failed${suffix}`, { cause: err });
   }
@@ -42,10 +39,12 @@ function parseNameStatusZ(output) {
     const status = fields[i++];
     if (!status) continue;
     const first = fields[i++];
-    if (first === undefined) throw new Error('Unexpected truncated output from git --name-status -z.');
+    if (first === undefined)
+      throw new Error('Unexpected truncated output from git --name-status -z.');
     if (status.startsWith('R') || status.startsWith('C')) {
       const second = fields[i++];
-      if (second === undefined) throw new Error('Unexpected truncated rename output from git --name-status -z.');
+      if (second === undefined)
+        throw new Error('Unexpected truncated rename output from git --name-status -z.');
       files.push({ status, path: `${first} → ${second}`, addPaths: [first, second] });
     } else {
       files.push({ status, path: first, addPaths: [first] });
@@ -74,10 +73,7 @@ export function getStagedDiff(cwd, contextLines) {
 // ids) so a long-running AI/review step cannot silently commit a different
 // index from the one used to generate the message.
 export function getIndexFingerprint(cwd) {
-  const patch = readGit(
-    ['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'],
-    cwd,
-  );
+  const patch = readGit(['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'], cwd);
   return createHash('sha256').update(patch).digest('hex');
 }
 
@@ -142,7 +138,9 @@ export function createIndexTransaction(projectRoot) {
 
   process.once('exit', onExit);
   return {
-    markOwned() { ownedHash = hashFileOrMissing(indexPath); },
+    markOwned() {
+      ownedHash = hashFileOrMissing(indexPath);
+    },
     restore,
     release,
   };
@@ -158,7 +156,8 @@ export function getDiffStat(cwd) {
 // Lock files only record resolved dependency versions — their content carries
 // no commit intent, and a package-lock.json bump can be tens of thousands of
 // lines. Matching by basename (case-insensitive) covers them at any depth.
-const LOCK_FILE_RE = /^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock|bun\.lockb|gemfile\.lock|go\.sum|cargo\.lock|composer\.lock|poetry\.lock|pipfile\.lock|uv\.lock|deno\.lock|gradle\.lockfile|.*\.terraform\.lock\.hcl)$/i;
+const LOCK_FILE_RE =
+  /^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock|bun\.lockb|gemfile\.lock|go\.sum|cargo\.lock|composer\.lock|poetry\.lock|pipfile\.lock|uv\.lock|deno\.lock|gradle\.lockfile|.*\.terraform\.lock\.hcl)$/i;
 
 export function isLockFile(path) {
   const base = (path || '').split('/').pop() || path;
@@ -174,7 +173,12 @@ export function matchStripPattern(path, patterns) {
   return (patterns || []).some((glob) => {
     if (typeof glob !== 'string' || !glob) return false;
     const re = new RegExp(
-      '^' + glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$',
+      '^' +
+        glob
+          .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*/g, '.*')
+          .replace(/\?/g, '.') +
+        '$',
       'i',
     );
     return re.test(base);
@@ -186,7 +190,7 @@ export function matchStripPattern(path, patterns) {
 function diffSectionPaths(line) {
   const rest = line.replace(/^diff --git\s+/, '');
   const parts = rest.match(/(?:"[^"]*"|\S+)/g) || [];
-  return parts.map(p => p.replace(/^"|"$/g, '').replace(/^[ab]\//, ''));
+  return parts.map((p) => p.replace(/^"|"$/g, '').replace(/^[ab]\//, ''));
 }
 
 // Replace the body of every lock-file (and "stripFiles"-matched) section in
@@ -218,8 +222,10 @@ export function stripLockFileContent(diff, stripGlobs = []) {
 function capSection(sec, maxChars) {
   if (sec.length <= maxChars) return sec;
   const nl = sec.lastIndexOf('\n', maxChars);
-  return sec.slice(0, nl > 0 ? nl : maxChars)
-    + `\n... (file section truncated — ${sec.length} chars total)\n`;
+  return (
+    sec.slice(0, nl > 0 ? nl : maxChars) +
+    `\n... (file section truncated — ${sec.length} chars total)\n`
+  );
 }
 
 // Cap a diff: first truncate any single file section beyond maxSectionChars,
@@ -257,8 +263,9 @@ export function condenseDiff(diff, maxChars, stat, maxSectionChars = Infinity) {
 }
 
 export function getChangedFiles(cwd) {
-  return parseNameStatusZ(readGit(['diff', '--name-status', '-z', '--staged'], cwd))
-    .map(({ status, path }) => ({ status, path }));
+  return parseNameStatusZ(readGit(['diff', '--name-status', '-z', '--staged'], cwd)).map(
+    ({ status, path }) => ({ status, path }),
+  );
 }
 
 // Working-tree changes vs. the index (git diff without --staged) — same shape
@@ -274,9 +281,11 @@ export function getUnstagedFiles(cwd) {
 export function getDiffStats(diff) {
   if (!diff) return { files: 0, additions: 0, deletions: 0 };
   const lines = diff.split('\n');
-  let files = 0, additions = 0, deletions = 0;
+  let files = 0,
+    additions = 0,
+    deletions = 0;
   for (const line of lines) {
-    if      (line.startsWith('diff --git'))           files++;
+    if (line.startsWith('diff --git')) files++;
     else if (line.startsWith('+') && !line.startsWith('+++')) additions++;
     else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
   }
@@ -301,10 +310,13 @@ export function getBranch(cwd) {
 export function isGitRepo(cwd) {
   try {
     execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
-      cwd, stdio: ['pipe', 'pipe', 'ignore'],
+      cwd,
+      stdio: ['pipe', 'pipe', 'ignore'],
     });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 export function gitCommit(message, projectRoot) {
@@ -316,10 +328,12 @@ export function gitCommit(message, projectRoot) {
   return true;
 }
 
-const SENSITIVE_FILE_RE = /(?:^|\/)(?:\.env(?:\..+)?|\.aicommit\.config\.json|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials?(?:\.[^/]*)?|service[-_]?account(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|key|keystore))$/i;
+const SENSITIVE_FILE_RE =
+  /(?:^|\/)(?:\.env(?:\..+)?|\.aicommit\.config\.json|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials?(?:\.[^/]*)?|service[-_]?account(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|key|keystore))$/i;
 const PRIVATE_KEY_RE = /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/i;
 const AWS_KEY_RE = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
-const ASSIGNED_SECRET_RE = /(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\b\s*[:=]\s*["']?)([^\s,"'}]{8,})/gi;
+const ASSIGNED_SECRET_RE =
+  /(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\b\s*[:=]\s*["']?)([^\s,"'}]{8,})/gi;
 
 export function isSensitiveFile(path) {
   const normalized = String(path || '').replace(/\\/g, '/');
@@ -383,21 +397,25 @@ export function protectSensitiveDiff(diff) {
 
     let foundAssignedSecret = false;
     let foundCloudKey = false;
-    const redacted = sec.split('\n').map((diffLine) => {
-      // Inspect both added and deleted content: removed credentials are absent
-      // from the new snapshot but are still present in the outbound diff.
-      const contentLine = diffLine.startsWith('+') || diffLine.startsWith('-');
-      if (!contentLine || diffLine.startsWith('+++') || diffLine.startsWith('---')) return diffLine;
-      let next = diffLine.replace(AWS_KEY_RE, () => {
-        foundCloudKey = true;
-        return '[REDACTED_ACCESS_KEY]';
-      });
-      next = next.replace(ASSIGNED_SECRET_RE, (_m, prefix) => {
-        foundAssignedSecret = true;
-        return `${prefix}[REDACTED]`;
-      });
-      return next;
-    }).join('\n');
+    const redacted = sec
+      .split('\n')
+      .map((diffLine) => {
+        // Inspect both added and deleted content: removed credentials are absent
+        // from the new snapshot but are still present in the outbound diff.
+        const contentLine = diffLine.startsWith('+') || diffLine.startsWith('-');
+        if (!contentLine || diffLine.startsWith('+++') || diffLine.startsWith('---'))
+          return diffLine;
+        let next = diffLine.replace(AWS_KEY_RE, () => {
+          foundCloudKey = true;
+          return '[REDACTED_ACCESS_KEY]';
+        });
+        next = next.replace(ASSIGNED_SECRET_RE, (_m, prefix) => {
+          foundAssignedSecret = true;
+          return `${prefix}[REDACTED]`;
+        });
+        return next;
+      })
+      .join('\n');
     const displayPath = paths.at(-1) || '(unknown file)';
     if (foundAssignedSecret) findings.push(`credential-like assignment in: ${displayPath}`);
     if (foundCloudKey) findings.push(`cloud access key in: ${displayPath}`);
@@ -411,9 +429,8 @@ export function runGit(args, projectRoot, inherit = false) {
   try {
     execFileSync('git', args, { cwd: projectRoot, stdio: inherit ? 'inherit' : 'pipe' });
   } catch (err) {
-    const detail = typeof err.stderr === 'string'
-      ? err.stderr.trim()
-      : err.stderr?.toString('utf-8').trim();
+    const detail =
+      typeof err.stderr === 'string' ? err.stderr.trim() : err.stderr?.toString('utf-8').trim();
     const suffix = detail ? `: ${detail}` : '';
     throw new Error(`git ${args.join(' ')} failed${suffix}`, { cause: err });
   }
@@ -422,8 +439,11 @@ export function runGit(args, projectRoot, inherit = false) {
 export function hasHead(projectRoot) {
   try {
     execFileSync('git', ['rev-parse', '--verify', 'HEAD'], {
-      cwd: projectRoot, stdio: ['pipe', 'pipe', 'ignore'],
+      cwd: projectRoot,
+      stdio: ['pipe', 'pipe', 'ignore'],
     });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }

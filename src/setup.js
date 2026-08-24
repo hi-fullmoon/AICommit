@@ -16,11 +16,21 @@ import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 // Presets offered by the wizard. Each provides the endpoint and a sensible
 // default model; the user can still override the model id in a later step.
 const PROVIDER_PRESETS = [
-  { name: 'openai',     apiUrl: 'https://api.openai.com/v1/chat/completions',       modelId: 'gpt-4o' },
-  { name: 'deepseek',   apiUrl: 'https://api.deepseek.com/v1/chat/completions',     modelId: 'deepseek-v4-flash' },
-  { name: 'openrouter', apiUrl: 'https://openrouter.ai/api/v1/chat/completions',    modelId: 'openai/gpt-4o-mini' },
+  { name: 'openai', apiUrl: 'https://api.openai.com/v1/chat/completions', modelId: 'gpt-4o' },
   {
-    name: 'minimax', apiUrl: 'https://api.minimaxi.com/v1/chat/completions', modelId: 'MiniMax-M3',
+    name: 'deepseek',
+    apiUrl: 'https://api.deepseek.com/v1/chat/completions',
+    modelId: 'deepseek-v4-flash',
+  },
+  {
+    name: 'openrouter',
+    apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    modelId: 'openai/gpt-4o-mini',
+  },
+  {
+    name: 'minimax',
+    apiUrl: 'https://api.minimaxi.com/v1/chat/completions',
+    modelId: 'MiniMax-M3',
     extraBody: { thinking: { type: 'disabled' }, reasoning_split: true },
   },
 ];
@@ -81,27 +91,38 @@ async function writeConfigAtomic(path, value) {
   }
 }
 
-export async function runSetup() {
+export async function runSetup(dependencies = {}) {
+  const {
+    targetPath = join(homedir(), '.aicommit.config.json'),
+    selectPrompt = vimSelect,
+    inputPrompt = input,
+    passwordPrompt = password,
+    confirmPrompt = confirm,
+    connectionCheck = checkConnection,
+    spinnerFactory = ora,
+  } = dependencies;
+
   console.log('');
-  console.log('  ' + chalk.cyan.bold('⚡ aicommit setup ') + chalk.dim('interactive configuration'));
+  console.log(
+    '  ' + chalk.cyan.bold('⚡ aicommit setup ') + chalk.dim('interactive configuration'),
+  );
   console.log('  ' + chalk.dim('─'.repeat(45)));
 
   // Provider credentials are always user-owned. A repository may contain a
   // project config for harmless generation preferences, but it must never be
   // able to redirect a globally authenticated request.
-  const targetPath = join(homedir(), '.aicommit.config.json');
   console.log(chalk.dim(`  Credentials will be stored in the user config: ${targetPath}`));
 
   const existing = await readExistingConfig(targetPath);
 
   // ── 2. Provider ─────────────────────────────────────────────────────
 
-  const presetName = await vimSelect({
+  const presetName = await selectPrompt({
     message: 'Choose a provider',
     choices: [
-      ...PROVIDER_PRESETS.map(p => ({
-        name:        p.name,
-        value:       p.name,
+      ...PROVIDER_PRESETS.map((p) => ({
+        name: p.name,
+        value: p.name,
         description: `${p.apiUrl} — default model: ${p.modelId}`,
       })),
       { name: 'custom', value: 'custom', description: 'Any OpenAI-compatible endpoint' },
@@ -110,22 +131,21 @@ export async function runSetup() {
 
   let providerName, apiUrl, defaultModel, presetExtraBody;
   if (presetName === 'custom') {
-    providerName = await input({
-      message:  'Provider name (used with aicommit -p <name>)',
-      validate: v => /^[\w.-]+$/.test(v.trim()) || 'Use letters, digits, dot, dash or underscore',
+    providerName = await inputPrompt({
+      message: 'Provider name (used with aicommit -p <name>)',
+      validate: (v) => /^[\w.-]+$/.test(v.trim()) || 'Use letters, digits, dot, dash or underscore',
     });
     providerName = providerName.trim();
-    apiUrl = await input({
-      message:  'API endpoint URL',
-      validate: (v) => isSecureApiUrl(v.trim())
-        || 'Use HTTPS, or HTTP only for localhost/loopback',
+    apiUrl = await inputPrompt({
+      message: 'API endpoint URL',
+      validate: (v) => isSecureApiUrl(v.trim()) || 'Use HTTPS, or HTTP only for localhost/loopback',
     });
     apiUrl = apiUrl.trim();
     defaultModel = '';
   } else {
-    const preset = PROVIDER_PRESETS.find(p => p.name === presetName);
+    const preset = PROVIDER_PRESETS.find((p) => p.name === presetName);
     providerName = preset.name;
-    apiUrl       = preset.apiUrl;
+    apiUrl = preset.apiUrl;
     defaultModel = preset.modelId;
     presetExtraBody = preset.extraBody;
   }
@@ -139,13 +159,15 @@ export async function runSetup() {
   // An empty key is allowed — local models (Ollama, LM Studio, LiteLLM) are
   // keyless; the optional connection test below still catches a missing key
   // for providers that require one.
-  const keyInput = await password({
-    message:  `API key for ${providerName}${hasKey
-      ? ` (current: ${maskApiKey(existingProvider.apiKey)} — leave empty to keep)`
-      : hasKeyEnv
-        ? ` (current env: ${existingProvider.apiKeyEnv} — leave empty to keep)`
-        : ' (use env:VARIABLE, or leave empty for local models)'}`,
-    mask:     '*',
+  const keyInput = await passwordPrompt({
+    message: `API key for ${providerName}${
+      hasKey
+        ? ` (current: ${maskApiKey(existingProvider.apiKey)} — leave empty to keep)`
+        : hasKeyEnv
+          ? ` (current env: ${existingProvider.apiKeyEnv} — leave empty to keep)`
+          : ' (use env:VARIABLE, or leave empty for local models)'
+    }`,
+    mask: '*',
   });
   const enteredKey = keyInput.trim();
   let apiKey = existingProvider.apiKey || '';
@@ -166,20 +188,20 @@ export async function runSetup() {
 
   // ── 4. Model ────────────────────────────────────────────────────────
 
-  const modelInput = await input({
-    message:  'Model ID',
-    default:  existingProvider.modelId || defaultModel || undefined,
-    validate: v => v.trim() ? true : 'Model ID is required',
+  const modelInput = await inputPrompt({
+    message: 'Model ID',
+    default: existingProvider.modelId || defaultModel || undefined,
+    validate: (v) => (v.trim() ? true : 'Model ID is required'),
   });
   const modelId = modelInput.trim();
 
   // ── 5. Commit message language ──────────────────────────────────────
 
-  const language = await vimSelect({
-    message:  'Commit message language',
-    default:  existing.language === 'en' ? 'en' : 'zh',
+  const language = await selectPrompt({
+    message: 'Commit message language',
+    default: existing.language === 'en' ? 'en' : 'zh',
     choices: [
-      { name: '中文 (zh)',   value: 'zh' },
+      { name: '中文 (zh)', value: 'zh' },
       { name: 'English (en)', value: 'en' },
     ],
   });
@@ -195,19 +217,19 @@ export async function runSetup() {
 
   // ── 6. Connection test ──────────────────────────────────────────────
 
-  const runTest = await confirm({
+  const runTest = await confirmPrompt({
     message: 'Test the connection now?',
     default: true,
   });
 
   if (runTest) {
-    const spinner = ora({
-      text:  chalk.dim(`Checking ${chalk.bold(modelId)} ...`),
+    const spinner = spinnerFactory({
+      text: chalk.dim(`Checking ${chalk.bold(modelId)} ...`),
       color: 'cyan',
     }).start();
 
     try {
-      const report = await checkConnection({
+      const report = await connectionCheck({
         ...entry,
         apiKey: apiKeyEnv ? process.env[apiKeyEnv] : apiKey,
         maxTokens: 64,
@@ -217,7 +239,7 @@ export async function runSetup() {
     } catch (err) {
       spinner.fail('Connection failed');
       console.log(`\n  ${indentError(err)}\n`);
-      const saveAnyway = await confirm({
+      const saveAnyway = await confirmPrompt({
         message: 'Save the config anyway?',
         default: false,
       });
@@ -240,8 +262,16 @@ export async function runSetup() {
   console.log('  ' + chalk.green.bold('✓ Config saved'));
   console.log('  ' + chalk.dim(`  Path:     ${targetPath}`));
   console.log('  ' + chalk.dim(`  Provider: ${providerName} (${modelId})`));
-  console.log('  ' + chalk.dim(`  API key:  ${apiKeyEnv ? `env:${apiKeyEnv}` : maskApiKey(apiKey)}`));
+  console.log(
+    '  ' + chalk.dim(`  API key:  ${apiKeyEnv ? `env:${apiKeyEnv}` : maskApiKey(apiKey)}`),
+  );
   console.log('');
-  console.log(chalk.dim('  Run ') + chalk.bold('aicommit -c') + chalk.dim(' to verify the connection, or ') + chalk.bold('aicommit') + chalk.dim(' to start committing.'));
+  console.log(
+    chalk.dim('  Run ') +
+      chalk.bold('aicommit -c') +
+      chalk.dim(' to verify the connection, or ') +
+      chalk.bold('aicommit') +
+      chalk.dim(' to start committing.'),
+  );
   console.log('');
 }

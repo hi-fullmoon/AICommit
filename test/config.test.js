@@ -1,9 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  DEFAULT_CONFIG, validateConfig, filterProjectConfig,
-} from '../src/config.js';
+import { DEFAULT_CONFIG, validateConfig, filterProjectConfig } from '../src/config.js';
 
 const cfg = (extra = {}) => ({
   ...DEFAULT_CONFIG,
@@ -45,8 +43,15 @@ test('project config cannot override connection/provider settings or raise cost 
 
   assert.deepEqual(safe, { language: 'en', stripFiles: ['*.snap'] });
   assert.deepEqual(ignored.sort(), [
-    'apiKey', 'apiKeyEnv', 'apiUrl', 'defaultProvider', 'extraBody', 'maxTokens', 'modelId',
-    'providers', 'reasoning',
+    'apiKey',
+    'apiKeyEnv',
+    'apiUrl',
+    'defaultProvider',
+    'extraBody',
+    'maxTokens',
+    'modelId',
+    'providers',
+    'reasoning',
   ]);
 });
 
@@ -60,7 +65,10 @@ test('validateConfig rejects invalid collection and boolean config values', () =
 });
 
 test('validateConfig validates split-specific tuning options', () => {
-  assert.equal(validateConfig(cfg({ splitMaxDiffChars: 12000, splitMaxPlanFiles: 50 })).splitMaxPlanFiles, 50);
+  assert.equal(
+    validateConfig(cfg({ splitMaxDiffChars: 12000, splitMaxPlanFiles: 50 })).splitMaxPlanFiles,
+    50,
+  );
   assert.throws(() => validateConfig(cfg({ splitMaxDiffChars: 0 })), /splitMaxDiffChars/);
   assert.throws(() => validateConfig(cfg({ splitMaxPlanFiles: 1.5 })), /splitMaxPlanFiles/);
 });
@@ -68,9 +76,25 @@ test('validateConfig validates split-specific tuning options', () => {
 test('validateConfig validates reasoning settings', () => {
   assert.equal(validateConfig(cfg()).reasoning.mode, 'on');
   assert.equal(validateConfig(cfg()).reasoning.effort, 'medium');
-  assert.equal(validateConfig(cfg({ reasoning: { mode: 'on', effort: 'high', maxTokens: 8192 } })).reasoning.effort, 'high');
-  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'sometimes', effort: 'low', maxTokens: 4096 } })), /reasoning\.mode/);
-  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'extreme', maxTokens: 4096 } })), /reasoning\.effort/);
-  assert.throws(() => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'low', maxTokens: 0 } })), /maxTokens/);
-  assert.throws(() => validateConfig(cfg({ reasoning: { maxDisplayChars: 0 } })), /maxDisplayChars/);
+  assert.equal(
+    validateConfig(cfg({ reasoning: { mode: 'on', effort: 'high', maxTokens: 8192 } })).reasoning
+      .effort,
+    'high',
+  );
+  assert.throws(
+    () => validateConfig(cfg({ reasoning: { mode: 'sometimes', effort: 'low', maxTokens: 4096 } })),
+    /reasoning\.mode/,
+  );
+  assert.throws(
+    () => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'extreme', maxTokens: 4096 } })),
+    /reasoning\.effort/,
+  );
+  assert.throws(
+    () => validateConfig(cfg({ reasoning: { mode: 'on', effort: 'low', maxTokens: 0 } })),
+    /maxTokens/,
+  );
+  assert.throws(
+    () => validateConfig(cfg({ reasoning: { maxDisplayChars: 0 } })),
+    /maxDisplayChars/,
+  );
 });

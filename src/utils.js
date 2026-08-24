@@ -1,7 +1,12 @@
 import { access } from 'node:fs/promises';
 
 export async function fileExists(p) {
-  try { await access(p); return true; } catch { return false; }
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Treat model output, provider errors, Git paths, and config values as
@@ -28,8 +33,12 @@ export function deepMerge(a, b) {
     if (Array.isArray(a[key]) && Array.isArray(b[key])) {
       result[key] = [...new Set([...a[key], ...b[key]])];
     } else if (
-      b[key] && typeof b[key] === 'object' && !Array.isArray(b[key]) &&
-      a[key] && typeof a[key] === 'object' && !Array.isArray(a[key])
+      b[key] &&
+      typeof b[key] === 'object' &&
+      !Array.isArray(b[key]) &&
+      a[key] &&
+      typeof a[key] === 'object' &&
+      !Array.isArray(a[key])
     ) {
       result[key] = deepMerge(a[key], b[key]);
     } else {
@@ -50,18 +59,19 @@ export function cleanCommitMessage(msg) {
   return cleaned
     .trim()
     .replace(/^\s*```[a-zA-Z]*(?:\s+|$)/, '') // opening fence, even with content on the same line
-    .replace(/\s*```\s*$/, '')                // closing fence, even with content on the same line
+    .replace(/\s*```\s*$/, '') // closing fence, even with content on the same line
     .trim();
 }
 
-const CONVENTIONAL_COMMIT_RE = /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
+const CONVENTIONAL_COMMIT_RE =
+  /^(?:feat|fix|chore|docs|refactor|test|style|perf|ci|build)(?:\([\w./-]+\))?!?: \S/i;
 
 export function isValidCommitMessage(message, maxSubjectLength = 100) {
   const cleaned = cleanCommitMessage(message);
   const subject = cleaned.split('\n', 1)[0];
-  return Boolean(cleaned)
-    && subject.length <= maxSubjectLength
-    && CONVENTIONAL_COMMIT_RE.test(subject);
+  return (
+    Boolean(cleaned) && subject.length <= maxSubjectLength && CONVENTIONAL_COMMIT_RE.test(subject)
+  );
 }
 
 export function formatMs(ms) {
@@ -72,14 +82,14 @@ export function formatMs(ms) {
 // (M-scale counts stay in k here — 1.2M = 1200k — so the parts can be summed).
 function roundedK(n) {
   const k = n / 1_000;
-  return +(k.toFixed(k < 0.1 ? 2 : 1));
+  return +k.toFixed(k < 0.1 ? 2 : 1);
 }
 
 // Render a k value with units — "0.9k", "6.8k", or "1.2M" once >= 1000k.
 // The leading `+` strips a trailing ".0" so 7k renders as "7k", not "7.0k".
 function renderK(k) {
   if (k >= 1_000) return `${+(k / 1_000).toFixed(1)}M`;
-  return `${+(k.toFixed(k < 0.1 ? 2 : 1))}k`;
+  return `${+k.toFixed(k < 0.1 ? 2 : 1)}k`;
 }
 
 // Abbreviate a token count with k/M units — k is the smallest unit shown,
@@ -110,7 +120,9 @@ export function formatUsage(usage) {
 // Indent every line of an error message by two spaces, so multi-line API
 // errors align under the surrounding CLI indentation.
 export function indentError(err) {
-  return sanitizeTerminalText(err?.message || err).split('\n').join('\n  ');
+  return sanitizeTerminalText(err?.message || err)
+    .split('\n')
+    .join('\n  ');
 }
 
 export function maskApiKey(key) {
@@ -120,7 +132,8 @@ export function maskApiKey(key) {
   return `${safe.slice(0, 4)}…${safe.slice(-4)} (${key.length} chars)`;
 }
 
-const SENSITIVE_CONFIG_KEY_RE = /^(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)$/i;
+const SENSITIVE_CONFIG_KEY_RE =
+  /^(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)$/i;
 
 export function stringifyConfigRedacted(value) {
   return JSON.stringify(value, (key, item) => {

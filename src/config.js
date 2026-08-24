@@ -12,17 +12,36 @@ import { fileExists, deepMerge } from './utils.js';
 // global config. Project config may tune generation/display behaviour, but all
 // connection and provider selection fields remain user-owned.
 export const PROJECT_CONNECTION_KEYS = new Set([
-  'apiUrl', 'apiKey', 'apiKeyEnv', 'modelId', 'providers', 'defaultProvider', 'extraBody',
+  'apiUrl',
+  'apiKey',
+  'apiKeyEnv',
+  'modelId',
+  'providers',
+  'defaultProvider',
+  'extraBody',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
-  'language', 'prompt', 'stripFiles', 'temperature',
-  'maxTokens', 'timeoutMs', 'maxDiffChars', 'maxFileDiffChars',
-  'splitMaxDiffChars', 'splitMaxPlanFiles', 'diffContextLines',
+  'language',
+  'prompt',
+  'stripFiles',
+  'temperature',
+  'maxTokens',
+  'timeoutMs',
+  'maxDiffChars',
+  'maxFileDiffChars',
+  'splitMaxDiffChars',
+  'splitMaxPlanFiles',
+  'diffContextLines',
 ]);
 const PROJECT_CEILING_KEYS = new Set([
-  'maxTokens', 'timeoutMs', 'maxDiffChars', 'maxFileDiffChars',
-  'splitMaxDiffChars', 'splitMaxPlanFiles', 'diffContextLines',
+  'maxTokens',
+  'timeoutMs',
+  'maxDiffChars',
+  'maxFileDiffChars',
+  'splitMaxDiffChars',
+  'splitMaxPlanFiles',
+  'diffContextLines',
 ]);
 const MAX_PROJECT_PROMPT_CHARS = 20_000;
 
@@ -38,15 +57,18 @@ export function filterProjectConfig(projectConfig, baseConfig = DEFAULT_CONFIG) 
       ignored.push(key);
       continue;
     }
-    if (key === 'prompt' && (typeof value !== 'string' || value.length > MAX_PROJECT_PROMPT_CHARS)) {
+    if (
+      key === 'prompt' &&
+      (typeof value !== 'string' || value.length > MAX_PROJECT_PROMPT_CHARS)
+    ) {
       ignored.push(key);
       continue;
     }
     if (
-      PROJECT_CEILING_KEYS.has(key)
-      && typeof value === 'number'
-      && typeof baseConfig[key] === 'number'
-      && value > baseConfig[key]
+      PROJECT_CEILING_KEYS.has(key) &&
+      typeof value === 'number' &&
+      typeof baseConfig[key] === 'number' &&
+      value > baseConfig[key]
     ) {
       ignored.push(key);
       continue;
@@ -147,8 +169,12 @@ function resolveProvider(config, cliProvider) {
   const providers = config.providers;
 
   if (cliProvider && !providers) {
-    console.error(chalk.red(`  ✗ -p/--provider given ("${cliProvider}") but no "providers" defined in config.`));
-    console.error(chalk.dim('  Define a "providers" map in ~/.aicommit.config.json or ./.aicommit.config.json'));
+    console.error(
+      chalk.red(`  ✗ -p/--provider given ("${cliProvider}") but no "providers" defined in config.`),
+    );
+    console.error(
+      chalk.dim('  Define a "providers" map in ~/.aicommit.config.json or ./.aicommit.config.json'),
+    );
     process.exit(1);
   }
 
@@ -180,10 +206,11 @@ export function isSecureApiUrl(value) {
   try {
     const u = new URL(value);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const loopback = u.hostname === 'localhost'
-      || u.hostname === '127.0.0.1'
-      || u.hostname.startsWith('127.')
-      || u.hostname === '[::1]';
+    const loopback =
+      u.hostname === 'localhost' ||
+      u.hostname === '127.0.0.1' ||
+      u.hostname.startsWith('127.') ||
+      u.hostname === '[::1]';
     return u.protocol === 'https:' || loopback;
   } catch {
     return false;
@@ -201,11 +228,12 @@ function assertUrl(config, key) {
 
 function assertNumber(config, key, { integer = false, min = -Infinity, max = Infinity } = {}) {
   const value = config[key];
-  const ok = typeof value === 'number'
-    && Number.isFinite(value)
-    && (!integer || Number.isInteger(value))
-    && value >= min
-    && value <= max;
+  const ok =
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    (!integer || Number.isInteger(value)) &&
+    value >= min &&
+    value <= max;
   if (!ok) {
     const kind = integer ? 'integer' : 'number';
     const range = Number.isFinite(max) ? ` between ${min} and ${max}` : ` >= ${min}`;
@@ -219,9 +247,14 @@ export function validateConfig(config) {
   assertString(config, 'prompt');
 
   if (typeof config.apiKey !== 'string') {
-    throw new Error('Invalid config "apiKey": expected a string. Use "" for keyless local endpoints.');
+    throw new Error(
+      'Invalid config "apiKey": expected a string. Use "" for keyless local endpoints.',
+    );
   }
-  if (typeof config.apiKeyEnv !== 'string' || (config.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.apiKeyEnv))) {
+  if (
+    typeof config.apiKeyEnv !== 'string' ||
+    (config.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.apiKeyEnv))
+  ) {
     throw new Error('Invalid config "apiKeyEnv": expected an environment variable name or "".');
   }
   if (config.language !== 'zh' && config.language !== 'en') {
@@ -233,20 +266,30 @@ export function validateConfig(config) {
   if (!Array.isArray(config.stripFiles) || config.stripFiles.some((p) => typeof p !== 'string')) {
     throw new Error('Invalid config "stripFiles": expected an array of strings.');
   }
-  if (!config.extraBody || typeof config.extraBody !== 'object' || Array.isArray(config.extraBody)) {
+  if (
+    !config.extraBody ||
+    typeof config.extraBody !== 'object' ||
+    Array.isArray(config.extraBody)
+  ) {
     throw new Error('Invalid config "extraBody": expected an object.');
   }
   if ('model' in config.extraBody || 'messages' in config.extraBody) {
     throw new Error('Invalid config "extraBody": "model" and "messages" are managed by aicommit.');
   }
-  if (!config.reasoning || typeof config.reasoning !== 'object' || Array.isArray(config.reasoning)) {
+  if (
+    !config.reasoning ||
+    typeof config.reasoning !== 'object' ||
+    Array.isArray(config.reasoning)
+  ) {
     throw new Error('Invalid config "reasoning": expected an object.');
   }
   if (!['auto', 'on', 'off'].includes(config.reasoning.mode)) {
     throw new Error('Invalid config "reasoning.mode": expected "auto", "on", or "off".');
   }
   if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoning.effort)) {
-    throw new Error('Invalid config "reasoning.effort": expected low, medium, high, xhigh, or max.');
+    throw new Error(
+      'Invalid config "reasoning.effort": expected low, medium, high, xhigh, or max.',
+    );
   }
   for (const key of ['enabledBody', 'disabledBody']) {
     const value = config.reasoning[key];
@@ -284,7 +327,8 @@ function configHasApiKey(cfg) {
 export function getProjectRoot() {
   try {
     return execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
     }).trim();
   } catch {
     return process.cwd();
@@ -315,7 +359,7 @@ export async function loadConfig(cliProvider = null) {
   }
 
   const projectPath = join(projectRoot, '.aicommit.config.json');
-  if (projectPath !== userPath && await fileExists(projectPath)) {
+  if (projectPath !== userPath && (await fileExists(projectPath))) {
     let parsed;
     try {
       parsed = JSON.parse(await readFile(projectPath, 'utf-8'));
@@ -326,10 +370,14 @@ export async function loadConfig(cliProvider = null) {
     config = deepMerge(config, safe);
     loaded.push('project');
     if (ignored.length) {
-      console.error(chalk.yellow(
-        `  ⚠ Ignored unsafe settings from untrusted project config: ${ignored.join(', ')}`,
-      ));
-      console.error(chalk.dim('    Put provider credentials and endpoints in ~/.aicommit.config.json.'));
+      console.error(
+        chalk.yellow(
+          `  ⚠ Ignored unsafe settings from untrusted project config: ${ignored.join(', ')}`,
+        ),
+      );
+      console.error(
+        chalk.dim('    Put provider credentials and endpoints in ~/.aicommit.config.json.'),
+      );
     }
   }
 
