@@ -1,0 +1,22 @@
+{
+  "kind": "aicommit-team-policy",
+  "version": 1,
+  "language": "en",
+  "commitPolicy": {
+    "version": 1,
+    "types": ["feat", "fix", "docs", "refactor", "test", "chore"],
+    "scope": {
+      "mode": "optional",
+      "values": []
+    },
+    "subject": {
+      "maxLength": 72
+    },
+    "body": {
+      "mode": "optional",
+      "maxLines": 8
+    },
+    "breakingChange": "allow",
+    "language": "inherit"
+  }
+}

@@ -132,3 +132,12 @@ test('error classification has stable categories and exit codes', () => {
     assert.equal(EXIT_CODES[category], exitCode);
   }
 });
+
+test('controlled command errors may expose structured non-secret validation data', () => {
+  const error = new AicommitError(ERROR_CATEGORIES.CONFIG, 'policy rejected', {
+    data: { valid: false, issues: ['scope_required'] },
+  });
+  const output = errorOutput(error);
+  validate(output, schema);
+  assert.deepEqual(output.data, { valid: false, issues: ['scope_required'] });
+});

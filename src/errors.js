@@ -40,6 +40,9 @@ export class AicommitError extends Error {
     this.category = category;
     this.exitCode = EXIT_CODES[category] ?? EXIT_CODES.internal;
     this.reported = Boolean(options.reported);
+    if (options.data && typeof options.data === 'object' && !Array.isArray(options.data)) {
+      this.data = options.data;
+    }
     if (options.cause !== undefined) this.cause = options.cause;
   }
 }
@@ -76,7 +79,7 @@ export function classifyError(err) {
     return fail(ERROR_CATEGORIES.RESPONSE_FORMAT, message, { cause: err });
   }
   if (
-    /invalid config|failed to parse.*config|environment variable|credential helper|unknown provider|provider.*defined|unknown option|missing value|unexpected extra argument|invalid reasoning level|not a valid directory|--output=json/.test(
+    /invalid config|failed to (?:parse|read).*?(?:config|team policy)|environment variable|credential helper|unknown provider|provider.*defined|unknown option|missing value|unexpected extra argument|invalid reasoning level|not a valid directory|--output=json/.test(
       lower,
     )
   ) {

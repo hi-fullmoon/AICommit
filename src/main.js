@@ -49,6 +49,7 @@ import { runDoctor } from './doctor.js';
 import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.js';
 import { runConfigCommand } from './config-command.js';
 import { generateCompletion } from './completion.js';
+import { runPolicyCommand } from './policy-command.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -75,6 +76,9 @@ export async function main() {
     setup,
     doctor,
     configAction,
+    policyAction,
+    policyMessageFile,
+    policyRange,
     completionShell,
     statsAction,
     metricsAction,
@@ -97,7 +101,7 @@ export async function main() {
   }
 
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !check && !doctor && !configAction) {
+  if (machineOutput && !yes && !check && !doctor && !configAction && !policyAction) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -121,6 +125,14 @@ export async function main() {
   if (configAction) {
     return runConfigCommand(configAction, {
       provider: cliProvider,
+      machineOutput,
+    });
+  }
+
+  if (policyAction) {
+    return runPolicyCommand(policyAction, {
+      messageFile: policyMessageFile,
+      range: policyRange,
       machineOutput,
     });
   }

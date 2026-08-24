@@ -131,6 +131,16 @@ Each context category and the whole feature can be disabled independently. `conv
 
 Generated candidates are checked locally for policy format, type/scope, subject and body limits, breaking-change markers, and explicit language. A hard failure gets at most one low-cost correction request without re-sending the diff. Keyword/path alignment with the bounded diff is reported as an advisory warning because it is heuristic.
 
+For a deterministic team gate, generate and commit the strict credential-free policy document, then use the same validator from a local `commit-msg` hook and CI:
+
+```bash
+aicommit policy template > .aicommit.policy.json
+aicommit policy check --file=.git/COMMIT_EDITMSG
+aicommit policy check --range=origin/main..HEAD --output=json
+```
+
+The complete team policy loads after personal settings. Machine output includes a policy fingerprint and issue codes but omits commit-message contents; policy commands never resolve credentials. See the bilingual [team migration guide and executable examples](docs/team-policy.md), plus the published [team-policy schema](schemas/aicommit-team-policy.schema.json).
+
 ### Provider reliability
 
 Every provider adapter maps the same generation contract: messages, streaming, reasoning controls, output-token budget, normalized usage (`inputTokens`, `outputTokens`, `totalTokens`), and finish reason. Endpoint detection normally selects the adapter; set `providerType` when a compatible service uses a custom domain.
@@ -222,7 +232,7 @@ aicommit -h              # help
 
 ### Configuration inspection
 
-`aicommit config show|validate|path` can run outside a repository and accepts an optional target directory. `show` applies the same user/project trust filtering and provider selection as commit generation, but recursively masks secrets. `validate` parses, merges, and validates configuration without reading environment credentials or invoking Git credential helpers, making `aicommit config validate --output=json` safe for CI. `path` reports both locations even when a config file is malformed. `show` and `validate` accept `--provider=<name>`.
+`aicommit config show|validate|path` can run outside a repository and accepts an optional target directory. `show` applies the same user/project/team-policy trust filtering and provider selection as commit generation, but recursively masks secrets. `validate` parses, merges, and validates configuration without reading environment credentials or invoking Git credential helpers, making `aicommit config validate --output=json` safe for CI. `path` reports user config, project config, and team-policy locations even when a config file is malformed. `show` and `validate` accept `--provider=<name>`.
 
 ### Shell completion
 

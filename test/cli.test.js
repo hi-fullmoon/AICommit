@@ -131,6 +131,25 @@ test('parseArgs recognizes config inspection and shell completion commands', () 
   assert.throws(() => parseArgs(['completion', 'powershell']), /bash, zsh, or fish/);
 });
 
+test('parseArgs recognizes team policy template and check inputs', () => {
+  assert.equal(parseArgs(['policy', 'template']).policyAction, 'template');
+  const file = parseArgs(['policy', 'check', '--file=.git/COMMIT_EDITMSG', '--output=json']);
+  assert.equal(file.policyAction, 'check');
+  assert.equal(file.policyMessageFile, '.git/COMMIT_EDITMSG');
+  assert.equal(file.output, 'json');
+  const range = parseArgs(['policy', 'check', '/tmp/repo', '--range=main..HEAD']);
+  assert.equal(range.targetPath, '/tmp/repo');
+  assert.equal(range.policyRange, 'main..HEAD');
+  assert.throws(() => parseArgs(['policy']), /template or check/);
+  assert.throws(() => parseArgs(['policy', 'template', '--output=json']), /takes no arguments/);
+  assert.throws(
+    () => parseArgs(['policy', 'check', '--file=message', '--range=HEAD']),
+    /either --file or --range/,
+  );
+  assert.throws(() => parseArgs(['--range=HEAD']), /only valid with/);
+  assert.throws(() => parseArgs(['policy', 'check', '--provider=x']), /policy check accepts only/);
+});
+
 test('parseArgs recognizes local metrics management actions', () => {
   assert.equal(parseArgs(['metrics']).metricsAction, 'status');
   assert.equal(parseArgs(['metrics', 'clear']).metricsAction, 'clear');

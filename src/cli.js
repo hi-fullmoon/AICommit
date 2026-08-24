@@ -15,6 +15,7 @@ function showHelp() {
     ${chalk.dim('$')} aicommit [path] [options]
     ${chalk.dim('$')} aicommit setup
     ${chalk.dim('$')} aicommit config <show|validate|path> [options]
+    ${chalk.dim('$')} aicommit policy <template|check> [options]
     ${chalk.dim('$')} aicommit completion <bash|zsh|fish>
     ${chalk.dim('$')} aicommit split <plan|apply> --file=<path> [options]
 
@@ -23,7 +24,9 @@ function showHelp() {
     doctor                Diagnose runtime, config, credentials, and connectivity
     config show           Print the effective configuration with secrets redacted
     config validate       Parse, merge, and validate configuration without reading credentials
-    config path           Print user and project configuration paths
+    config path           Print user, project, and team-policy paths
+    policy template       Print a safe repository team-policy template
+    policy check          Validate a message file or Git range with the effective team policy
     completion            Generate Bash, Zsh, or Fish completion on stdout
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
@@ -43,7 +46,8 @@ function showHelp() {
     --split=<scope>       Split staged changes or all changes: staged, all
     --split-hunks         Experimental same-file hunk planning (default: off)
     --scope=<scope>       Scope for "split plan": staged, all
-    --file=<path>         Plan artifact path for "split plan/apply"
+    --file=<path>         Split-plan artifact or commit-message file
+    --range=<revision>    Git revision/range for "policy check" (default: HEAD)
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
@@ -58,6 +62,9 @@ function showHelp() {
     aicommit config show  Show effective redacted configuration
     aicommit config validate --output=json  Validate configuration for CI
     aicommit config path  Show user and project config locations
+    aicommit policy template > .aicommit.policy.json  Create a committable policy
+    aicommit policy check --file=.git/COMMIT_EDITMSG  Validate a local commit message
+    aicommit policy check --range=origin/main..HEAD --output=json  Validate a CI range
     aicommit completion zsh > _aicommit  Generate Zsh completion
     aicommit metrics status  Show local-only metrics status and record count
     aicommit stats        Show local acceptance, quality, latency, and token trends
@@ -114,6 +121,9 @@ function parsedDefaults(overrides = {}) {
     setup: false,
     doctor: false,
     configAction: null,
+    policyAction: null,
+    policyMessageFile: null,
+    policyRange: null,
     completionShell: null,
     statsAction: null,
     metricsAction: null,
@@ -166,6 +176,22 @@ export function parseArgs(args = process.argv.slice(2)) {
     return parsedDefaults({ completionShell: shell });
   }
 
+  if (args[0] === 'policy' && args[1] === 'template') {
+    if (args.length !== 2) {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'policy template takes no arguments.');
+    }
+    return parsedDefaults({ policyAction: 'template' });
+  }
+
+  let policyAction = null;
+  if (args[0] === 'policy') {
+    policyAction = args[1];
+    if (policyAction !== 'check') {
+      throw fail(ERROR_CATEGORIES.CONFIG, 'policy requires one action: template or check.');
+    }
+    args = args.slice(2);
+  }
+
   let configAction = null;
   if (args[0] === 'config') {
     configAction = args[1];
@@ -196,6 +222,8 @@ export function parseArgs(args = process.argv.slice(2)) {
   let split = null;
   let splitHunks = false;
   let splitPlanFile = null;
+  let policyMessageFile = null;
+  let policyRange = null;
   let splitScopeOption = false;
   let dryRun = false;
   let yes = false;
@@ -270,14 +298,30 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
 
     if (arg === '--file') {
-      splitPlanFile = takeValue(args, i, arg, 'path');
+      const value = takeValue(args, i, arg, 'path');
+      if (policyAction) policyMessageFile = value;
+      else splitPlanFile = value;
       i++;
       continue;
     }
 
     if (arg.startsWith('--file=')) {
-      splitPlanFile = arg.slice('--file='.length);
-      if (!splitPlanFile) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --file.');
+      const value = arg.slice('--file='.length);
+      if (!value) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --file.');
+      if (policyAction) policyMessageFile = value;
+      else splitPlanFile = value;
+      continue;
+    }
+
+    if (arg === '--range') {
+      policyRange = takeValue(args, i, arg, 'revision');
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith('--range=')) {
+      policyRange = arg.slice('--range='.length);
+      if (!policyRange) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --range.');
       continue;
     }
 
@@ -428,7 +472,15 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
   if (
     configAction &&
-    (cliLang || cliReasoning || split || splitHunks || splitCommand || dryRun || yes || check)
+    (cliLang ||
+      cliReasoning ||
+      split ||
+      splitHunks ||
+      splitCommand ||
+      splitPlanFile ||
+      dryRun ||
+      yes ||
+      check)
   ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
@@ -438,7 +490,33 @@ export function parseArgs(args = process.argv.slice(2)) {
   if (configAction === 'path' && cliProvider) {
     throw fail(ERROR_CATEGORIES.CONFIG, 'config path does not accept --provider.');
   }
-  if (doctor && (targetPath || cliLang || cliReasoning || split || dryRun || yes || check)) {
+  if (
+    policyAction &&
+    (cliProvider ||
+      cliLang ||
+      cliReasoning ||
+      split ||
+      splitHunks ||
+      splitCommand ||
+      dryRun ||
+      yes ||
+      check)
+  ) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'policy check accepts only an optional path, --file or --range, --output, and --debug.',
+    );
+  }
+  if (!policyAction && policyRange) {
+    throw fail(ERROR_CATEGORIES.CONFIG, '--range is only valid with "aicommit policy check".');
+  }
+  if (policyMessageFile && policyRange) {
+    throw fail(ERROR_CATEGORIES.CONFIG, 'policy check accepts either --file or --range, not both.');
+  }
+  if (
+    doctor &&
+    (targetPath || cliLang || cliReasoning || split || splitPlanFile || dryRun || yes || check)
+  ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
       'doctor accepts only --provider, --output, and --debug options.',
@@ -462,6 +540,9 @@ export function parseArgs(args = process.argv.slice(2)) {
     setup,
     doctor,
     configAction,
+    policyAction,
+    policyMessageFile,
+    policyRange,
     completionShell: null,
     statsAction: null,
     metricsAction: null,

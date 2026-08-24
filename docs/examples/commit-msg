@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec aicommit policy check --file="$1"

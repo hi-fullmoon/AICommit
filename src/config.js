@@ -16,6 +16,7 @@ import {
   mergeRepositoryContext,
   validateRepositoryContextConfig,
 } from './context.js';
+import { readTeamPolicy } from './team-policy.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -473,7 +474,19 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
     }
   }
 
-  const { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
+  const teamPolicy = await readTeamPolicy(projectRoot);
+  let { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
+
+  // A repository-owned team policy is a strict, credential-free document.
+  // Apply it after selecting the personal provider so provider-scoped user
+  // preferences cannot change the committed policy on developer machines.
+  if (teamPolicy) {
+    resolvedConfig = mergeConfig(resolvedConfig, {
+      language: teamPolicy.language,
+      commitPolicy: teamPolicy.commitPolicy,
+    });
+    loaded.push('team policy');
+  }
 
   validateConfig(resolvedConfig);
   const credential = resolveCredentials

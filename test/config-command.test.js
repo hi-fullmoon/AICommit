@@ -104,6 +104,11 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
     pathOutput.data.paths.project.path,
     join(realpathSync(repo), '.aicommit.config.json'),
   );
+  assert.equal(
+    pathOutput.data.paths.teamPolicy.path,
+    join(realpathSync(repo), '.aicommit.policy.json'),
+  );
+  assert.equal(pathOutput.data.paths.teamPolicy.exists, false);
 
   const invalid = runCli(repo, home, ['config', 'validate', '--output=json'], env);
   assert.equal(invalid.code, 2, invalid.stdout + invalid.stderr);

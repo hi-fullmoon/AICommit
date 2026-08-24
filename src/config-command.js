@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { getProjectRoot, loadConfig } from './config.js';
 import { fileExists, stringifyConfigRedacted } from './utils.js';
+import { TEAM_POLICY_FILENAME } from './team-policy.js';
 
 function redactedObject(value) {
   return JSON.parse(stringifyConfigRedacted(value));
@@ -11,15 +12,20 @@ function redactedObject(value) {
 export async function inspectConfigPaths(projectRoot = getProjectRoot()) {
   const user = join(homedir(), '.aicommit.config.json');
   const project = join(projectRoot, '.aicommit.config.json');
+  const teamPolicy = join(projectRoot, TEAM_POLICY_FILENAME);
   return {
     user: { path: user, exists: await fileExists(user) },
     project: { path: project, exists: project !== user && (await fileExists(project)) },
+    teamPolicy: { path: teamPolicy, exists: await fileExists(teamPolicy) },
   };
 }
 
 function printPaths(paths) {
   console.log(`User config:    ${paths.user.path}${paths.user.exists ? '' : ' (not found)'}`);
   console.log(`Project config: ${paths.project.path}${paths.project.exists ? '' : ' (not found)'}`);
+  console.log(
+    `Team policy:    ${paths.teamPolicy.path}${paths.teamPolicy.exists ? '' : ' (not found)'}`,
+  );
 }
 
 export async function runConfigCommand(action, { provider = null, machineOutput = false } = {}) {

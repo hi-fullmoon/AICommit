@@ -53,7 +53,7 @@ export function successOutput(result = {}) {
 
 export function errorOutput(err) {
   const classified = classifyError(err);
-  return {
+  const output = {
     schemaVersion: OUTPUT_SCHEMA_VERSION,
     ok: false,
     message: null,
@@ -70,6 +70,10 @@ export function errorOutput(err) {
       message: classified.message,
     },
   };
+  if (classified.data && typeof classified.data === 'object' && !Array.isArray(classified.data)) {
+    output.data = classified.data;
+  }
+  return output;
 }
 
 export function exitCodeFor(err) {

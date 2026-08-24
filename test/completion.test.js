@@ -7,7 +7,15 @@ import { generateCompletion } from '../src/completion.js';
 test('completion generators cover stable commands and shell-specific registration', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const script = generateCompletion(shell);
-    for (const command of ['config', 'completion', 'split', 'doctor', 'stats', 'metrics']) {
+    for (const command of [
+      'config',
+      'policy',
+      'completion',
+      'split',
+      'doctor',
+      'stats',
+      'metrics',
+    ]) {
       assert.match(script, new RegExp(`\\b${command}\\b`), `${shell} omits ${command}`);
     }
     const longOptionPrefix = shell === 'fish' ? '-l ' : '--';
@@ -15,6 +23,8 @@ test('completion generators cover stable commands and shell-specific registratio
       const renderedOption = `${longOptionPrefix}${option}`;
       assert.match(script, new RegExp(renderedOption), `${shell} omits ${renderedOption}`);
     }
+    const rangeOption = `${longOptionPrefix}range`;
+    assert.match(script, new RegExp(rangeOption), `${shell} omits ${rangeOption}`);
     assert.doesNotMatch(script, /apiKey|credential|secret/i);
   }
   assert.match(generateCompletion('bash'), /complete -F _aicommit aicommit/);

@@ -100,11 +100,18 @@ async function main() {
       'README.md',
       'SECURITY.md',
       'bin/aicommit.js',
+      'docs/team-policy.md',
+      'docs/examples/commit-msg',
+      'docs/examples/aicommit-policy.yml',
       'package.json',
       'schemas/aicommit-output.schema.json',
+      'schemas/aicommit-team-policy.schema.json',
       'src/completion.js',
       'src/config-command.js',
+      'src/policy-command.js',
+      'src/team-policy.js',
       'src/main.js',
+      'templates/.aicommit.policy.json',
     ]) {
       assert.ok(packedPaths.has(expected), `published package is missing ${expected}`);
     }
@@ -143,9 +150,33 @@ async function main() {
     assert.match(bashCompletion, /complete -F _aicommit aicommit/);
     assert.doesNotMatch(bashCompletion, /AI-powered commit message generator/);
 
+    const policyTemplate = run(process.execPath, [entry, 'policy', 'template']);
+    const parsedPolicyTemplate = JSON.parse(policyTemplate);
+    assert.equal(parsedPolicyTemplate.kind, 'aicommit-team-policy');
+    assert.ok(!Object.hasOwn(parsedPolicyTemplate, 'apiKey'));
+
     const home = join(root, 'home');
     mkdirSync(home);
     const repo = makeRepo(root);
+    writeFileSync(join(repo, '.aicommit.policy.json'), policyTemplate);
+    const messageFile = join(root, 'COMMIT_EDITMSG');
+    writeFileSync(messageFile, 'test: validate installed policy command\n');
+    const policyCheck = await runCli(
+      entry,
+      ['policy', 'check', `--file=${messageFile}`, '--output=json'],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          HOME: home,
+          USERPROFILE: home,
+          NO_COLOR: '1',
+          FORCE_COLOR: '0',
+        },
+      },
+    );
+    assert.equal(policyCheck.code, 0, policyCheck.stdout + policyCheck.stderr);
+    assert.equal(JSON.parse(policyCheck.stdout).exitReason, 'policy_valid');
     const configPaths = await runCli(entry, ['config', 'path', '--output=json'], {
       cwd: repo,
       env: {

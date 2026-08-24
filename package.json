@@ -13,7 +13,9 @@
     "README.md",
     "SECURITY.md",
     "bin/",
+    "docs/",
     "schemas/",
+    "templates/",
     "src/"
   ],
   "scripts": {
