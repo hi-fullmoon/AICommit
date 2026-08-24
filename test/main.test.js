@@ -375,6 +375,85 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   );
 });
 
+test('automatic policy correction is counted as a privacy-safe rewrite metric', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-policy-correction-metric-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  let calls = 0;
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      calls++;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: calls === 1 ? 'Updated the application value' : 'fix: update app value',
+              },
+            },
+          ],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['--yes', '--no-reasoning']);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.equal(calls, 2);
+  const metricText = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8');
+  const metric = JSON.parse(metricText.trim());
+  assert.equal(metric.rewrites, 1);
+  assert.equal(metric.edited, false);
+  assert.doesNotMatch(metricText, /application value|app\.js|local-test-model/);
+});
+
+test('stats command reports local trends without requiring a Git repository', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-stats-e2e-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const metricsPath = join(home, 'quality.jsonl');
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({ metrics: { enabled: true, path: metricsPath, maxEntries: 20 } }),
+  );
+  writeFileSync(
+    metricsPath,
+    JSON.stringify({
+      durationMs: 250,
+      usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+    }) + '\n',
+  );
+
+  const result = await runCli(root, home, ['stats']);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Local quality stats/);
+  assert.match(result.stdout, /First pass:\s+1 \(100\.0%\)/);
+  assert.match(result.stdout, /Tokens:\s+total 25/);
+  assert.match(result.stdout, /local only; no messages, diffs, reasoning/);
+  assert.equal(readFileSync(metricsPath, 'utf8').trim().split('\n').length, 1);
+});
+
 test('--output=json returns the split plan without reasoning or terminal decoration', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-json-split-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

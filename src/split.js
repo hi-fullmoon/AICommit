@@ -1051,7 +1051,7 @@ export async function splitFlow(
         process.on('SIGINT', cancelRegenOnSigint);
         try {
           regenCounts[idx]++;
-          const { message, elapsed, usage, reasoning } = await generateCommitMessage(
+          const { message, elapsed, usage, reasoning, corrections } = await generateCommitMessage(
             config,
             groupDiff,
             regenCounts[idx],
@@ -1064,7 +1064,7 @@ export async function splitFlow(
           rspinner.succeed(done);
           reasoningText = reasoning;
           groups[idx] = { ...groups[idx], message };
-          rewriteCount++;
+          rewriteCount += 1 + (corrections || 0);
         } catch (err) {
           if (liveGroupReasoning) await liveGroupReasoning.stop();
           regenCounts[idx]--;

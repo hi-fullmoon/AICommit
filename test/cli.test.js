@@ -59,3 +59,13 @@ test('parseArgs recognizes local metrics management actions', () => {
   assert.throws(() => parseArgs(['metrics', 'upload']), /metrics accepts one action/);
   assert.equal(parseArgs([]).metricsAction, null);
 });
+
+test('parseArgs recognizes local stats and its privacy-management aliases', () => {
+  assert.equal(parseArgs(['stats']).statsAction, 'show');
+  assert.equal(parseArgs(['stats', 'show']).statsAction, 'show');
+  assert.equal(parseArgs(['stats', 'clear']).statsAction, 'clear');
+  assert.equal(parseArgs(['stats', 'enable']).statsAction, 'enable');
+  assert.equal(parseArgs(['stats', 'disable']).statsAction, 'disable');
+  assert.throws(() => parseArgs(['stats', 'upload']), /stats accepts one action/);
+  assert.equal(parseArgs([]).statsAction, null);
+});

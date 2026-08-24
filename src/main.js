@@ -46,7 +46,7 @@ import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
-import { configureMetrics, runMetricsCommand } from './metrics.js';
+import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -69,6 +69,7 @@ export async function main() {
     check,
     setup,
     doctor,
+    statsAction,
     metricsAction,
     help,
     version,
@@ -78,6 +79,10 @@ export async function main() {
   if (metricsAction) {
     await runMetricsCommand(metricsAction);
     return { exitReason: `metrics_${metricsAction}` };
+  }
+  if (statsAction) {
+    await runStatsCommand(statsAction);
+    return { exitReason: `stats_${statsAction}` };
   }
 
   const machineOutput = output === 'json';
@@ -646,8 +651,9 @@ export async function main() {
   }
   // ── 3. AI call + confirm (with regenerate loop) ────────────────────
 
-  let message, elapsed, usage, reasoningText, qualityWarnings;
+  let message, elapsed, usage, reasoningText, qualityWarnings, corrections;
   let regenerateCount = 0;
+  let automaticCorrectionCount = 0;
   let wasEdited = false;
 
   while (true) {
@@ -689,7 +695,9 @@ export async function main() {
         usage,
         reasoning: reasoningText,
         qualityWarnings,
+        corrections,
       } = await generateCommitMessage(config, modelDiff, regenerateCount, message, stream));
+      automaticCorrectionCount += corrections || 0;
       if (liveReasoning) await liveReasoning.stop();
       let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
       if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
@@ -798,7 +806,7 @@ export async function main() {
       exitReason: 'dry_run',
       committed: false,
       edited: wasEdited,
-      rewrites: regenerateCount,
+      rewrites: regenerateCount + automaticCorrectionCount,
     };
   }
 
@@ -837,7 +845,7 @@ export async function main() {
       exitReason: 'success',
       committed: true,
       edited: wasEdited,
-      rewrites: regenerateCount,
+      rewrites: regenerateCount + automaticCorrectionCount,
     };
   } catch (err) {
     const restored = indexTransaction ? indexTransaction.restore() : false;

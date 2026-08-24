@@ -18,6 +18,7 @@ function showHelp() {
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
     doctor                Diagnose runtime, config, credentials, and connectivity
+    stats [action]        Show quality/cost trends; show, clear, enable, disable
     metrics [action]      Manage local metrics: status, clear, enable, disable
 
   ${chalk.bold('Arguments:')}
@@ -41,6 +42,7 @@ function showHelp() {
     aicommit setup        Run the interactive configuration wizard
     aicommit doctor       Check runtime, config, credentials, and connectivity
     aicommit metrics status  Show local-only metrics status and record count
+    aicommit stats        Show local acceptance, quality, latency, and token trends
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
@@ -84,6 +86,7 @@ function parsedDefaults(overrides = {}) {
     check: false,
     setup: false,
     doctor: false,
+    statsAction: null,
     metricsAction: null,
     help: false,
     version: false,
@@ -113,6 +116,17 @@ export function parseArgs(args = process.argv.slice(2)) {
       );
     }
     return parsedDefaults({ metricsAction: action });
+  }
+
+  if (args[0] === 'stats') {
+    const action = args[1] || 'show';
+    if (args.length > 2 || !['show', 'clear', 'enable', 'disable'].includes(action)) {
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'stats accepts one action: show, clear, enable, or disable.',
+      );
+    }
+    return parsedDefaults({ statsAction: action });
   }
 
   const doctor = args[0] === 'doctor';
@@ -274,6 +288,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     check,
     setup,
     doctor,
+    statsAction: null,
     metricsAction: null,
     help: false,
     version: false,

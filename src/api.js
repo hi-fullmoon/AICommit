@@ -647,6 +647,7 @@ export async function generateCommitMessage(
   let usage = firstUsage;
   let reasoning = initialReasoning;
   let message = text;
+  let corrections = 0;
 
   // Last resort: extract a message from the reasoning content itself
   if (!message.trim() && reasoning) {
@@ -659,6 +660,7 @@ export async function generateCommitMessage(
   // concrete violations are sufficient to repair formatting and constraints.
   let validation = validateCommitCandidate(message, { policy, diff });
   if (message.trim() && validation.needsCorrection) {
+    corrections = 1;
     const retry = await getResponseText(
       config,
       [
@@ -712,5 +714,6 @@ export async function generateCommitMessage(
     usage,
     reasoning,
     qualityWarnings: validation.warnings.map((item) => item.message),
+    corrections,
   };
 }

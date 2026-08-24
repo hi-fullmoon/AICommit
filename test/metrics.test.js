@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { minimizeMetric, recordMetric, runMetricsCommand } from '../src/metrics.js';
+import {
+  minimizeMetric,
+  readMetricRecords,
+  recordMetric,
+  runMetricsCommand,
+  runStatsCommand,
+  summarizeMetrics,
+} from '../src/metrics.js';
 
 test('metric minimization uses a strict privacy allowlist', () => {
   const metric = minimizeMetric({
@@ -86,5 +93,113 @@ test('metrics command can disable, enable, inspect, and irreversibly clear local
 
   const cleared = await runMetricsCommand('clear', { home: root, userConfigPath });
   assert.equal(cleared.count, 1);
+  assert.equal(existsSync(metricsFile), false);
+});
+
+test('stats summarizes acceptance, edits, rewrites, failures, latency, tokens, and quality trend', () => {
+  const successful = [
+    { result: 'committed', edited: true, rewrites: 0, durationMs: 100, usage: { totalTokens: 10 } },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 1,
+      durationMs: 200,
+      usage: { totalTokens: 20 },
+    },
+    { result: 'dry_run', edited: true, rewrites: 1, durationMs: 300, usage: { totalTokens: 30 } },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+      durationMs: 400,
+      usage: { totalTokens: 40 },
+    },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+      durationMs: 500,
+      usage: { totalTokens: 50 },
+    },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 1,
+      durationMs: 600,
+      usage: { totalTokens: 60 },
+    },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+      durationMs: 700,
+      usage: { totalTokens: 70 },
+    },
+    { result: 'dry_run', edited: false, rewrites: 0, durationMs: 800, usage: { totalTokens: 80 } },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+      durationMs: 900,
+      usage: { totalTokens: 90 },
+    },
+    {
+      result: 'committed',
+      edited: false,
+      rewrites: 0,
+      durationMs: 1000,
+      usage: { totalTokens: 100 },
+    },
+  ];
+  const stats = summarizeMetrics([
+    ...successful,
+    { result: 'provider', edited: false, rewrites: 0, durationMs: 1100, usage: null },
+  ]);
+  assert.equal(stats.runs, 11);
+  assert.equal(stats.outcomes.committed, 8);
+  assert.equal(stats.outcomes.dryRuns, 2);
+  assert.equal(stats.outcomes.acceptedFirstPass, 6);
+  assert.equal(stats.outcomes.edited, 2);
+  assert.equal(stats.outcomes.rewritten, 3);
+  assert.equal(stats.outcomes.rewriteCount, 3);
+  assert.equal(stats.outcomes.failed, 1);
+  assert.equal(stats.latency.p50Ms, 600);
+  assert.equal(stats.latency.p95Ms, 1100);
+  assert.equal(stats.tokens.total, 550);
+  assert.equal(stats.qualityTrend.baselineReady, true);
+  assert.equal(stats.qualityTrend.previous.rate, 60);
+  assert.equal(stats.qualityTrend.recent.rate, 20);
+  assert.ok(stats.qualityTrend.relativeImprovementPercent > 66);
+  assert.equal(stats.qualityTrend.targetMet, true);
+});
+
+test('stats command ignores malformed lines and reuses enable, disable, and clear controls', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-stats-command-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const userConfigPath = join(root, '.aicommit.config.json');
+  const metricsFile = join(root, 'metrics.jsonl');
+  await writeFile(
+    userConfigPath,
+    JSON.stringify({ metrics: { enabled: true, path: metricsFile, maxEntries: 20 } }),
+  );
+  await writeFile(
+    metricsFile,
+    JSON.stringify(minimizeMetric({ result: 'committed', durationMs: 25 })) +
+      '\n{malformed\n' +
+      JSON.stringify({ message: 'private', result: 'committed', durationMs: 35 }) +
+      '\n',
+  );
+  const loaded = await readMetricRecords(metricsFile);
+  assert.equal(loaded.records.length, 2);
+  assert.equal(loaded.invalid, 1);
+  assert.doesNotMatch(JSON.stringify(loaded.records), /private|message/);
+
+  const report = await runStatsCommand('show', { home: root, userConfigPath });
+  assert.equal(report.invalid, 1);
+  assert.equal(report.stats.runs, 2);
+  assert.equal(report.stats.outcomes.acceptedFirstPass, 2);
+  assert.equal((await runStatsCommand('disable', { home: root, userConfigPath })).enabled, false);
+  assert.equal((await runStatsCommand('enable', { home: root, userConfigPath })).enabled, true);
+  assert.equal((await runStatsCommand('clear', { home: root, userConfigPath })).count, 3);
   assert.equal(existsSync(metricsFile), false);
 });

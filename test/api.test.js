@@ -400,13 +400,14 @@ test('Anthropic-format response (content[0].text) is used without a follow-up', 
   assert.equal(calls.length, 1);
 });
 
-test('non-conventional reply triggers a corrective retry without re-sending the diff', async () => {
+test('non-conventional reply triggers one counted corrective retry without re-sending the diff', async () => {
   const calls = stubFetch([
     { choices: [{ message: { content: 'Updated the login page styling.' } }] },
     { choices: [{ message: { content: 'style: update login page styling' } }] },
   ]);
-  const { message } = await generateCommitMessage(cfg(), diff);
+  const { message, corrections } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'style: update login page styling');
+  assert.equal(corrections, 1);
   assert.equal(calls.length, 2, 'one corrective retry was made');
   const retry = calls[1].messages;
   assert.equal(retry[0].role, 'system', 'system prompt kept for language/format constraints');
@@ -441,8 +442,9 @@ test('empty corrective retry rejects the original invalid reply', async () => {
 
 test('valid conventional reply makes no corrective retry', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'fix(api): handle empty diff' } }] }]);
-  const { message } = await generateCommitMessage(cfg(), diff);
+  const { message, corrections } = await generateCommitMessage(cfg(), diff);
   assert.equal(message, 'fix(api): handle empty diff');
+  assert.equal(corrections, 0);
   assert.equal(calls.length, 1);
 });
 
