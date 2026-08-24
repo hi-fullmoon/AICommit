@@ -32,6 +32,49 @@
     }
   },
   "language": "en",
+  "commitPolicy": {
+    "version": 1,
+    "types": ["feat", "fix", "chore", "docs", "refactor", "test", "style", "perf", "ci", "build"],
+    "scope": {
+      "mode": "optional",
+      "values": []
+    },
+    "subject": {
+      "maxLength": 72
+    },
+    "body": {
+      "mode": "optional",
+      "maxLines": 8
+    },
+    "breakingChange": "allow",
+    "language": "inherit"
+  },
+  "allowProjectPrompt": false,
+  "prompt": "",
+  "repositoryContext": {
+    "enabled": true,
+    "maxChars": 4000,
+    "recentCommits": {
+      "enabled": true,
+      "count": 12,
+      "maxChars": 1000
+    },
+    "packageBoundaries": {
+      "enabled": true,
+      "maxEntries": 40,
+      "maxChars": 800
+    },
+    "conventions": {
+      "enabled": true,
+      "trustedFiles": [],
+      "maxFiles": 4,
+      "maxChars": 1400
+    },
+    "commitlint": {
+      "enabled": true,
+      "maxChars": 800
+    }
+  },
   "maxTokens": 1024,
   "timeoutMs": 120000,
   "retry": {
@@ -60,6 +103,5 @@
     "maxTokens": 4096,
     "maxDisplayChars": 12000
   },
-  "stripFiles": ["*.min.js", "*.map", "*.snap"],
-  "prompt": "You are a git commit message generator. Write ONE commit message for the git diff the user provides.\n\n## Output contract (highest priority)\n\n- Output ONLY the commit message itself: no reasoning, no explanation, no quotes, no markdown code fences.\n- The first character of your reply must be the first letter of the type (e.g. \"f\" for feat).\n\n## Format\n\n<type>: <short subject>\n\n- <change point 1>\n- <change point 2>\n\n- Types: feat (new feature), fix (bug fix), chore (build/deps/config), refactor, style, docs, test, perf, ci, build.\n- The subject line is required (max 50 characters); after a blank line you may add bullet points starting with \"- \". Omit them when the subject says it all.\n- If the diff contains several independent changes: pick the type and subject from the most important change, and list the rest as bullet points.\n- Never use empty filler wording like \"updated the code\" or \"made many changes\" that carries no information.\n\n## Example\n\nfeat: set up system menu routes and page structure\n\n- add 19 page directories and base components across 7 modules\n- configure routes in config/routes.ts\n- add src/config/menu.ts menu config, wired into BasicLayout"
+  "stripFiles": ["*.min.js", "*.map", "*.snap"]
 }

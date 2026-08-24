@@ -22,7 +22,7 @@ aicommit setup
 
 It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
 
-To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `prompt`, `stripFiles`, `temperature`, and the diff/token/timeout limits, but limits may only lower user-configured ceilings. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and oversized prompts are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
+To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
 To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. Environment variables take priority over every other credential source and are recommended for CI and other stateless environments.
 
@@ -61,7 +61,7 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
 }
 ```
 
-The selected provider's values are deep-merged over the top-level keys, so shared settings (`language`, `prompt`, `temperature`, `maxTokens`, ...) only need to be set once. Without `-p`, the `defaultProvider` is used (or the first entry in `providers` if `defaultProvider` is omitted). A flat single-model config (top-level `apiUrl`/`apiKey`/`modelId`, no `providers`) still works as before.
+The selected provider's values are deep-merged over the top-level keys, so shared settings (`language`, `commitPolicy`, `temperature`, `maxTokens`, ...) only need to be set once. Without `-p`, the `defaultProvider` is used (or the first entry in `providers` if `defaultProvider` is omitted). A flat single-model config (top-level `apiUrl`/`apiKey`/`modelId`, no `providers`) still works as before.
 
 | Key                  | Description                                                                                                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -72,7 +72,10 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `apiKeyEnv`          | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                 |
 | `modelId`            | Model identifier                                                                                                                                                                                                             |
 | `providerType`       | Optional adapter override: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, or `custom`; otherwise inferred from the endpoint                                                                                        |
-| `prompt`             | System prompt (a sensible default is built in)                                                                                                                                                                               |
+| `commitPolicy`       | Versioned commit rules for types, scope, subject length, body, breaking changes, and language                                                                                                                                |
+| `prompt`             | Optional user-approved guidance appended to the authoritative structured policy (default: empty)                                                                                                                             |
+| `allowProjectPrompt` | User-owned opt-in for accepting `prompt` from project config (default: `false`)                                                                                                                                              |
+| `repositoryContext`  | Total and per-category budgets for recent commits, package boundaries, trusted conventions, and commitlint detection                                                                                                         |
 | `language`           | Commit message language, `zh` or `en` (default: `zh`)                                                                                                                                                                        |
 | `temperature`        | Sampling temperature (default: `0.3`)                                                                                                                                                                                        |
 | `maxTokens`          | Max response tokens (default: `1024`)                                                                                                                                                                                        |
@@ -92,6 +95,42 @@ The selected provider's values are deep-merged over the top-level keys, so share
 
 Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
 
+### Repository policy and bounded context
+
+The default generation contract is structured and versioned instead of being embedded in a free-form prompt. A user config can replace declaration arrays such as `types` and `scope.values` to make them stricter:
+
+```json
+{
+  "commitPolicy": {
+    "version": 1,
+    "types": ["feat", "fix", "docs", "refactor", "test", "chore"],
+    "scope": { "mode": "optional", "values": ["api", "cli"] },
+    "subject": { "maxLength": 72 },
+    "body": { "mode": "optional", "maxLines": 8 },
+    "breakingChange": "allow",
+    "language": "inherit"
+  },
+  "allowProjectPrompt": false,
+  "repositoryContext": {
+    "enabled": true,
+    "maxChars": 4000,
+    "recentCommits": { "enabled": true, "count": 12, "maxChars": 1000 },
+    "packageBoundaries": { "enabled": true, "maxEntries": 40, "maxChars": 800 },
+    "conventions": {
+      "enabled": true,
+      "trustedFiles": ["CONTRIBUTING.md"],
+      "maxFiles": 4,
+      "maxChars": 1400
+    },
+    "commitlint": { "enabled": true, "maxChars": 800 }
+  }
+}
+```
+
+Each context category and the whole feature can be disabled independently. `conventions.trustedFiles` is accepted only from user-owned config; paths must stay inside the repository and resolve to regular, non-symlinked files. Project config can disable sources or lower existing ceilings, but cannot add trusted files, re-enable a user-disabled source, or raise any budget. Recognized scalar commitlint rules can set repository-specific types/scopes and lower the subject limit; commitlint files are read as data and never executed. Before a provider call, the terminal shows the categories, counts, and total characters selected.
+
+Generated candidates are checked locally for policy format, type/scope, subject and body limits, breaking-change markers, and explicit language. A hard failure gets at most one low-cost correction request without re-sending the diff. Keyword/path alignment with the bounded diff is reported as an advisory warning because it is heuristic.
+
 ### Provider reliability
 
 Every provider adapter maps the same generation contract: messages, streaming, reasoning controls, output-token budget, normalized usage (`inputTokens`, `outputTokens`, `totalTokens`), and finish reason. Endpoint detection normally selects the adapter; set `providerType` when a compatible service uses a custom domain.
@@ -105,6 +144,7 @@ Token spend per call is dominated by the diff; aicommit already strips lock file
 - Add generated artifacts to `stripFiles` (e.g. `["*.min.js", "*.map", "*.snap"]`) — their content is replaced with a one-line stub.
 - Lower `maxDiffChars` (e.g. `15000`) if your commits are usually small.
 - `diffContextLines` defaults to `1`; set it to `0` to send only changed lines with no context.
+- Lower or disable individual `repositoryContext` categories when their style signal is not useful for your repository.
 
 ## Privacy and data flow
 
@@ -115,14 +155,17 @@ Commit-generation requests can contain:
 - the configured system prompt and requested commit language;
 - changed file paths/statuses and the staged diff in normal mode;
 - changed file paths/statuses, tracked diffs, and bounded text previews of untracked files in split mode;
+- bounded recent commit subjects, package boundaries, explicitly trusted convention excerpts, and recognized commitlint constraints when their context categories are enabled;
 - the previous generated message when asking for a lower-cost rewrite;
 - a small fixed prompt when running `aicommit --check`.
 
-AICommit does not intentionally send unrelated repository files, Git history, environment variables, or its local configuration file. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection is a guardrail, not a complete secret scanner.
+AICommit does not intentionally send unrelated repository files, historical commit bodies, environment variables, or its local configuration file. Every selected diff, path list, history sample, preview, and convention excerpt is placed inside an explicit JSON envelope marked as untrusted data; the authoritative system policy instructs the model never to follow embedded repository instructions. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection and prompt boundaries are guardrails, not complete secret or prompt-injection defenses.
 
 Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, retry policy, metrics, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` or the OS-backed Git credential helper for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
 
-Successful and failed commit runs write a minimal local JSONL metric by default to `~/.aicommit/metrics.jsonl`. Each record contains exactly duration, normalized token usage, a bounded result category, whether the message was edited, and the rewrite count. It never contains the diff, reasoning, commit message, file names, provider, model, or credentials. The file retains the newest 500 records by default and is written with owner-only permissions where supported. Use `aicommit metrics status|clear|enable|disable`; clearing is permanent. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings.
+Successful and failed commit runs write a minimal local JSONL metric by default to `~/.aicommit/metrics.jsonl`. Each record contains exactly duration, normalized token usage, a bounded result category, whether the message was edited, and the rewrite count (including automatic policy correction). It never contains the diff, reasoning, commit message, file names, provider, model, or credentials. The file retains the newest 500 records by default and is written with owner-only permissions where supported.
+
+Use `aicommit stats` to view first-pass acceptance, edit/rewrite/failure rates, P50/P95 latency, token totals, and recent-vs-previous trends. After ten successful runs it compares two chronological baseline windows and reports progress toward the roadmap's 20% relative edit/rewrite-rate improvement target. `aicommit stats clear|enable|disable` manages the same local store; clearing is permanent. The lower-level `aicommit metrics status|clear|enable|disable` commands remain available. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings, and there is no upload implementation.
 
 ## Usage
 
@@ -130,6 +173,8 @@ Successful and failed commit runs write a minimal local JSONL metric by default 
 aicommit setup           # interactive configuration wizard
 aicommit doctor          # diagnose runtime, config, credentials, and connectivity
 aicommit metrics status  # inspect local metrics state without uploading anything
+aicommit stats           # show local quality, latency, and token trends
+aicommit stats clear     # permanently clear local metric history
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
@@ -241,7 +286,7 @@ Current split behavior is file-level: one file cannot be divided across multiple
 
 ## Development and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, and [RELEASING.md](RELEASING.md) for SemVer, release notes, tags, npm Trusted Publishing, provenance, and rollback procedures.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, and [RELEASING.md](RELEASING.md) for SemVer, release notes, tags, npm Trusted Publishing, provenance, and rollback procedures. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
 
 ## License
 

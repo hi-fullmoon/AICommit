@@ -25,7 +25,7 @@ npm run test:package
 npm audit --omit=dev
 ```
 
-`npm run ci` runs ESLint, verifies Prettier formatting, executes the tests, writes a coverage report, and enforces at least 70% line coverage. Use `npm run format` to apply the repository style.
+`npm run ci` runs ESLint, verifies Prettier formatting, enforces the anonymous local quality eval at 99% or better, executes the tests, writes a coverage report, and enforces at least 70% line coverage. Use `npm run format` to apply the repository style.
 
 Tests that manipulate Git should create a temporary repository and clean it up. Provider integration tests must use a local stub server or fixtures; routine tests must not call paid or remote model APIs. Add regression coverage for security boundaries, Git restoration, non-interactive behavior, and cross-platform path handling when relevant.
 

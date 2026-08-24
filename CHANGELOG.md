@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-24
+
+### Added
+
+- Versioned `commitPolicy` rules for types, scopes, subject length, body, breaking changes, and language.
+- Strictly bounded repository context from recent commit subjects, package boundaries, user-trusted convention files, and statically recognized commitlint rules.
+- `aicommit stats` for local first-pass acceptance, edit/rewrite/failure rates, latency, token trends, and the 20% quality-improvement baseline; stats can be disabled or permanently cleared.
+- Anonymous local eval coverage for single/mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates, enforced in CI at 99% or better.
+
+### Changed
+
+- Replaced the default free-form prompt contract with an authoritative structured policy; user guidance is additive, and project-owned prompts now require the user-owned `allowProjectPrompt` opt-in.
+- Commit generation now shows a bounded context summary before the provider request and allows every repository-context category to be disabled independently.
+- Candidate responses are validated locally for policy compliance and diff/path alignment; hard policy failures receive at most one low-cost correction without re-sending the diff.
+- Automatic policy corrections now contribute to the anonymous local rewrite metric.
+
+### Security
+
+- Diff, file, path, history, and convention inputs now use explicit JSON envelopes marked as untrusted data, backed by a prompt-injection regression corpus.
+- Project config can only disable repository context or lower user-owned ceilings; it cannot add trusted convention files, re-enable sources, expand budgets, or alter endpoints and credentials.
+- Trusted convention reads reject paths outside the repository, symbolic links, and non-regular files; commitlint configuration is parsed as data and never executed.
+
 ## [1.1.0] - 2026-08-24
 
 ### Added
@@ -43,6 +65,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - File-level split planning and execution with Git-state concurrency checks.
 - Provider presets and user/project configuration trust boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.0.0

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest published `1.0.x` release. After a newer minor line is published, only its latest patch is supported unless a release note says otherwise.
+Security fixes are provided for the latest published `1.x` release. After a newer minor line is published, only its latest patch is supported unless a release note says otherwise.
 
 ## Reporting a vulnerability
 
@@ -18,6 +18,8 @@ AICommit is a local CLI that sends selected repository context directly to the c
 
 - the Git index and worktree must not be overwritten when concurrent changes make restoration uncertain;
 - cloned project configuration must not redirect credentials, change provider controls, or increase user-owned data/cost limits;
+- repository-owned prompts require a user-owned opt-in, while trusted convention paths can only come from user config;
+- diff, path, history, preview, and convention content must remain marked as untrusted model data and never gain instruction authority;
 - untrusted diff, file, model, and reasoning text must not execute terminal control sequences;
 - common sensitive content should be detected and protected before the default model request;
 - remote endpoints must use HTTPS, while plaintext HTTP is limited to loopback development services.
