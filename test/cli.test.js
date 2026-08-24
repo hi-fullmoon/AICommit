@@ -6,12 +6,19 @@ import { parseArgs } from '../src/cli.js';
 test('parseArgs recognizes dry-run in normal and split modes', () => {
   const normal = parseArgs(['--dry-run', '/tmp/repo']);
   assert.equal(normal.dryRun, true);
-  assert.equal(normal.split, false);
+  assert.equal(normal.split, null);
   assert.equal(normal.targetPath, '/tmp/repo');
 
   const split = parseArgs(['--split', '--dry-run']);
   assert.equal(split.dryRun, true);
-  assert.equal(split.split, true);
+  assert.equal(split.split, 'prompt');
+});
+
+test('parseArgs requires an explicit staged/all scope for non-interactive split', () => {
+  assert.equal(parseArgs(['--split=staged', '--yes']).split, 'staged');
+  assert.equal(parseArgs(['--split=all', '--yes']).split, 'all');
+  assert.throws(() => parseArgs(['--split=other']), /Invalid split scope/);
+  assert.throws(() => parseArgs(['--split', '--yes']), /requires an explicit scope/);
 });
 
 test('parseArgs keeps dry-run disabled by default and for setup', () => {
@@ -22,7 +29,7 @@ test('parseArgs keeps dry-run disabled by default and for setup', () => {
 
 test('parseArgs recognizes explicit non-interactive confirmation', () => {
   assert.equal(parseArgs(['--yes']).yes, true);
-  assert.equal(parseArgs(['-y', '--split']).yes, true);
+  assert.equal(parseArgs(['-y', '--split=all']).yes, true);
   assert.equal(parseArgs(['--yes', '--dry-run']).dryRun, true);
   assert.equal(parseArgs([]).yes, false);
 });

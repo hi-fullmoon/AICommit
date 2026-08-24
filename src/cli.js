@@ -29,7 +29,8 @@ function showHelp() {
     -v, --version         Show version number
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
-    -s, --split           Split changes into multiple logical commits
+    -s, --split           Choose a split scope interactively
+    --split=<scope>       Split staged changes or all changes: staged, all
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
@@ -46,7 +47,9 @@ function showHelp() {
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
-    aicommit --split      Group changes into several logical commits
+    aicommit --split      Choose staged/all scope, then plan logical commits
+    aicommit --split=staged  Split only the reviewed index snapshot
+    aicommit --split=all --yes  Split the complete working tree non-interactively
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit --yes        Commit already staged changes without prompts
@@ -80,7 +83,7 @@ function parsedDefaults(overrides = {}) {
     cliReasoning: null,
     output: 'text',
     debug: false,
-    split: false,
+    split: null,
     dryRun: false,
     yes: false,
     check: false,
@@ -138,7 +141,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let cliReasoning = null;
   let output = 'text';
   let debug = false;
-  let split = false;
+  let split = null;
   let dryRun = false;
   let yes = false;
   let check = false;
@@ -175,7 +178,18 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
 
     if (arg === '-s' || arg === '--split') {
-      split = true;
+      split = 'prompt';
+      continue;
+    }
+
+    if (arg.startsWith('--split=')) {
+      split = arg.slice('--split='.length);
+      if (!['staged', 'all'].includes(split)) {
+        throw fail(
+          ERROR_CATEGORIES.CONFIG,
+          `Invalid split scope: "${split}". Use staged or all.`,
+        );
+      }
       continue;
     }
 
@@ -267,6 +281,12 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
   if (!['text', 'json'].includes(output)) {
     throw fail(ERROR_CATEGORIES.CONFIG, `Invalid output mode: "${output}". Use text or json.`);
+  }
+  if (split === 'prompt' && yes) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'Non-interactive split requires an explicit scope: use --split=staged or --split=all.',
+    );
   }
   if (doctor && (targetPath || cliLang || cliReasoning || split || dryRun || yes || check)) {
     throw fail(

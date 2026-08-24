@@ -216,7 +216,7 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
-test('single-file --split --yes keeps split semantics and stages the worktree change', async (t) => {
+test('single-file --split=all --yes keeps split semantics and stages the worktree change', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-one-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -259,14 +259,14 @@ test('single-file --split --yes keeps split semantics and stages the worktree ch
     }),
   );
 
-  const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
+  const result = await runCli(repo, home, ['--split=all', '--yes', '--no-reasoning']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Split plan: 1 commit/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: commit one split file');
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
-test('--split --yes scans complete untracked files before auto-staging', async (t) => {
+test('--split=all --yes scans complete untracked files before auto-staging', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-sensitive-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -297,7 +297,7 @@ test('--split --yes scans complete untracked files before auto-staging', async (
     }),
   );
 
-  const result = await runCli(repo, home, ['--split', '--yes', '--no-reasoning']);
+  const result = await runCli(repo, home, ['--split=all', '--yes', '--no-reasoning']);
   assert.equal(result.code, 7, result.stdout + result.stderr);
   assert.equal(requests, 0);
   assert.match(result.stdout, /will not auto-stage sensitive files/);
@@ -498,7 +498,7 @@ test('--output=json returns the split plan without reasoning or terminal decorat
   );
 
   const result = await runCli(repo, home, [
-    '--split',
+    '--split=all',
     '--yes',
     '--dry-run',
     '--no-reasoning',

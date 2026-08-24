@@ -306,6 +306,7 @@ export async function main() {
 
   if (split) {
     const handled = await splitFlow(config, projectRoot, {
+      scope: split,
       dryRun,
       yes,
       machineOutput,
