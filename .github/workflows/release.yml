@@ -45,6 +45,7 @@ jobs:
             --tarball "dist/aicommit-${VERSION}.tgz" \
             --sbom "dist/aicommit-${VERSION}.spdx.json" \
             --output dist
+          cmp dist/aicommit.rb Formula/aicommit.rb
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
       - name: Sign release assets with GitHub build provenance
         id: provenance

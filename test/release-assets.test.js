@@ -112,8 +112,23 @@ test('release and CI workflows preserve signed npm and Homebrew distribution gat
   assert.match(release, /uses: actions\/attest@v4/g);
   assert.match(release, /npm publish "dist\/aicommit-\$\{VERSION\}\.tgz" --provenance/);
   assert.match(release, /gh release upload/);
+  assert.match(release, /cmp dist\/aicommit\.rb Formula\/aicommit\.rb/);
   assert.match(release, /brew install --formula Formula\/aicommit\.rb/);
   assert.match(ci, /homebrew-smoke:/);
   assert.match(ci, /AICOMMIT_HOMEBREW_SMOKE: '1'/);
   assert.equal(manifest.publishConfig.provenance, true);
+});
+
+test('release, rollback, verification, and preset compatibility docs remain executable', async () => {
+  const distribution = await readFile(new URL('../docs/distribution.md', import.meta.url), 'utf8');
+  const presets = await readFile(new URL('../docs/provider-presets.md', import.meta.url), 'utf8');
+  const releasing = await readFile(new URL('../RELEASING.md', import.meta.url), 'utf8');
+  assert.match(distribution, /npm audit signatures/);
+  assert.match(distribution, /brew upgrade hi-fullmoon\/aicommit\/aicommit/);
+  assert.match(distribution, /gh attestation verify/);
+  assert.match(distribution, /brew install --formula \/tmp\/aicommit-rollback\/aicommit\.rb/);
+  assert.match(presets, /"coreMinimum": "1\.4\.0"/);
+  assert.match(presets, /aicommit preset rollback/);
+  assert.match(releasing, /git verify-tag vX\.Y\.Z/);
+  assert.match(releasing, /AICOMMIT_HOMEBREW_SMOKE=1/);
 });

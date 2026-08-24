@@ -4,15 +4,26 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-24
+
 ### Added
 
+- Credential-free `aicommit config show|validate|path` inspection and generated Bash, Zsh, and Fish completion.
+- Strict repository-owned team policy template plus deterministic local/CI `policy check` commands and bilingual migration examples.
+- Independently updateable, versioned provider preset manifests with core/adapter compatibility declarations, atomic install, repair, and rollback.
 - Credential-denied extension API v1 with isolated context-provider, message-validator, and provider-adapter interfaces, a strict manifest schema, and bilingual executable documentation.
 - Signed GitHub release assets with SHA-256 checksums, SPDX SBOM, GitHub OIDC/Sigstore attestations, npm Trusted Publishing provenance, and a generated Homebrew formula.
 - Automated npm/Homebrew installation smoke paths plus bilingual distribution, troubleshooting, privacy, and provider-compatibility guides.
 
+### Changed
+
+- Interactive setup now consumes the active provider preset manifest instead of a hard-coded provider list.
+- Provider request orchestration accepts asynchronous built-in or extension adapters without changing the Git and interaction flows.
+
 ### Security
 
 - Third-party extension code runs in a permissioned child process with a sanitized environment and no credential value; project config cannot enable extensions, v1 rejects credential permission requests, and Node.js 18 never falls back to unsandboxed execution.
+- Team policy, config inspection, and preset management never resolve provider credentials; preset and extension manifests reject credential-bearing fields, unsafe paths, and incompatible contracts.
 
 ## [1.3.0] - 2026-08-24
 
@@ -96,7 +107,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - File-level split planning and execution with Git-state concurrency checks.
 - Provider presets and user/project configuration trust boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/hi-fullmoon/AICommit/compare/v1.0.0...v1.1.0

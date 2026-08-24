@@ -20,7 +20,7 @@ import {
 } from '../src/provider-presets.js';
 
 const bundledPresetLoader = () =>
-  loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.3.0' });
+  loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.4.0' });
 
 const entry = {
   apiUrl: 'https://api.deepseek.com/v1/chat/completions',

@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "version": "1.0.0",
   "compatibility": {
-    "coreMinimum": "1.3.0",
+    "coreMinimum": "1.4.0",
     "coreMaximumExclusive": "2.0.0",
     "adapterContract": 1
   },
