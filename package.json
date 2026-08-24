@@ -75,6 +75,11 @@
     "access": "public",
     "provenance": true
   },
+  "overrides": {
+    "c8": {
+      "test-exclude": "7.0.1"
+    }
+  },
   "engines": {
     "node": ">=18"
   },
