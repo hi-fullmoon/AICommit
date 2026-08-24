@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -355,6 +355,17 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   assert.doesNotMatch(result.stdout, /private reasoning|AI-powered|Calling/);
   assert.match(result.stderr, /AI-powered commit message generator/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: expose stable machine output');
+  const metricText = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8');
+  const metric = JSON.parse(metricText.trim());
+  assert.deepEqual(Object.keys(metric), ['durationMs', 'usage', 'result', 'edited', 'rewrites']);
+  assert.equal(metric.result, 'committed');
+  assert.equal(metric.edited, false);
+  assert.equal(metric.rewrites, 0);
+  assert.deepEqual(metric.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+  assert.doesNotMatch(
+    metricText,
+    /stable machine output|private reasoning|app\.js|local-test-model|custom/,
+  );
 });
 
 test('--output=json returns the split plan without reasoning or terminal decoration', async (t) => {

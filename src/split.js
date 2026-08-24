@@ -879,6 +879,8 @@ export async function splitFlow(
 
   // Review / edit / regenerate loop
   let regenCounts = groups.map(() => 0);
+  let planEdited = false;
+  let rewriteCount = 0;
 
   while (true) {
     displayPlan(groups, allFiles);
@@ -933,6 +935,7 @@ export async function splitFlow(
       if (edited) {
         groups = edited;
         regenCounts = groups.map(() => 0);
+        planEdited = true;
       }
       continue; // show the (possibly updated) plan again
     }
@@ -1016,6 +1019,7 @@ export async function splitFlow(
           rspinner.succeed(done);
           reasoningText = reasoning;
           groups[idx] = { ...groups[idx], message };
+          rewriteCount++;
         } catch (err) {
           if (liveGroupReasoning) await liveGroupReasoning.stop();
           regenCounts[idx]--;
@@ -1042,6 +1046,8 @@ export async function splitFlow(
       warnings,
       exitReason: 'dry_run',
       committed: false,
+      edited: planEdited,
+      rewrites: rewriteCount,
     };
   }
 
@@ -1076,5 +1082,7 @@ export async function splitFlow(
     warnings,
     exitReason: 'success',
     committed: true,
+    edited: planEdited,
+    rewrites: rewriteCount,
   };
 }

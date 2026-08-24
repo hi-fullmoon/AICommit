@@ -18,6 +18,7 @@ function showHelp() {
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
     doctor                Diagnose runtime, config, credentials, and connectivity
+    metrics [action]      Manage local metrics: status, clear, enable, disable
 
   ${chalk.bold('Arguments:')}
     path                  Target directory (default: current directory)
@@ -80,6 +81,7 @@ function parsedDefaults(overrides = {}) {
     check: false,
     setup: false,
     doctor: false,
+    metricsAction: null,
     help: false,
     version: false,
     ...overrides,
@@ -97,6 +99,17 @@ export function parseArgs(args = process.argv.slice(2)) {
       );
     }
     return parsedDefaults({ setup: true });
+  }
+
+  if (args[0] === 'metrics') {
+    const action = args[1] || 'status';
+    if (args.length > 2 || !['status', 'clear', 'enable', 'disable'].includes(action)) {
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'metrics accepts one action: status, clear, enable, or disable.',
+      );
+    }
+    return parsedDefaults({ metricsAction: action });
   }
 
   const doctor = args[0] === 'doctor';
@@ -258,6 +271,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     check,
     setup,
     doctor,
+    metricsAction: null,
     help: false,
     version: false,
   };

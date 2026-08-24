@@ -46,6 +46,7 @@ import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
+import { configureMetrics, runMetricsCommand } from './metrics.js';
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
@@ -63,11 +64,16 @@ export async function main() {
     check,
     setup,
     doctor,
+    metricsAction,
     help,
     version,
   } = parseArgs();
 
   if (help || version) return { exitReason: help ? 'help' : 'version' };
+  if (metricsAction) {
+    await runMetricsCommand(metricsAction);
+    return { exitReason: `metrics_${metricsAction}` };
+  }
 
   const machineOutput = output === 'json';
   if (machineOutput && !yes && !check && !doctor) {
@@ -234,6 +240,8 @@ export async function main() {
       throw err;
     }
   }
+
+  configureMetrics(config.metrics);
 
   // An empty apiKey is valid for local, keyless endpoints (Ollama, LM Studio,
   // LiteLLM); the request layer omits the Authorization header for them, so a
@@ -616,6 +624,7 @@ export async function main() {
 
   let message, elapsed, usage, reasoningText;
   let regenerateCount = 0;
+  let wasEdited = false;
 
   while (true) {
     const spinner = ora({
@@ -712,6 +721,7 @@ export async function main() {
       const edited = await editMessage(message);
       if (edited) {
         message = edited;
+        wasEdited = true;
         break; // proceed to commit with edited message
       }
       // User cancelled during edit — exit
@@ -758,6 +768,8 @@ export async function main() {
       warnings,
       exitReason: 'dry_run',
       committed: false,
+      edited: wasEdited,
+      rewrites: regenerateCount,
     };
   }
 
@@ -795,6 +807,8 @@ export async function main() {
       warnings,
       exitReason: 'success',
       committed: true,
+      edited: wasEdited,
+      rewrites: regenerateCount,
     };
   } catch (err) {
     const restored = indexTransaction ? indexTransaction.restore() : false;

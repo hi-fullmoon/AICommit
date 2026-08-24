@@ -38,6 +38,7 @@ test('project config cannot override connection/provider settings or raise cost 
     extraBody: { arbitrary: true },
     retry: { maxAttempts: 10 },
     credentialHelper: { enabled: true },
+    metrics: { enabled: false },
     maxTokens: DEFAULT_CONFIG.maxTokens + 1,
     reasoning: { mode: 'on', maxTokens: 999999 },
     language: 'en',
@@ -53,6 +54,7 @@ test('project config cannot override connection/provider settings or raise cost 
     'defaultProvider',
     'extraBody',
     'maxTokens',
+    'metrics',
     'modelId',
     'providerType',
     'providers',
@@ -145,5 +147,22 @@ test('validateConfig validates credential helper settings', () => {
         }),
       ),
     /credentialHelper\.username/,
+  );
+});
+
+test('validateConfig validates local metric settings', () => {
+  assert.equal(validateConfig(cfg()).metrics.enabled, true);
+  assert.throws(() => validateConfig(cfg({ metrics: null })), /metrics/);
+  assert.throws(
+    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, enabled: 'yes' } })),
+    /metrics\.enabled/,
+  );
+  assert.throws(
+    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, path: 'relative.jsonl' } })),
+    /metrics\.path/,
+  );
+  assert.throws(
+    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, maxEntries: 0 } })),
+    /maxEntries/,
   );
 });

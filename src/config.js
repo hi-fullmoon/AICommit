@@ -1,13 +1,14 @@
 import { readFile, chmod } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import chalk from 'chalk';
 
 import { fileExists, deepMerge } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { resolveCredential } from './credentials.js';
+import { DEFAULT_METRICS } from './metrics.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -24,6 +25,7 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'extraBody',
   'retry',
   'credentialHelper',
+  'metrics',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
@@ -110,6 +112,8 @@ export const DEFAULT_CONFIG = {
     enabled: false,
     username: 'aicommit',
   },
+  // Minimal local-only run metrics. There is deliberately no upload target.
+  metrics: { ...DEFAULT_METRICS },
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
   // change set doesn't burn tokens on lines the model doesn't need.
@@ -281,6 +285,18 @@ export function validateConfig(config) {
       'Invalid config "providerType": expected openai, openrouter, deepseek, minimax, ollama, custom, or "".',
     );
   }
+  if (!config.metrics || typeof config.metrics !== 'object' || Array.isArray(config.metrics)) {
+    throw new Error('Invalid config "metrics": expected an object.');
+  }
+  if (typeof config.metrics.enabled !== 'boolean') {
+    throw new Error('Invalid config "metrics.enabled": expected a boolean.');
+  }
+  if (
+    typeof config.metrics.path !== 'string' ||
+    (config.metrics.path && !isAbsolute(config.metrics.path))
+  ) {
+    throw new Error('Invalid config "metrics.path": expected an absolute path or "".');
+  }
   if (
     typeof config.apiKeyEnv !== 'string' ||
     (config.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.apiKeyEnv))
@@ -356,6 +372,7 @@ export function validateConfig(config) {
   assertNumber(config.retry, 'maxAttempts', { integer: true, min: 1, max: 10 });
   assertNumber(config.retry, 'baseDelayMs', { integer: true, min: 0, max: 60000 });
   assertNumber(config.retry, 'maxDelayMs', { integer: true, min: 0, max: 300000 });
+  assertNumber(config.metrics, 'maxEntries', { integer: true, min: 1, max: 10000 });
   if (config.retry.maxDelayMs < config.retry.baseDelayMs) {
     throw new Error('Invalid config "retry.maxDelayMs": must be >= retry.baseDelayMs.');
   }

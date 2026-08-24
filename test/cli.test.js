@@ -50,3 +50,12 @@ test('parseArgs recognizes doctor and restricts it to diagnostic options', () =>
   assert.throws(() => parseArgs(['doctor', '--yes']), /doctor accepts only/);
   assert.equal(parseArgs([]).doctor, false);
 });
+
+test('parseArgs recognizes local metrics management actions', () => {
+  assert.equal(parseArgs(['metrics']).metricsAction, 'status');
+  assert.equal(parseArgs(['metrics', 'clear']).metricsAction, 'clear');
+  assert.equal(parseArgs(['metrics', 'enable']).metricsAction, 'enable');
+  assert.equal(parseArgs(['metrics', 'disable']).metricsAction, 'disable');
+  assert.throws(() => parseArgs(['metrics', 'upload']), /metrics accepts one action/);
+  assert.equal(parseArgs([]).metricsAction, null);
+});
