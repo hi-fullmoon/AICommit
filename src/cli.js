@@ -39,6 +39,8 @@ function showHelp() {
 
   ${chalk.bold('Examples:')}
     aicommit setup        Run the interactive configuration wizard
+    aicommit doctor       Check runtime, config, credentials, and connectivity
+    aicommit metrics status  Show local-only metrics status and record count
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
@@ -46,6 +48,7 @@ function showHelp() {
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit --yes        Commit already staged changes without prompts
+    aicommit --yes --output=json  Emit one machine-readable result on stdout
     aicommit -c           Verify the configured (default) provider is reachable
     aicommit -c -p openrouter  Verify the "openrouter" provider is reachable
     aicommit /path/to    Commit changes in the specified directory

@@ -20,11 +20,13 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection. Provider credentials are written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
+It walks you through picking a provider (OpenAI, DeepSeek, OpenRouter, MiniMax, or a custom OpenAI-compatible endpoint), entering your API key and model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
 
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `prompt`, `stripFiles`, `temperature`, and the diff/token/timeout limits, but limits may only lower user-configured ceilings. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and oversized prompts are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
-To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. The named environment variable must be present when aicommit starts.
+To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. Environment variables take priority over every other credential source and are recommended for CI and other stateless environments.
+
+AICommit can also read from the Git credential helper already configured on your OS. Enable `credentialHelper.enabled`, store the provider credential through your normal Git/OS credential workflow, and AICommit will call `git credential fill` without prompting. The lookup username defaults to `aicommit` and can be changed with `credentialHelper.username`. Credential resolution order is environment variable → Git credential helper → plaintext user config → keyless localhost. A project config cannot enable a helper or select a credential source.
 
 Multiple providers can be defined and switched at runtime with `-p` / `--provider`:
 
@@ -34,8 +36,9 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
 
   "providers": {
     "minimax": {
+      "providerType": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
-      "apiKey": "sk-...",
+      "apiKeyEnv": "MINIMAX_API_KEY",
       "modelId": "MiniMax-M3",
       "extraBody": {
         "thinking": { "type": "disabled" },
@@ -43,13 +46,15 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
       }
     },
     "deepseek": {
+      "providerType": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "sk-...",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
       "modelId": "deepseek-v4-flash"
     },
     "openrouter": {
+      "providerType": "openrouter",
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "apiKey": "sk-or-v1-...",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
       "modelId": "openai/gpt-4o-mini"
     }
   }
@@ -66,11 +71,15 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `apiKey`             | API key (empty string allowed for local models)                                                                                                                                                                              |
 | `apiKeyEnv`          | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                 |
 | `modelId`            | Model identifier                                                                                                                                                                                                             |
+| `providerType`       | Optional adapter override: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, or `custom`; otherwise inferred from the endpoint                                                                                        |
 | `prompt`             | System prompt (a sensible default is built in)                                                                                                                                                                               |
 | `language`           | Commit message language, `zh` or `en` (default: `zh`)                                                                                                                                                                        |
 | `temperature`        | Sampling temperature (default: `0.3`)                                                                                                                                                                                        |
 | `maxTokens`          | Max response tokens (default: `1024`)                                                                                                                                                                                        |
 | `timeoutMs`          | Per-request timeout in milliseconds (default: `120000`)                                                                                                                                                                      |
+| `retry`              | Transient retry limits: `maxAttempts`, `baseDelayMs`, and `maxDelayMs` (defaults: `3`, `500`, and `5000`)                                                                                                                    |
+| `credentialHelper`   | Opt in to `git credential fill` with `enabled` and `username` (defaults: `false` and `aicommit`)                                                                                                                             |
+| `metrics`            | Local-only metrics controls: `enabled`, absolute `path` or empty for the default, and `maxEntries` (defaults: `true`, empty, and `500`)                                                                                      |
 | `maxDiffChars`       | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`)                                                                                                        |
 | `maxFileDiffChars`   | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`)                                                                        |
 | `splitMaxDiffChars`  | Diff chars sent to the split-planning call; split mode needs less hunk detail than final message generation (default: `16000`)                                                                                               |
@@ -81,7 +90,13 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `extraBody`          | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured                                        |
 | `reasoning`          | Reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically                                                                                       |
 
-Works with any OpenAI-compatible API: OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai) (use model IDs like `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `deepseek/deepseek-chat`), Ollama (`http://localhost:11434/v1/chat/completions`), LiteLLM, etc. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
+Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
+
+### Provider reliability
+
+Every provider adapter maps the same generation contract: messages, streaming, reasoning controls, output-token budget, normalized usage (`inputTokens`, `outputTokens`, `totalTokens`), and finish reason. Endpoint detection normally selects the adapter; set `providerType` when a compatible service uses a custom domain.
+
+Requests retry only transient failures: HTTP 429, recoverable 5xx responses, network interruption, and interrupted response bodies. Retries are bounded by `retry.maxAttempts`, use capped exponential backoff, and honor `Retry-After` when present. Authentication, invalid-parameter, and content-safety failures are returned immediately without retrying.
 
 ### Saving tokens
 
@@ -93,7 +108,7 @@ Token spend per call is dominated by the diff; aicommit already strips lock file
 
 ## Privacy and data flow
 
-AICommit has no hosted backend and does not upload telemetry. At runtime it only makes network requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
+AICommit has no hosted backend and no metrics-upload implementation. At runtime it only makes generation requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
 
 Commit-generation requests can contain:
 
@@ -105,12 +120,16 @@ Commit-generation requests can contain:
 
 AICommit does not intentionally send unrelated repository files, Git history, environment variables, or its local configuration file. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection is a guardrail, not a complete secret scanner.
 
-Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
+Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, retry policy, metrics, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` or the OS-backed Git credential helper for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
+
+Successful and failed commit runs write a minimal local JSONL metric by default to `~/.aicommit/metrics.jsonl`. Each record contains exactly duration, normalized token usage, a bounded result category, whether the message was edited, and the rewrite count. It never contains the diff, reasoning, commit message, file names, provider, model, or credentials. The file retains the newest 500 records by default and is written with owner-only permissions where supported. Use `aicommit metrics status|clear|enable|disable`; clearing is permanent. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings.
 
 ## Usage
 
 ```bash
 aicommit setup           # interactive configuration wizard
+aicommit doctor          # diagnose runtime, config, credentials, and connectivity
+aicommit metrics status  # inspect local metrics state without uploading anything
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit --split         # split changes into multiple logical commits
@@ -123,23 +142,71 @@ aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
 aicommit -p deepseek     # switch to the "deepseek" provider
+aicommit --yes --output=json # emit one schema-validated JSON result on stdout
 aicommit -c              # verify the configured LLM is reachable
 aicommit -c -p openrouter # verify the "openrouter" provider specifically
 aicommit -h              # help
 ```
 
-| Option             | Description                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                       |
-| `-p`, `--provider` | Use the named provider from `providers`                                                      |
-| `-s`, `--split`    | Split changes into multiple logical commits                                                  |
-| `--dry-run`        | Generate and review a message or split plan without creating commits                         |
-| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes                       |
-| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                      |
-| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it                    |
-| `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working (exit 0 on success, 1 on failure) |
-| `-v`, `--version`  | Show version                                                                                 |
-| `-h`, `--help`     | Show help                                                                                    |
+| Option             | Description                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                               |
+| `-p`, `--provider` | Use the named provider from `providers`                                                              |
+| `-s`, `--split`    | Split changes into multiple logical commits                                                          |
+| `--dry-run`        | Generate and review a message or split plan without creating commits                                 |
+| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes                               |
+| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                              |
+| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it                            |
+| `--output`         | `text` (default) or one JSON object; commit/split JSON flows require `--yes`                         |
+| `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working; failures use the stable classified exits |
+| `-v`, `--version`  | Show version                                                                                         |
+| `-h`, `--help`     | Show help                                                                                            |
+
+### Machine-readable output
+
+Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `--check --output=json` and `doctor --output=json` do not require `--yes`.
+
+```json
+{
+  "schemaVersion": "1.0",
+  "ok": true,
+  "message": "fix: handle provider retry limits",
+  "plan": null,
+  "provider": "openai",
+  "model": "gpt-4o",
+  "latencyMs": 842,
+  "usage": {
+    "inputTokens": 420,
+    "outputTokens": 18,
+    "totalTokens": 438
+  },
+  "warnings": [],
+  "exitReason": "dry_run",
+  "committed": false,
+  "error": null
+}
+```
+
+The published [JSON schema](schemas/aicommit-output.schema.json) covers success, split-plan, doctor/check, and error results. Machine output never includes the diff or model reasoning. Split output exposes only each group message and its assigned paths.
+
+Stable process exits are shared by text and JSON modes:
+
+| Exit  | Category                | Meaning                                       |
+| ----- | ----------------------- | --------------------------------------------- |
+| `0`   | success                 | Completed, previewed, or cancelled by policy  |
+| `1`   | internal                | Unexpected internal failure                   |
+| `2`   | config                  | Arguments, config, or credential setup        |
+| `3`   | git_state               | Repository, index, or commit state            |
+| `4`   | network                 | DNS, connection, timeout, or transport        |
+| `5`   | provider                | Provider HTTP/API failure                     |
+| `6`   | response_format         | Invalid or unusable model response            |
+| `7`   | sensitive_data          | Non-interactive safety boundary               |
+| `8`   | concurrent_modification | Protected Git state changed during generation |
+| `130` | interrupt               | Interrupted with Ctrl+C                       |
+
+### Diagnostics
+
+`aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Use `aicommit doctor -p <name>` to select a configured provider or `aicommit doctor --output=json` in automation.
 
 Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. If some changes are staged but others are not, aicommit asks whether to include the rest in this commit.
 

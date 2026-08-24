@@ -2,9 +2,9 @@
   "defaultProvider": "minimax",
   "providers": {
     "minimax": {
+      "providerType": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
-      "apiKey": "sk-your-minimax-key-here",
-      "apiKeyEnv": "",
+      "apiKeyEnv": "MINIMAX_API_KEY",
       "modelId": "MiniMax-M3",
       "extraBody": {
         "thinking": {
@@ -14,19 +14,40 @@
       }
     },
     "deepseek": {
+      "providerType": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "sk-your-deepseek-key-here",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
       "modelId": "deepseek-v4-flash"
     },
     "openrouter": {
+      "providerType": "openrouter",
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "apiKey": "sk-or-v1-your-openrouter-key-here",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
       "modelId": "openai/gpt-4o-mini"
+    },
+    "ollama": {
+      "providerType": "ollama",
+      "apiUrl": "http://127.0.0.1:11434/api/chat",
+      "modelId": "qwen3:8b"
     }
   },
   "language": "en",
   "maxTokens": 1024,
   "timeoutMs": 120000,
+  "retry": {
+    "maxAttempts": 3,
+    "baseDelayMs": 500,
+    "maxDelayMs": 5000
+  },
+  "credentialHelper": {
+    "enabled": false,
+    "username": "aicommit"
+  },
+  "metrics": {
+    "enabled": true,
+    "path": "",
+    "maxEntries": 500
+  },
   "maxDiffChars": 30000,
   "maxFileDiffChars": 3000,
   "splitMaxDiffChars": 16000,

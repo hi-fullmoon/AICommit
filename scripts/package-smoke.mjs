@@ -101,6 +101,7 @@ async function main() {
       'SECURITY.md',
       'bin/aicommit.js',
       'package.json',
+      'schemas/aicommit-output.schema.json',
       'src/main.js',
     ]) {
       assert.ok(packedPaths.has(expected), `published package is missing ${expected}`);
@@ -177,6 +178,31 @@ async function main() {
     assert.match(result.stdout, /Dry run complete/);
     assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
     assert.match(git(repo, ['diff', '--staged']), /value = 2/);
+
+    const jsonResult = await runCli(
+      entry,
+      ['--yes', '--dry-run', '--no-reasoning', '--output=json'],
+      {
+        cwd: repo,
+        env: {
+          ...process.env,
+          HOME: home,
+          USERPROFILE: home,
+          NO_COLOR: '1',
+          FORCE_COLOR: '0',
+        },
+      },
+    );
+    assert.equal(jsonResult.signal, null);
+    assert.equal(jsonResult.code, 0, jsonResult.stdout + jsonResult.stderr);
+    const machineOutput = JSON.parse(jsonResult.stdout);
+    assert.equal(machineOutput.schemaVersion, '1.0');
+    assert.equal(machineOutput.ok, true);
+    assert.equal(machineOutput.message, 'test: verify installed package dry run');
+    assert.equal(machineOutput.committed, false);
+    assert.equal(machineOutput.exitReason, 'dry_run');
+    assert.ok(!Object.hasOwn(machineOutput, 'diff'));
+    assert.ok(!Object.hasOwn(machineOutput, 'reasoning'));
 
     console.log(`Package smoke passed: ${packResult[0].filename}`);
   } finally {
