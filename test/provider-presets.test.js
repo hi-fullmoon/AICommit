@@ -30,6 +30,16 @@ test('bundled provider presets are strict, versioned, and core-compatible', asyn
   assert.equal(loaded.manifest.compatibility.adapterContract, 1);
   assert.ok(loaded.manifest.providers.length >= 5);
   assert.ok(loaded.manifest.providers.every((provider) => !Object.hasOwn(provider, 'apiKey')));
+  assert.deepEqual(
+    loaded.manifest.providers.find((provider) => provider.id === 'kimi-code'),
+    {
+      id: 'kimi-code',
+      label: 'Kimi Code',
+      adapter: 'custom',
+      apiUrl: 'https://api.kimi.com/coding/v1/chat/completions',
+      modelId: 'kimi-for-coding',
+    },
+  );
 
   const raw = JSON.parse(await readFile(BUNDLED_PROVIDER_PRESET_PATH, 'utf8'));
   assert.deepEqual(validateProviderPresetManifest(raw), loaded.manifest);

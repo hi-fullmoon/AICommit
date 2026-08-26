@@ -25,6 +25,12 @@
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "modelId": "openai/gpt-4o-mini"
     },
+    "kimi-code": {
+      "providerType": "custom",
+      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
+      "apiKeyEnv": "KIMI_API_KEY",
+      "modelId": "kimi-for-coding"
+    },
     "ollama": {
       "providerType": "ollama",
       "apiUrl": "http://127.0.0.1:11434/api/chat",

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Bundled Kimi Code setup preset and a copy-ready environment-variable configuration example using the OpenAI-compatible endpoint.
+
 ### Changed
 
 - Repository team policies now reject `-l`/`--lang` overrides, inherited policy languages are enforced during candidate validation, and split extension violations remain reviewable before commit.

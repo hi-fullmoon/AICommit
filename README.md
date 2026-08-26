@@ -29,7 +29,7 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key/model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
+It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key/model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
 
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
@@ -65,6 +65,12 @@ Multiple providers can be defined and switched at runtime with `-p` / `--provide
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "modelId": "openai/gpt-4o-mini"
+    },
+    "kimi-code": {
+      "providerType": "custom",
+      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
+      "apiKeyEnv": "KIMI_API_KEY",
+      "modelId": "kimi-for-coding"
     }
   }
 }
@@ -103,7 +109,37 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `extraBody`          | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured                                        |
 | `reasoning`          | Reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically                                                                                       |
 
-Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
+Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, [Kimi Code](https://www.kimi.com/code/docs/), Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
+
+### Kimi Code example
+
+Create an API key in the Kimi Code console, export it without storing the secret in JSON, and select the bundled preset in `aicommit setup`. For a manual configuration, use the OpenAI-compatible full endpoint:
+
+```bash
+export KIMI_API_KEY='your-kimi-code-api-key'
+```
+
+```json
+{
+  "defaultProvider": "kimi-code",
+  "providers": {
+    "kimi-code": {
+      "providerType": "custom",
+      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
+      "apiKeyEnv": "KIMI_API_KEY",
+      "modelId": "kimi-for-coding"
+    }
+  }
+}
+```
+
+Verify the endpoint, key, and model before the first commit:
+
+```bash
+aicommit --check -p kimi-code
+```
+
+`kimi-for-coding` is available to all Kimi Code membership tiers and follows the service's rolling model upgrades. Kimi Code membership keys use `api.kimi.com`; Kimi Platform pay-as-you-go keys use a different endpoint and are not interchangeable.
 
 See the bilingual [provider compatibility table](docs/provider-compatibility.md) for streaming, reasoning, token-budget, usage, authentication, preset, and extension-adapter boundaries.
 

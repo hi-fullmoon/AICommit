@@ -1,7 +1,7 @@
 {
   "kind": "aicommit-provider-presets",
   "schemaVersion": 1,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "compatibility": {
     "coreMinimum": "1.4.0",
     "coreMaximumExclusive": "2.0.0",
@@ -41,6 +41,13 @@
         },
         "reasoning_split": true
       }
+    },
+    {
+      "id": "kimi-code",
+      "label": "Kimi Code",
+      "adapter": "custom",
+      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
+      "modelId": "kimi-for-coding"
     },
     {
       "id": "ollama",
