@@ -40,6 +40,7 @@ import {
   indentError,
   sanitizeTerminalText,
   stringifyConfigRedacted,
+  redactSensitiveUrl,
 } from './utils.js';
 import { applySplitPlan, resumeSplit, splitFlow } from './split.js';
 import { runSetup } from './setup.js';
@@ -176,7 +177,8 @@ export async function main() {
 
   // ── 1. Config ───────────────────────────────────────────────────────
 
-  const { config, projectRoot, loaded, providerName } = await loadConfig(cliProvider);
+  const { config, projectRoot, loaded, providerName, teamPolicyPath } =
+    await loadConfig(cliProvider);
   const extensionHost = await configureExtensionHost(config);
   const selectedProvider = providerName || detectProviderType(config.apiUrl, config.providerType);
   const warnings = [];
@@ -199,6 +201,12 @@ export async function main() {
   // Validate after applying the override, so a bad value is caught whether
   // it came from the CLI or from a config file.
 
+  if (cliLang && teamPolicyPath) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `--lang cannot override the repository team policy at ${teamPolicyPath}.`,
+    );
+  }
   if (cliLang) config.language = cliLang;
   if (config.language !== 'zh' && config.language !== 'en') {
     throw fail(
@@ -223,7 +231,9 @@ export async function main() {
     '  ' + chalk.green('✓') + chalk.dim(` Model: ${sanitizeTerminalText(modelLabel)}${viaCli}`),
   );
   console.log(
-    '  ' + chalk.green('✓') + chalk.dim(` Endpoint: ${sanitizeTerminalText(config.apiUrl)}`),
+    '  ' +
+      chalk.green('✓') +
+      chalk.dim(` Endpoint: ${sanitizeTerminalText(redactSensitiveUrl(config.apiUrl))}`),
   );
 
   const langLabel = config.language === 'zh' ? '中文' : 'English';
@@ -269,7 +279,7 @@ export async function main() {
 
       console.log('');
       console.log('  ' + chalk.dim('Provider:  ') + (providerName || chalk.dim('(flat config)')));
-      console.log('  ' + chalk.dim('Endpoint:  ') + config.apiUrl);
+      console.log('  ' + chalk.dim('Endpoint:  ') + redactSensitiveUrl(config.apiUrl));
       console.log('  ' + chalk.dim('API key:   ') + maskApiKey(config.apiKey));
       console.log('  ' + chalk.dim('Model:     ') + config.modelId);
       if (report.content) {
@@ -341,7 +351,12 @@ export async function main() {
     console.log(chalk.dim(`  yes:          ${yes}`));
     console.log(chalk.dim('  final config:'));
     for (const [key, value] of Object.entries(config)) {
-      const display = key === 'apiKey' ? maskApiKey(value) : stringifyConfigRedacted(value);
+      const display =
+        key === 'apiKey'
+          ? maskApiKey(value)
+          : key === 'apiUrl'
+            ? redactSensitiveUrl(value)
+            : stringifyConfigRedacted(value);
       const truncated = display.length > 100 ? display.slice(0, 100) + '…' : display;
       console.log(chalk.dim(`    ${key}: ${truncated}`));
     }

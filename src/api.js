@@ -722,7 +722,8 @@ export async function generateCommitMessage(
 
   if (!validation.valid) {
     const details = validation.errors.map((item) => item.message).join(' ');
-    throw new Error(
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
       'API returned a commit message that violates commitPolicy after the corrective retry. ' +
         details,
     );

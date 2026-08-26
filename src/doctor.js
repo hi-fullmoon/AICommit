@@ -7,7 +7,7 @@ import { loadConfig, isSecureApiUrl } from './config.js';
 import { classifyError, ERROR_CATEGORIES, fail } from './errors.js';
 import { getProviderAdapter } from './providers.js';
 import { configureExtensionHost, resolveProviderAdapter } from './extensions.js';
-import { formatMs, formatUsage, sanitizeTerminalText } from './utils.js';
+import { formatMs, formatUsage, redactSensitiveUrl, sanitizeTerminalText } from './utils.js';
 
 function nodeSupported(version = process.versions.node) {
   return Number(version.split('.')[0]) >= 18;
@@ -77,7 +77,9 @@ export async function runDoctor(cliProvider = null) {
     checks,
     'Endpoint security',
     isSecureApiUrl(config.apiUrl) ? 'pass' : 'fail',
-    isSecureApiUrl(config.apiUrl) ? config.apiUrl : 'insecure endpoint rejected',
+    isSecureApiUrl(config.apiUrl)
+      ? redactSensitiveUrl(config.apiUrl)
+      : 'insecure endpoint rejected',
   );
   addCheck(
     checks,

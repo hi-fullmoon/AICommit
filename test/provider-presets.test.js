@@ -34,6 +34,14 @@ test('bundled provider presets are strict, versioned, and core-compatible', asyn
   const raw = JSON.parse(await readFile(BUNDLED_PROVIDER_PRESET_PATH, 'utf8'));
   assert.deepEqual(validateProviderPresetManifest(raw), loaded.manifest);
   assert.equal(assertProviderPresetCompatibility(raw, '1.99.0'), raw);
+  assert.equal(assertProviderPresetCompatibility(raw, '1.4.1-beta.1'), raw);
+  assert.equal(assertProviderPresetCompatibility(raw, '1.4.1-beta.1+build.7'), raw);
+  assert.equal(assertProviderPresetCompatibility(raw, '2.0.0-rc.1'), raw);
+  assert.throws(() => assertProviderPresetCompatibility(raw, '1.4.0-beta.1'), /requires aicommit/);
+  assert.throws(
+    () => assertProviderPresetCompatibility(raw, '1.4.1-beta.01'),
+    /must be a semantic version/,
+  );
   assert.throws(() => assertProviderPresetCompatibility(raw, '2.0.0'), /requires aicommit/);
 });
 

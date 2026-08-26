@@ -309,6 +309,7 @@ function alignmentIssue(parsedMessage, diff) {
 
 export function validateCommitCandidate(message, { policy, diff = '' } = {}) {
   const normalizedPolicy = policy || normalizeCommitPolicy();
+  const effectiveLanguage = normalizedPolicy.effectiveLanguage || normalizedPolicy.language;
   const parsedMessage = parseCommitMessage(message);
   const issues = [];
   const parsed = parsedMessage.parsed;
@@ -351,11 +352,11 @@ export function validateCommitCandidate(message, { policy, diff = '' } = {}) {
         ),
       );
     }
-    if (normalizedPolicy.language === 'zh' && !/\p{Script=Han}/u.test(parsed.subject)) {
+    if (effectiveLanguage === 'zh' && !/\p{Script=Han}/u.test(parsed.subject)) {
       issues.push(issue('language', 'The subject must be written in Simplified Chinese.'));
     }
     if (
-      normalizedPolicy.language === 'en' &&
+      effectiveLanguage === 'en' &&
       (!/[A-Za-z]/.test(parsed.subject) || /\p{Script=Han}/u.test(parsed.subject))
     ) {
       issues.push(issue('language', 'The subject must be written in English.'));

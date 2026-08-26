@@ -10,6 +10,7 @@ import {
   indentError,
   sanitizeTerminalText,
   stringifyConfigRedacted,
+  redactSensitiveUrl,
   isValidCommitMessage,
 } from '../src/utils.js';
 
@@ -133,4 +134,16 @@ test('commit validation and recursive config redaction are strict', () => {
     extraBody: { authorization: 'Bearer secret-value', nested: { password: 'hunter22!' } },
   });
   assert.doesNotMatch(rendered, /secret-value|hunter22/);
+});
+
+test('provider URL redaction removes userinfo, secret parameters, and fragments', () => {
+  const endpoint =
+    'https://user:password@example.test/v1?api-version=2026-08-25&api_key=query-secret#private';
+  const redacted = redactSensitiveUrl(endpoint);
+  assert.match(redacted, /example\.test\/v1/);
+  assert.match(redacted, /api-version=2026-08-25/);
+  assert.doesNotMatch(redacted, /user|password|query-secret|private/);
+
+  const rendered = stringifyConfigRedacted({ apiUrl: endpoint });
+  assert.doesNotMatch(rendered, /user|password|query-secret|private/);
 });

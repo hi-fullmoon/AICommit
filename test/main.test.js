@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { renderTeamPolicyTemplate } from '../src/team-policy.js';
+
 const CLI = fileURLToPath(new URL('../bin/aicommit.js', import.meta.url));
 
 function git(cwd, args) {
@@ -88,10 +90,11 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   writeFileSync(
     join(home, '.aicommit.config.json'),
     JSON.stringify({
-      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api-version=1&api_key=endpoint-query-secret#endpoint-fragment-secret`,
       apiKey: '',
       apiKeyEnv: 'AICOMMIT_E2E_API_KEY',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -125,10 +128,75 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   assert.doesNotMatch(JSON.stringify(requests[0].body), /project-context-secret|ATTACKER\.md/);
   assert.match(result.stderr, /Ignored unsafe settings from untrusted project config/);
   assert.match(result.stdout, new RegExp(`Endpoint: http://127\\.0\\.0\\.1:${port}`));
+  assert.match(result.stdout, /api-version=1/);
+  assert.doesNotMatch(
+    result.stdout + result.stderr,
+    /endpoint-query-secret|endpoint-fragment-secret/,
+  );
   assert.match(result.stdout, /Context: recent commits:1/);
   assert.match(result.stdout, /Git commit failed/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
   assert.match(git(repo, ['diff', '--staged']), /value = 2/);
+});
+
+test('repository team policy cannot be overridden with --lang', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-team-language-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
+      apiKey: '',
+      modelId: 'offline-model',
+      reasoning: { mode: 'off' },
+    }),
+  );
+  writeFileSync(join(repo, '.aicommit.policy.json'), renderTeamPolicyTemplate());
+
+  const result = await runCli(repo, home, ['--lang=zh', '--yes', '--no-reasoning']);
+  assert.equal(result.code, 2, result.stdout + result.stderr);
+  assert.match(result.stderr, /--lang cannot override the repository team policy/);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
+  assert.match(git(repo, ['diff', '--staged']), /value = 2/);
+});
+
+test('credential helper failures redact endpoint secrets in text and doctor JSON output', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-credential-error-redaction-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  const gitConfig = join(root, 'empty-gitconfig');
+  writeFileSync(gitConfig, '');
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl:
+        'https://url-user:url-password@provider.example/v1?api_key=query-secret#fragment-secret',
+      apiKey: '',
+      modelId: 'offline-model',
+      language: 'en',
+      credentialHelper: { enabled: true, username: 'redaction-test' },
+      reasoning: { mode: 'off' },
+    }),
+  );
+  const isolatedGit = {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: gitConfig,
+  };
+
+  const textResult = await runCli(repo, home, ['--yes', '--no-reasoning'], isolatedGit);
+  const jsonResult = await runCli(repo, home, ['doctor', '--output=json'], isolatedGit);
+  assert.equal(textResult.code, 2, textResult.stdout + textResult.stderr);
+  assert.equal(jsonResult.code, 2, jsonResult.stdout + jsonResult.stderr);
+  const jsonOutput = JSON.parse(jsonResult.stdout);
+  assert.equal(jsonOutput.error.category, 'config');
+  assert.match(jsonOutput.error.message, /Credential helper failed/);
+  const rendered = textResult.stdout + textResult.stderr + jsonResult.stdout + jsonResult.stderr;
+  assert.doesNotMatch(rendered, /url-user|url-password|query-secret|fragment-secret/);
 });
 
 test('non-interactive dry run restores staging performed by aicommit', async (t) => {
@@ -162,6 +230,7 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -202,6 +271,7 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -255,6 +325,7 @@ test('single-file --split=all --yes keeps split semantics and stages the worktre
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -305,6 +376,7 @@ test('--split=staged commits the index snapshot and leaves newer worktree edits 
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -383,6 +455,7 @@ test('experimental hunk plan/apply creates lossless same-file commits without pr
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -455,6 +528,7 @@ test('split plan exports JSON and split apply commits it without provider config
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -524,6 +598,7 @@ test('split --resume finishes a checkpointed apply without provider configuratio
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -599,6 +674,7 @@ test('split apply rejects a stale fingerprint before mutating the index', async 
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -645,6 +721,7 @@ test('split plan rejects output inside the working tree before a provider reques
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -689,6 +766,7 @@ test('--split=all --yes scans complete untracked files before auto-staging', asy
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -738,6 +816,7 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -806,6 +885,7 @@ test('automatic policy correction is counted as a privacy-safe rewrite metric', 
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -889,6 +969,7 @@ test('--output=json returns the split plan without reasoning or terminal decorat
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
+      language: 'en',
       reasoning: { mode: 'off' },
     }),
   );
@@ -954,6 +1035,7 @@ test('provider and response-format errors have stable JSON categories and exit c
         apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
         apiKey: '',
         modelId: 'local-test-model',
+        language: 'en',
         reasoning: { mode: 'off' },
         retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
       }),
@@ -1014,7 +1096,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   writeFileSync(
     join(home, '.aicommit.config.json'),
     JSON.stringify({
-      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api_key=doctor-url-secret&api-version=1#doctor-fragment-secret`,
       apiKey: 'legacy-plaintext-must-not-win',
       apiKeyEnv: 'AICOMMIT_DOCTOR_KEY',
       modelId: 'doctor-model',
@@ -1046,4 +1128,6 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   }
   assert.doesNotMatch(result.stdout + result.stderr, /doctor-secret-value/);
   assert.doesNotMatch(result.stdout + result.stderr, /legacy-plaintext-must-not-win/);
+  assert.doesNotMatch(result.stdout + result.stderr, /doctor-url-secret|doctor-fragment-secret/);
+  assert.match(result.stderr, /api-version=1/);
 });

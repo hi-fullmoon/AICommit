@@ -65,7 +65,7 @@ test('request layer refuses insecure non-loopback HTTP endpoints', async () => {
 });
 
 test('system prompt keeps custom guidance and carries the authoritative language exactly once', async () => {
-  const calls = stubFetch([{ choices: [{ message: { content: 'feat: x' } }] }]);
+  const calls = stubFetch([{ choices: [{ message: { content: 'feat: 添加功能' } }] }]);
   await generateCommitMessage(cfg({ language: 'zh' }), diff);
   const sys = calls[0].messages.find((m) => m.role === 'system').content;
   const hits = sys.match(/Simplified Chinese/g) || [];
@@ -436,7 +436,14 @@ test('empty corrective retry rejects the original invalid reply', async () => {
     { choices: [{ message: { content: 'Updated the login page styling.' } }] },
     { choices: [{ message: { content: null } }] },
   ]);
-  await assert.rejects(() => generateCommitMessage(cfg(), diff), /violates commitPolicy/);
+  await assert.rejects(
+    () => generateCommitMessage(cfg(), diff),
+    (error) => {
+      assert.equal(error.category, 'response_format');
+      assert.match(error.message, /violates commitPolicy/);
+      return true;
+    },
+  );
   assert.equal(calls.length, 2);
 });
 

@@ -1308,6 +1308,23 @@ export function executeSplit(
 
 // Returns a structured result when split mode handled the run; false means
 // "fall back to the normal single-commit flow" for a lone interactive file.
+export async function validateSplitExtensionMessages(groups, config, warnings = []) {
+  const host = extensionHostFor(config);
+  if (!host) return [];
+  const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
+  const violations = [];
+  for (const [index, group] of groups.entries()) {
+    const issues = await host.validateMessage(group.message, policy);
+    const errors = issues.filter((item) => item.severity === 'error');
+    for (const issue of issues.filter((item) => item.severity === 'warning')) {
+      const warning = `Split group ${index + 1}: ${issue.message}`;
+      if (!warnings.includes(warning)) warnings.push(warning);
+    }
+    if (errors.length) violations.push({ group: index + 1, errors });
+  }
+  return violations;
+}
+
 export async function splitFlow(
   config,
   projectRoot,
@@ -1635,33 +1652,17 @@ export async function splitFlow(
   let planEdited = false;
   let rewriteCount = 0;
 
-  const validateExtensionMessages = async () => {
-    const host = extensionHostFor(config);
-    if (!host) return;
-    for (const [index, group] of groups.entries()) {
-      const issues = await host.validateMessage(
-        group.message,
-        normalizeCommitPolicy(config.commitPolicy, config.language),
-      );
-      const errors = issues.filter((item) => item.severity === 'error');
-      for (const issue of issues.filter((item) => item.severity === 'warning')) {
-        const warning = `Split group ${index + 1}: ${issue.message}`;
-        if (!warnings.includes(warning)) warnings.push(warning);
-      }
-      if (errors.length) {
-        throw fail(
-          ERROR_CATEGORIES.RESPONSE_FORMAT,
-          `Split group ${index + 1} failed extension validation: ${errors
-            .map((item) => item.message)
-            .join(' ')}`,
-        );
+  while (true) {
+    const extensionViolations = await validateSplitExtensionMessages(groups, config, warnings);
+    displayPlan(groups, allFiles);
+    if (extensionViolations.length) {
+      console.log('\n  ' + chalk.yellow.bold('⚠ Extension validation blocked this plan:'));
+      for (const violation of extensionViolations) {
+        for (const issue of violation.errors) {
+          console.log(`    Group ${violation.group}: ${sanitizeTerminalText(issue.message)}`);
+        }
       }
     }
-  };
-
-  while (true) {
-    await validateExtensionMessages();
-    displayPlan(groups, allFiles);
 
     const action = yes
       ? dryRun
@@ -1812,6 +1813,22 @@ export async function splitFlow(
         }
       }
       continue; // show the updated plan again
+    }
+
+    if (extensionViolations.length) {
+      const details = extensionViolations
+        .map(
+          (violation) =>
+            `Split group ${violation.group}: ${violation.errors
+              .map((item) => item.message)
+              .join(' ')}`,
+        )
+        .join(' ');
+      if (!yes) {
+        console.log(chalk.dim('\n  Edit the plan or regenerate its messages before continuing.\n'));
+        continue;
+      }
+      throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, details);
     }
 
     break; // commit, or finish the dry run

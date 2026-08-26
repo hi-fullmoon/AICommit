@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 
+import { redactSensitiveUrl } from './utils.js';
+
 export function isLoopbackEndpoint(apiUrl) {
   try {
     const { hostname, protocol } = new URL(apiUrl);
@@ -107,7 +109,9 @@ export function resolveCredential(config, options = {}) {
     );
   }
   if (helperError) {
-    throw new Error(`Credential helper failed for ${config.apiUrl}: ${helperError.message}`);
+    throw new Error(
+      `Credential helper failed for ${redactSensitiveUrl(config.apiUrl)}: ${helperError.message}`,
+    );
   }
 
   return {

@@ -23,7 +23,13 @@ export const BUNDLED_PROVIDER_PRESET_PATH = resolve(
 const MAX_PRESET_BYTES = 256 * 1024;
 const MAX_EXTRA_BODY_DEPTH = 8;
 const MAX_EXTRA_BODY_NODES = 500;
-const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const STABLE_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const PRERELEASE_IDENTIFIER = '(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)';
+const CORE_SEMVER_RE = new RegExp(
+  `^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)` +
+    `(?:-(${PRERELEASE_IDENTIFIER}(?:\\.${PRERELEASE_IDENTIFIER})*))?` +
+    '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$',
+);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const FORBIDDEN_JSON_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const CREDENTIAL_KEY_RE =
@@ -43,15 +49,54 @@ function assertExactKeys(value, expected, path) {
   if (missing.length) throw new Error(`${path} is missing properties: ${missing.join(', ')}.`);
 }
 
-function semverTuple(value, path) {
-  const match = typeof value === 'string' ? value.match(SEMVER_RE) : null;
-  if (!match) throw new Error(`${path} must be a stable semantic version (x.y.z).`);
-  return match.slice(1).map(Number);
+function semverValue(value, path, { allowPrerelease = false } = {}) {
+  const match =
+    typeof value === 'string'
+      ? value.match(allowPrerelease ? CORE_SEMVER_RE : STABLE_SEMVER_RE)
+      : null;
+  if (!match) {
+    throw new Error(
+      allowPrerelease
+        ? `${path} must be a semantic version.`
+        : `${path} must be a stable semantic version (x.y.z).`,
+    );
+  }
+  return {
+    numbers: match.slice(1, 4).map(Number),
+    prerelease: match[4] ? match[4].split('.') : [],
+  };
 }
 
 function compareVersions(left, right) {
   for (let index = 0; index < 3; index++) {
-    if (left[index] !== right[index]) return left[index] - right[index];
+    if (left.numbers[index] !== right.numbers[index]) {
+      return left.numbers[index] - right.numbers[index];
+    }
+  }
+  if (!left.prerelease.length || !right.prerelease.length) {
+    if (!left.prerelease.length && !right.prerelease.length) return 0;
+    return left.prerelease.length ? -1 : 1;
+  }
+  const count = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let index = 0; index < count; index++) {
+    const leftPart = left.prerelease[index];
+    const rightPart = right.prerelease[index];
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    if (leftPart === rightPart) continue;
+    const leftNumeric = /^\d+$/.test(leftPart);
+    const rightNumeric = /^\d+$/.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      const normalizedLeft = leftPart.replace(/^0+(?=\d)/, '');
+      const normalizedRight = rightPart.replace(/^0+(?=\d)/, '');
+      if (normalizedLeft.length !== normalizedRight.length) {
+        return normalizedLeft.length - normalizedRight.length;
+      }
+      if (normalizedLeft === normalizedRight) continue;
+      return normalizedLeft < normalizedRight ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
   }
   return 0;
 }
@@ -109,14 +154,14 @@ export function validateProviderPresetManifest(value) {
   if (value.schemaVersion !== PROVIDER_PRESET_SCHEMA_VERSION) {
     throw new Error(`Provider preset schemaVersion must be ${PROVIDER_PRESET_SCHEMA_VERSION}.`);
   }
-  semverTuple(value.version, 'Provider preset version');
+  semverValue(value.version, 'Provider preset version');
   assertExactKeys(
     value.compatibility,
     ['coreMinimum', 'coreMaximumExclusive', 'adapterContract'],
     'Provider preset compatibility',
   );
-  const minimum = semverTuple(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
-  const maximum = semverTuple(
+  const minimum = semverValue(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
+  const maximum = semverValue(
     value.compatibility.coreMaximumExclusive,
     'compatibility.coreMaximumExclusive',
   );
@@ -188,9 +233,9 @@ export function validateProviderPresetManifest(value) {
 
 export function assertProviderPresetCompatibility(value, coreVersion = CORE_VERSION) {
   validateProviderPresetManifest(value);
-  const core = semverTuple(coreVersion, 'Core version');
-  const minimum = semverTuple(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
-  const maximum = semverTuple(
+  const core = semverValue(coreVersion, 'Core version', { allowPrerelease: true });
+  const minimum = semverValue(value.compatibility.coreMinimum, 'compatibility.coreMinimum');
+  const maximum = semverValue(
     value.compatibility.coreMaximumExclusive,
     'compatibility.coreMaximumExclusive',
   );

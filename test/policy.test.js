@@ -91,6 +91,24 @@ test('candidate validator enforces type, scope, subject, body, breaking, and exp
   );
 });
 
+test('candidate validator enforces the effective inherited language', () => {
+  const chinese = normalizeCommitPolicy({}, 'zh');
+  assert.equal(validateCommitCandidate('feat: 添加重试', { policy: chinese }).valid, true);
+  assert.deepEqual(
+    validateCommitCandidate('feat: add retries', { policy: chinese }).errors.map(
+      (item) => item.code,
+    ),
+    ['language'],
+  );
+
+  const english = normalizeCommitPolicy({}, 'en');
+  assert.equal(validateCommitCandidate('feat: add retries', { policy: english }).valid, true);
+  assert.deepEqual(
+    validateCommitCandidate('feat: 添加重试', { policy: english }).errors.map((item) => item.code),
+    ['language'],
+  );
+});
+
 test('candidate alignment check is bounded and advisory', () => {
   const policy = normalizeCommitPolicy({}, 'en');
   const aligned = validateCommitCandidate('fix(api): retry provider timeout', {

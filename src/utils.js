@@ -134,9 +134,31 @@ export function maskApiKey(key) {
 
 const SENSITIVE_CONFIG_KEY_RE =
   /^(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)$/i;
+const SENSITIVE_URL_PARAMETER_RE =
+  /^(?:api[-_]?key|key|x[-_]?api[-_]?key|access[-_]?token|refresh[-_]?token|bearer[-_]?token|token|authorization|auth|password|passwd|secret(?:[-_]?key)?|client[-_]?secret|credential|signature|sig|code|subscription[-_]?key|x-amz-(?:credential|signature|security-token)|x-goog-signature)$/i;
+
+// Provider endpoints occasionally need non-secret query parameters such as
+// `api-version`, but credentials embedded in userinfo or well-known secret
+// parameters must never be echoed to terminals, JSON inspection output, or
+// extension processes. Fragments are omitted because HTTP never sends them.
+export function redactSensitiveUrl(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.username) url.username = 'redacted';
+    if (url.password) url.password = 'redacted';
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_URL_PARAMETER_RE.test(key)) url.searchParams.set(key, 'redacted');
+    }
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return sanitizeTerminalText(value);
+  }
+}
 
 export function stringifyConfigRedacted(value) {
   return JSON.stringify(value, (key, item) => {
+    if (/^apiUrl$/i.test(key) && typeof item === 'string') return redactSensitiveUrl(item);
     if (!SENSITIVE_CONFIG_KEY_RE.test(key)) return item;
     return typeof item === 'string' ? maskApiKey(item) : '[REDACTED]';
   });

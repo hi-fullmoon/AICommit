@@ -3,6 +3,8 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { redactSensitiveUrl } from './utils.js';
+
 const RUNNER_PATH = fileURLToPath(new URL('./extension-runner.mjs', import.meta.url));
 const EXTENSION_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -10,7 +12,7 @@ const CAPABILITIES = new Set(['contextProvider', 'messageValidator', 'providerAd
 const MAX_MANIFEST_BYTES = 32_000;
 const MAX_RESULT_CHARS = 128_000;
 const SECRET_FIELD =
-  /^(?:authorization|cookie|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret)$/i;
+  /^(?:authorization|proxy[-_]?authorization|cookie|x[-_]?api[-_]?key|api[-_]?key|access[-_]?token|refresh[-_]?token|bearer[-_]?token|token|password|passwd|secret(?:[-_]?key)?|client[-_]?secret|credential)$/i;
 
 export const EXTENSION_HOST = Symbol.for('aicommit.extensionHost');
 
@@ -217,7 +219,8 @@ function invokeExtension(extension, capability, input, timeoutMs) {
 }
 
 function containsCredentialField(value, depth = 0) {
-  if (depth > 12 || !value || typeof value !== 'object') return false;
+  if (depth > 12) return true;
+  if (!value || typeof value !== 'object') return false;
   if (Array.isArray(value)) return value.some((item) => containsCredentialField(item, depth + 1));
   return Object.entries(value).some(
     ([key, item]) => SECRET_FIELD.test(key) || containsCredentialField(item, depth + 1),
@@ -225,8 +228,13 @@ function containsCredentialField(value, depth = 0) {
 }
 
 function safeAdapterConfig(config) {
+  if (containsCredentialField(config.extraBody) || containsCredentialField(config.reasoning)) {
+    throw new Error(
+      'Extension provider configuration contains a credential-like field that cannot cross the extension boundary.',
+    );
+  }
   return {
-    apiUrl: config.apiUrl,
+    apiUrl: redactSensitiveUrl(config.apiUrl),
     modelId: config.modelId,
     extraBody: config.extraBody,
     reasoning: config.reasoning,
@@ -349,6 +357,14 @@ export async function createExtensionHost(settings) {
         capabilities,
         headers: {},
         async buildRequest(request) {
+          if (
+            containsCredentialField(request?.extraBody) ||
+            containsCredentialField(request?.reasoning)
+          ) {
+            throw new Error(
+              'Extension provider request contains a credential-like field that cannot cross the extension boundary.',
+            );
+          }
           const payload = await call('buildRequest', { request });
           if (!object(payload))
             throw new Error('providerAdapter buildRequest must return an object.');
@@ -375,6 +391,11 @@ export async function createExtensionHost(settings) {
           };
         },
         async reasoningForFollowUp(reasoning) {
+          if (containsCredentialField(reasoning)) {
+            throw new Error(
+              'Extension provider reasoning config contains a credential-like field that cannot cross the extension boundary.',
+            );
+          }
           const result = await call('reasoningForFollowUp', { reasoning });
           if (!object(result))
             throw new Error('providerAdapter reasoningForFollowUp must return an object.');

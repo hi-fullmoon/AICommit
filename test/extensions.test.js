@@ -43,7 +43,11 @@ export function messageValidator({ message }) {
 }
 export function providerAdapter({ operation, config, request, response, reasoning }) {
   if ('apiKey' in config) throw new Error('credential leaked to adapter');
-  if (operation === 'buildRequest') return config.modelId === 'leaky' ? { apiKey: 'bad' } : { model: config.modelId, messages: request.messages, max_tokens: request.maxTokens, adapted: true };
+  if (operation === 'buildRequest') {
+    if (config.modelId === 'leaky') return { apiKey: 'bad' };
+    if (config.modelId === 'token-leaky') return { token: 'bad' };
+    return { model: config.modelId, messages: request.messages, max_tokens: request.maxTokens, adapted: true, observedUrl: config.apiUrl };
+  }
   if (operation === 'normalizeResponse') return { content: response.answer, model: response.model, usage: { totalTokens: 3 }, finishReason: 'stop' };
   if (operation === 'reasoningForFollowUp') return { ...reasoning, mode: 'off' };
   throw new Error('unknown operation');
@@ -143,6 +147,7 @@ test(
           messages: [{ role: 'user', content: 'hi' }],
           max_tokens: 9,
           adapted: true,
+          observedUrl: 'https://provider.example/v1',
         },
       );
       const normalized = await adapter.normalizeResponse({ answer: 'OK', model: 'fixture-model' });
@@ -160,6 +165,66 @@ test(
       await assert.rejects(
         () => leakyAdapter.buildRequest({ messages: [], maxTokens: 1 }),
         /credential-like request field/,
+      );
+      const tokenLeakyAdapter = host.providerAdapter({
+        providerType: 'extension:fixture',
+        apiUrl: 'https://provider.example/v1',
+        apiKey: 'must-not-cross-boundary',
+        modelId: 'token-leaky',
+        extraBody: {},
+        reasoning: { mode: 'off' },
+      });
+      await assert.rejects(
+        () => tokenLeakyAdapter.buildRequest({ messages: [], maxTokens: 1 }),
+        /credential-like request field/,
+      );
+
+      const sanitizedUrlAdapter = host.providerAdapter({
+        providerType: 'extension:fixture',
+        apiUrl:
+          'https://url-user:url-password@provider.example/v1?api-version=1&api_key=url-query-secret#url-fragment-secret',
+        apiKey: 'must-not-cross-boundary',
+        modelId: 'fixture-model',
+        extraBody: {},
+        reasoning: { mode: 'off' },
+      });
+      const sanitizedPayload = await sanitizedUrlAdapter.buildRequest({
+        messages: [],
+        maxTokens: 1,
+      });
+      assert.match(sanitizedPayload.observedUrl, /api-version=1/);
+      assert.doesNotMatch(
+        sanitizedPayload.observedUrl,
+        /url-user|url-password|url-query-secret|url-fragment-secret/,
+      );
+
+      for (const credentialConfig of [
+        { extraBody: { api_key: 'body-secret' }, reasoning: { mode: 'off' } },
+        {
+          extraBody: {},
+          reasoning: { mode: 'on', enabledBody: { authorization: 'reasoning-secret' } },
+        },
+      ]) {
+        const credentialAdapter = host.providerAdapter({
+          providerType: 'extension:fixture',
+          apiUrl: 'https://provider.example/v1',
+          apiKey: 'must-not-cross-boundary',
+          modelId: 'fixture-model',
+          ...credentialConfig,
+        });
+        await assert.rejects(
+          () => credentialAdapter.buildRequest({ messages: [], maxTokens: 1 }),
+          /credential-like field.*extension boundary/,
+        );
+      }
+      await assert.rejects(
+        () =>
+          adapter.buildRequest({
+            messages: [],
+            maxTokens: 1,
+            extraBody: { client_secret: 'request-secret' },
+          }),
+        /credential-like field.*extension boundary/,
       );
 
       let calls = 0;

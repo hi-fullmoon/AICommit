@@ -104,6 +104,24 @@ test('keyless loopback works while missing configured remote credentials fail', 
       }),
     /Credential helper failed/,
   );
+
+  const sensitiveEndpoint =
+    'https://url-user:url-password@api.example.test/v1?api_key=query-secret#fragment-secret';
+  assert.throws(
+    () =>
+      resolveCredential(
+        config({
+          apiUrl: sensitiveEndpoint,
+          credentialHelper: { enabled: true, username: 'robot' },
+        }),
+        { env: {}, readCredential: () => null },
+      ),
+    (error) => {
+      assert.match(error.message, /Credential helper failed/);
+      assert.doesNotMatch(error.message, /url-user|url-password|query-secret|fragment-secret/);
+      return true;
+    },
+  );
 });
 
 test('credential metadata never contains the resolved secret', () => {

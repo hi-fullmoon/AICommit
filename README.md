@@ -151,7 +151,7 @@ aicommit policy check --file=.git/COMMIT_EDITMSG
 aicommit policy check --range=origin/main..HEAD --output=json
 ```
 
-The complete team policy loads after personal settings. Machine output includes a policy fingerprint and issue codes but omits commit-message contents; policy commands never resolve credentials. See the bilingual [team migration guide and executable examples](docs/team-policy.md), plus the published [team-policy schema](schemas/aicommit-team-policy.schema.json).
+The complete team policy loads after personal settings. When one is present, `-l`/`--lang` is rejected instead of overriding the repository language. Machine output includes a policy fingerprint and issue codes but omits commit-message contents; policy commands never resolve credentials. See the bilingual [team migration guide and executable examples](docs/team-policy.md), plus the published [team-policy schema](schemas/aicommit-team-policy.schema.json).
 
 ### Provider reliability
 
@@ -170,7 +170,7 @@ aicommit preset install --file=provider-presets.json
 aicommit preset rollback
 ```
 
-The active user manifest is `~/.aicommit/provider-presets.json`; each update keeps the previous valid version for rollback. Manifests declare their own semantic version, supported core range, and adapter-contract version, and cannot contain credentials. See the bilingual [preset compatibility/update guide](docs/provider-presets.md) and [published schema](schemas/aicommit-provider-presets.schema.json).
+The active user manifest is `~/.aicommit/provider-presets.json`; each update keeps the previous valid version for rollback. Manifests declare their own semantic version, supported core range, and adapter-contract version, and cannot contain credentials. Core prerelease versions and build metadata are parsed using SemVer rules; build metadata does not affect compatibility ordering. See the bilingual [preset compatibility/update guide](docs/provider-presets.md) and [published schema](schemas/aicommit-provider-presets.schema.json).
 
 ### Credential-denied extensions
 
@@ -324,7 +324,7 @@ Stable process exits are shared by text and JSON modes:
 
 ### Diagnostics
 
-`aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Use `aicommit doctor -p <name>` to select a configured provider or `aicommit doctor --output=json` in automation.
+`aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Endpoint userinfo, credential-like query parameters, and fragments are also redacted from normal output and credential-resolution errors. Use `aicommit doctor -p <name>` to select a configured provider or `aicommit doctor --output=json` in automation.
 
 For stable error categories, Homebrew/npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
 
@@ -355,7 +355,7 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`--split` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--split=staged` or `--split=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
+`--split` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--split=staged` or `--split=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
 
 For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
 

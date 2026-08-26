@@ -519,5 +519,6 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
     credentialSource: credential.source,
     credentialSourceLabel: credential.sourceLabel,
     credentialWarning: credential.warning || null,
+    teamPolicyPath: teamPolicy?.path || null,
   };
 }

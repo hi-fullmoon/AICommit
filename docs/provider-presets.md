@@ -25,11 +25,13 @@ Every manifest declares:
 
 - `version` versions the independently replaceable preset data.
 - The core range is inclusive at `coreMinimum` and exclusive at `coreMaximumExclusive`.
+- Core prerelease versions and build metadata follow SemVer; build metadata is ignored for precedence.
 - `adapterContract` declares the request-adapter interface expected by every entry.
 - The runtime rejects unknown fields, duplicate/reserved IDs, unsupported adapters, remote HTTP, credentials, top-level `model`/`messages` overrides, oversized data, incompatible versions, and symlinked files.
 
 - `version` 标识可独立替换的 preset 数据版本。
 - core 范围包含 `coreMinimum`，不包含 `coreMaximumExclusive`。
+- Core 的预发布版本与构建元数据遵循 SemVer；构建元数据不参与优先级比较。
 - `adapterContract` 声明每个条目所依赖的请求 adapter 接口。
 - 运行时拒绝未知字段、重复/保留 ID、不支持的 adapter、远程 HTTP、凭据、顶层 `model`/`messages` 覆盖、超限数据、不兼容版本和符号链接文件。
 

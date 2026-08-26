@@ -52,7 +52,8 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   writeFileSync(
     userPath,
     JSON.stringify({
-      apiUrl: 'https://api.example.test/v1/chat/completions',
+      apiUrl:
+        'https://url-user:url-password@api.example.test/v1/chat/completions?api-version=1&api_key=url-query-secret#url-fragment-secret',
       apiKey: '',
       apiKeyEnv: 'AICOMMIT_CONFIG_COMMAND_KEY',
       modelId: 'test-model',
@@ -82,10 +83,15 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   assert.equal(output.data.config.language, 'en');
   assert.equal(output.data.config.apiKey, '(not set)');
   assert.equal(output.data.config.apiKeyEnv, 'AICOMMIT_CONFIG_COMMAND_KEY');
+  assert.match(output.data.config.apiUrl, /api-version=1/);
+  assert.doesNotMatch(
+    output.data.config.apiUrl,
+    /url-user|url-password|url-query-secret|url-fragment-secret/,
+  );
   assert.match(shown.stderr, /Ignored unsafe settings/);
   assert.doesNotMatch(
     shown.stdout + shown.stderr,
-    /environment-secret-must-not-be-read|helper-secret|project-secret-must-be-ignored/,
+    /environment-secret-must-not-be-read|helper-secret|project-secret-must-be-ignored|url-user|url-password|url-query-secret|url-fragment-secret/,
   );
   assert.equal(existsSync(helperMarker), false);
 

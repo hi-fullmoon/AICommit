@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Repository team policies now reject `-l`/`--lang` overrides, inherited policy languages are enforced during candidate validation, and split extension violations remain reviewable before commit.
+- Provider preset compatibility now accepts valid core prerelease/build versions and compares prereleases using SemVer precedence.
+
+### Security
+
+- Provider endpoint userinfo, credential-like query parameters, and fragments are redacted from config inspection, diagnostics, debug output, extension inputs, and credential-helper failures.
+- Extension provider adapters reject a broader set of credential-like request/configuration fields and fail closed when nested input exceeds the inspection depth.
+
 ## [1.4.0] - 2026-08-24
 
 ### Added
