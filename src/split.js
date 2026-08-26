@@ -62,9 +62,12 @@ import {
   writeSplitPlanArtifact,
 } from './split-plan.js';
 import {
+  assertNoSplitCheckpoint,
   createSplitCheckpoint,
+  discardSplitCheckpoint,
   readSplitCheckpoint,
   removeSplitCheckpoint,
+  splitCheckpointPath,
   writeSplitCheckpoint,
 } from './split-checkpoint.js';
 import {
@@ -89,6 +92,16 @@ const SPLIT_MAX_DIFF_CHARS = 16000;
 // plan mid-array. Files beyond the cap are dropped from the prompt; any file
 // the model does not list is swept into the catch-all group by normalizePlan.
 const SPLIT_MAX_PLAN_FILES = 100;
+
+function requireNoSplitCheckpoint(projectRoot) {
+  try {
+    assertNoSplitCheckpoint(projectRoot);
+  } catch (err) {
+    throw fail(ERROR_CATEGORIES.GIT_STATE, `Cannot start a new split: ${err.message}`, {
+      cause: err,
+    });
+  }
+}
 
 function pathIsWithin(parent, candidate) {
   const rel = relative(parent, candidate);
@@ -1362,6 +1375,10 @@ export async function splitFlow(
       process.exit(0);
     }
   }
+  // Dry runs and exported plans do not create a transaction, so they remain
+  // useful while recovery is pending. A committing run should stop before an
+  // API request instead of discovering the checkpoint only after planning.
+  if (!dryRun) requireNoSplitCheckpoint(projectRoot);
   let allFiles = getSplitChangedFiles(projectRoot, scope);
   const warnings = [];
 
@@ -2077,11 +2094,92 @@ export async function resumeSplit(projectRoot, { yes = false, machineOutput = fa
   };
 }
 
+export async function abortSplit(projectRoot, { yes = false } = {}) {
+  const path = splitCheckpointPath(projectRoot);
+  let checkpoint = null;
+  const warnings = [];
+  try {
+    checkpoint = readSplitCheckpoint(projectRoot).checkpoint;
+  } catch (err) {
+    if (/no split checkpoint/i.test(err.message)) {
+      throw fail(ERROR_CATEGORIES.CONFIG, `Cannot abort split: ${err.message}`, { cause: err });
+    }
+    // An invalid or obsolete checkpoint can still block every future split.
+    // The explicit abort command may unlink it, while preserving the warning
+    // so the user knows recovery metadata could not be inspected.
+    warnings.push(`Checkpoint metadata could not be validated: ${err.message}`);
+  }
+
+  console.log(
+    '\n  ' +
+      chalk.yellow('⚠') +
+      chalk.dim(
+        checkpoint
+          ? ` Split transaction ${checkpoint.transactionId.slice(0, 12)} has ` +
+              `${checkpoint.completed.length} completed and ` +
+              `${checkpoint.plan.groups.length - checkpoint.completed.length} pending group(s).`
+          : ` Split checkpoint metadata is unreadable: ${path}`,
+      ),
+  );
+  console.log(
+    chalk.dim('  Aborting removes only the checkpoint; existing commits and current changes stay.'),
+  );
+
+  if (!yes) {
+    const action = await vimSelect({
+      message: 'Discard the unfinished split checkpoint?',
+      choices: [
+        {
+          name: 'Discard checkpoint',
+          value: 'discard',
+          description: 'Keep HEAD, index, and worktree exactly as they are',
+        },
+        { name: 'Cancel', value: 'cancel', description: 'Keep the checkpoint' },
+      ],
+    });
+    if (action === 'cancel') {
+      console.log(chalk.dim('\n  Split abort cancelled; checkpoint retained.\n'));
+      return {
+        plan: null,
+        warnings,
+        exitReason: 'cancelled',
+        committed: false,
+      };
+    }
+  }
+
+  try {
+    discardSplitCheckpoint(projectRoot);
+  } catch (err) {
+    throw fail(ERROR_CATEGORIES.GIT_STATE, `Cannot abort split: ${err.message}`, { cause: err });
+  }
+  console.log(
+    '\n  ' +
+      chalk.green.bold(
+        '✓ Split checkpoint discarded; existing commits and current changes kept.\n',
+      ),
+  );
+  return {
+    plan: null,
+    provider: null,
+    model: null,
+    latencyMs: null,
+    usage: null,
+    warnings,
+    exitReason: 'split_aborted',
+    committed: false,
+    edited: false,
+    rewrites: 0,
+    data: { checkpointRemoved: true },
+  };
+}
+
 export async function applySplitPlan(
   projectRoot,
   planPath,
   { yes = false, machineOutput = false } = {},
 ) {
+  requireNoSplitCheckpoint(projectRoot);
   let loaded;
   try {
     loaded = await readSplitPlanArtifact(planPath);

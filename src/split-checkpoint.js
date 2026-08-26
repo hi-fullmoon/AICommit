@@ -152,11 +152,20 @@ export function splitCheckpointPath(projectRoot) {
   return checkpointFile(projectRoot);
 }
 
-export function createSplitCheckpoint(projectRoot, plan, snapshots) {
+export function assertNoSplitCheckpoint(projectRoot) {
   const path = checkpointFile(projectRoot);
   if (existsSync(path)) {
-    throw new Error(`An unfinished split checkpoint already exists: ${path}`);
+    throw new Error(
+      `An unfinished split checkpoint already exists: ${path}\n` +
+        'Resume it with "aicommit split --resume", or discard only the checkpoint with ' +
+        '"aicommit split --abort". Discarding keeps existing commits and current changes.',
+    );
   }
+  return path;
+}
+
+export function createSplitCheckpoint(projectRoot, plan, snapshots) {
+  const path = assertNoSplitCheckpoint(projectRoot);
   const now = new Date().toISOString();
   const transactionId = createHash('sha256')
     .update(JSON.stringify({ plan, snapshots, createdAt: now }))
@@ -221,4 +230,23 @@ export function writeSplitCheckpoint(projectRoot, input) {
 
 export function removeSplitCheckpoint(projectRoot) {
   rmSync(checkpointFile(projectRoot), { force: true });
+}
+
+// Explicitly abandoning recovery removes only AICommit's metadata. It never
+// rewrites HEAD, the index, or the worktree. A symlink at the fixed checkpoint
+// path is safe to unlink, but directories and special files are left alone.
+export function discardSplitCheckpoint(projectRoot) {
+  const path = checkpointFile(projectRoot);
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new Error(`No split checkpoint found: ${path}`);
+    throw err;
+  }
+  if (!stat.isFile() && !stat.isSymbolicLink()) {
+    throw new Error('Split checkpoint must be a regular file or symbolic link to discard it.');
+  }
+  rmSync(path);
+  return path;
 }

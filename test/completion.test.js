@@ -26,6 +26,9 @@ test('completion generators cover stable commands and shell-specific registratio
     }
     const rangeOption = `${longOptionPrefix}range`;
     assert.match(script, new RegExp(rangeOption), `${shell} omits ${rangeOption}`);
+    for (const action of ['--resume', '--abort']) {
+      assert.match(script, new RegExp(action), `${shell} omits ${action}`);
+    }
     assert.doesNotMatch(script, /apiKey|credential|secret/i);
   }
   assert.match(generateCompletion('bash'), /complete -F _aicommit aicommit/);

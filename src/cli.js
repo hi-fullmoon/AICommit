@@ -18,7 +18,7 @@ function showHelp() {
     ${chalk.dim('$')} aicommit policy <template|check> [options]
     ${chalk.dim('$')} aicommit preset <show|validate|path|install|rollback> [options]
     ${chalk.dim('$')} aicommit completion <bash|zsh|fish>
-    ${chalk.dim('$')} aicommit split <plan|apply> --file=<path> [options]
+    ${chalk.dim('$')} aicommit split <plan|apply|--resume|--abort> [options]
 
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
@@ -33,6 +33,7 @@ function showHelp() {
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
     split --resume        Resume the repository's unfinished transaction
+    split --abort         Discard recovery metadata; keep commits and changes
     stats [action]        Show quality/cost trends; show, clear, enable, disable
     metrics [action]      Manage local metrics: status, clear, enable, disable
 
@@ -83,6 +84,7 @@ function showHelp() {
     aicommit split plan --scope=staged --file=.aicommit-plan.json --yes
     aicommit split apply --file=.aicommit-plan.json --yes
     aicommit split --resume --yes  Resume pending groups from the checkpoint
+    aicommit split --abort --yes  Discard a stale checkpoint without changing Git state
     aicommit --reasoning=low  Stream reasoning; Ctrl+O expands/collapses it
     aicommit --dry-run    Review a generated message without committing
     aicommit --yes        Commit already staged changes without prompts
@@ -222,9 +224,12 @@ export function parseArgs(args = process.argv.slice(2)) {
 
   let splitCommand = null;
   if (args[0] === 'split') {
-    splitCommand = args[1] === '--resume' ? 'resume' : args[1];
-    if (!['plan', 'apply', 'resume'].includes(splitCommand)) {
-      throw fail(ERROR_CATEGORIES.CONFIG, 'split requires plan, apply, or --resume.');
+    splitCommand = args[1] === '--resume' ? 'resume' : args[1] === '--abort' ? 'abort' : args[1];
+    if (!['plan', 'apply', 'resume', 'abort'].includes(splitCommand)) {
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'split requires plan, apply, or one of --resume/--abort.',
+      );
     }
     args = args.slice(2);
   }
@@ -449,7 +454,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     );
   }
   if (splitCommand) {
-    if (splitCommand !== 'resume' && !splitPlanFile) {
+    if (!['resume', 'abort'].includes(splitCommand) && !splitPlanFile) {
       throw fail(ERROR_CATEGORIES.CONFIG, `split ${splitCommand} requires --file=<path>.`);
     }
     if (targetPath) {
@@ -484,7 +489,7 @@ export function parseArgs(args = process.argv.slice(2)) {
       ) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
-          'split --resume accepts only --yes, --output, and --debug.',
+          `split --${splitCommand} accepts only --yes, --output, and --debug.`,
         );
       }
     }

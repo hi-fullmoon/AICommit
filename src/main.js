@@ -42,7 +42,7 @@ import {
   stringifyConfigRedacted,
   redactSensitiveUrl,
 } from './utils.js';
-import { applySplitPlan, resumeSplit, splitFlow } from './split.js';
+import { abortSplit, applySplitPlan, resumeSplit, splitFlow } from './split.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { configureExtensionHost } from './extensions.js';
@@ -163,14 +163,14 @@ export async function main() {
   console.log('  ' + chalk.dim('─'.repeat(45)));
   console.log('  ' + chalk.dim(`Working directory: ${sanitizeTerminalText(process.cwd())}`));
 
-  if (splitCommand === 'apply' || splitCommand === 'resume') {
+  if (['apply', 'resume', 'abort'].includes(splitCommand)) {
     const projectRoot = getProjectRoot();
     if (!isGitRepo(projectRoot)) {
       throw fail(ERROR_CATEGORIES.GIT_STATE, `Not a git repository: ${process.cwd()}`);
     }
-    return splitCommand === 'resume'
-      ? resumeSplit(projectRoot, { yes, machineOutput })
-      : applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
+    if (splitCommand === 'resume') return resumeSplit(projectRoot, { yes, machineOutput });
+    if (splitCommand === 'abort') return abortSplit(projectRoot, { yes, machineOutput });
+    return applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
   }
 
   if (doctor) return runDoctor(cliProvider);

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  abortSplit,
   normalizePlan,
   getAllChangedFiles,
   getStagedChangedFiles,
@@ -28,6 +29,7 @@ import {
   captureUntrackedSnapshots,
   preflightSplit,
   resumeSplit,
+  splitFlow,
   validateSplitExtensionMessages,
 } from '../src/split.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -681,4 +683,57 @@ test('resume reconciles a commit created in the checkpoint crash window exactly 
   );
   assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }), '');
   assert.equal(existsSync(splitCheckpointPath(repo)), false);
+});
+
+test('new split stops at an existing checkpoint and abort preserves current Git state', async (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'a.txt'), 'base a\n');
+  writeFileSync(join(repo, 'b.txt'), 'base b\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'a.txt'), 'next a\n');
+  writeFileSync(join(repo, 'b.txt'), 'next b\n');
+  const files = getAllChangedFiles(repo);
+  const groups = [
+    { message: 'fix: update a', files: ['a.txt'] },
+    { message: 'fix: update b', files: ['b.txt'] },
+  ];
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, '#!/bin/sh\nexit 1\n');
+  chmodSync(hook, 0o755);
+
+  assert.equal(executeSplit(groups, repo, files, false, 'all'), false);
+  await assert.rejects(
+    splitFlow(
+      { ...DEFAULT_CONFIG, reasoning: { ...DEFAULT_CONFIG.reasoning, mode: 'off' } },
+      repo,
+      { scope: 'all', yes: true },
+    ),
+    /Cannot start a new split:[\s\S]*aicommit split --resume[\s\S]*aicommit split --abort/,
+  );
+
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repo,
+    encoding: 'utf8',
+  });
+  const indexBefore = readFileSync(join(repo, '.git', 'index'));
+  const statusBefore = execFileSync('git', ['status', '--porcelain'], {
+    cwd: repo,
+    encoding: 'utf8',
+  });
+  const result = await abortSplit(repo, { yes: true });
+
+  assert.equal(result.exitReason, 'split_aborted');
+  assert.equal(result.data.checkpointRemoved, true);
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
+  assert.equal(
+    execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }),
+    headBefore,
+  );
+  assert.deepEqual(readFileSync(join(repo, '.git', 'index')), indexBefore);
+  assert.equal(
+    execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }),
+    statusBefore,
+  );
 });

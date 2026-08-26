@@ -184,6 +184,39 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
   assert.equal(git(repo, ['status', '--porcelain']), '');
 });
 
+test('split --abort clears stale recovery metadata without rewriting replacement work', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-abort-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = prepareTwoFileRepo(root, 'repo');
+  const planPath = join(root, 'abort.json');
+  await writeStagedPlan(repo, planPath, [
+    { message: 'fix: commit a snapshot', files: ['a.txt'] },
+    { message: 'feat: commit b snapshot', files: ['b.txt'] },
+  ]);
+
+  const interrupted = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes'], {
+    NODE_ENV: 'test',
+    AICOMMIT_TEST_SPLIT_FAULT: 'after_checkpoint_before_commit:SIGINT',
+  });
+  assert.notEqual(interrupted.code, 0, interrupted.stdout + interrupted.stderr);
+  assert.equal(existsSync(splitCheckpointPath(repo)), true);
+
+  git(repo, ['commit', '-qm', 'chore: replace interrupted split']);
+  const headBefore = git(repo, ['rev-parse', 'HEAD']);
+  const statusBefore = git(repo, ['status', '--porcelain']);
+  const aborted = await runCli(repo, home, ['split', '--abort', '--yes', '--output=json']);
+  assert.equal(aborted.code, 0, aborted.stdout + aborted.stderr);
+  const output = JSON.parse(aborted.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.exitReason, 'split_aborted');
+  assert.equal(output.data.checkpointRemoved, true);
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
+  assert.equal(git(repo, ['rev-parse', 'HEAD']), headBefore);
+  assert.equal(git(repo, ['status', '--porcelain']), statusBefore);
+});
+
 test('fault matrix preserves rename, deletion, and binary groups through plan/apply', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-file-kinds-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

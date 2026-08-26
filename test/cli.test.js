@@ -50,6 +50,14 @@ test('parseArgs recognizes split plan/apply artifact commands', () => {
     () => parseArgs(['split', '--resume', '--file=x']),
     /accepts only --yes, --output, and --debug/,
   );
+
+  const abort = parseArgs(['split', '--abort', '--yes']);
+  assert.equal(abort.splitCommand, 'abort');
+  assert.equal(abort.splitPlanFile, null);
+  assert.throws(
+    () => parseArgs(['split', '--abort', '--file=x']),
+    /accepts only --yes, --output, and --debug/,
+  );
 });
 
 test('parseArgs keeps experimental hunk splitting opt-in and scoped to planning', () => {

@@ -234,6 +234,7 @@ aicommit --split=all --yes # non-interactively plan and commit all working-tree 
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split --resume --yes # resume an interrupted split transaction
+aicommit split --abort --yes # discard a stale checkpoint; keep commits and changes
 aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
@@ -359,7 +360,7 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
 
-Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split --resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
+Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split --resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If you intentionally finished or replaced the interrupted work through another Git workflow, run `aicommit split --abort`; it removes only the stale checkpoint and never rewrites HEAD, the index, or the worktree. New committing split runs detect a checkpoint before contacting the provider. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
 
 Split remains file-level by default. `--split-hunks` opts in to experimental same-file splitting for tracked text modifications with multiple unified-diff hunks. The JSON plan and checkpoint store only hunk IDs, line ranges, and hashes—not patch content. Before the first commit, AICommit applies every selected patch to a temporary index and requires the final tree to reproduce the captured target blobs exactly; parsing, patching, binary/mode-change, or lossless-validation failures fall back to a file-level plan. The worktree is never modified by hunk execution.
 
