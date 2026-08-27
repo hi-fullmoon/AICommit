@@ -140,7 +140,7 @@ const SENSITIVE_URL_PARAMETER_RE =
 // Provider endpoints occasionally need non-secret query parameters such as
 // `api-version`, but credentials embedded in userinfo or well-known secret
 // parameters must never be echoed to terminals, JSON inspection output, or
-// extension processes. Fragments are omitted because HTTP never sends them.
+// diagnostics. Fragments are omitted because HTTP never sends them.
 export function redactSensitiveUrl(value) {
   try {
     const url = new URL(String(value));

@@ -1,6 +1,6 @@
-import { readFile, writeFile, chmod, copyFile, rename, unlink } from 'node:fs/promises';
+import { readFile, writeFile, chmod, copyFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 
 import chalk from 'chalk';
 import ora from 'ora';
@@ -13,6 +13,7 @@ import { CONFIG_SCHEMA_VERSION, isSecureApiUrl, validateUserConfig } from './con
 import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 import { loadProviderPresetManifest } from './provider-presets.js';
+import { resolveConfigLocations, userConfigLocations } from './config-paths.js';
 
 // Merge the wizard's answers into the one supported Provider/Model schema.
 // Existing providers and unrelated global settings are preserved; the
@@ -41,6 +42,9 @@ async function readExistingConfig(path) {
 }
 
 async function writeConfigAtomic(path, value) {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700).catch(() => {});
   const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
     await writeFile(tempPath, JSON.stringify(value, null, 2) + '\n', {
@@ -58,7 +62,8 @@ async function writeConfigAtomic(path, value) {
 
 export async function runSetup(dependencies = {}) {
   const {
-    targetPath = join(homedir(), '.aicommit.config.json'),
+    targetPath: requestedTargetPath,
+    home = homedir(),
     selectPrompt = vimSelect,
     inputPrompt = input,
     passwordPrompt = password,
@@ -67,6 +72,12 @@ export async function runSetup(dependencies = {}) {
     spinnerFactory = ora,
     presetLoader = loadProviderPresetManifest,
   } = dependencies;
+  const defaultLocations = await resolveConfigLocations(userConfigLocations(home));
+  const targetPath = requestedTargetPath ?? defaultLocations.canonical;
+  const sourcePath =
+    requestedTargetPath !== undefined
+      ? targetPath
+      : defaultLocations.activePath || defaultLocations.canonical;
 
   console.log('');
   console.log(
@@ -78,8 +89,11 @@ export async function runSetup(dependencies = {}) {
   // project config for harmless generation preferences, but it must never be
   // able to redirect a globally authenticated request.
   console.log(chalk.dim(`  Credentials will be stored in the user config: ${targetPath}`));
+  if (sourcePath !== targetPath) {
+    console.log(chalk.dim(`  Existing legacy config will be migrated from: ${sourcePath}`));
+  }
 
-  const existing = await readExistingConfig(targetPath);
+  const existing = await readExistingConfig(sourcePath);
   const { manifest: presetManifest } = await presetLoader();
   const providerPresets = presetManifest.providers;
 

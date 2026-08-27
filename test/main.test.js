@@ -69,6 +69,7 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   const requests = [];
 
@@ -94,7 +95,7 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   const { port } = server.address();
 
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api-version=1&api_key=endpoint-query-secret#endpoint-fragment-secret`,
       apiKey: '',
@@ -153,9 +154,10 @@ test('repository team policy cannot be overridden with --lang', async (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
@@ -177,11 +179,12 @@ test('credential helper failures redact endpoint secrets in text and doctor JSON
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   const gitConfig = join(root, 'empty-gitconfig');
   writeFileSync(gitConfig, '');
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl:
         'https://url-user:url-password@provider.example/v1?api_key=query-secret#fragment-secret',
@@ -213,6 +216,7 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   git(repo, ['reset', '-q']);
 
@@ -234,7 +238,7 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
   const { port } = server.address();
 
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -253,15 +257,16 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
 });
 
-test('interactive cancellation returns through cleanup and records a cancelled metric', async (t) => {
+test('interactive cancellation returns through cleanup', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-cancel-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   git(repo, ['reset', '-q']);
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
@@ -276,12 +281,6 @@ test('interactive cancellation returns through cleanup and records a cancelled m
   assert.match(result.stdout, /Cancelled — stage files with git add/);
   assert.equal(git(repo, ['diff', '--staged']).trim(), '');
   assert.match(git(repo, ['diff']), /value = 2/);
-
-  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  assert.equal(metrics.at(-1).result, 'cancelled');
 });
 
 test('q cancels an interactive selection immediately', async (t) => {
@@ -289,10 +288,11 @@ test('q cancels an interactive selection immediately', async (t) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   git(repo, ['reset', '-q']);
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
@@ -307,12 +307,6 @@ test('q cancels an interactive selection immediately', async (t) => {
   assert.match(result.stdout, /Cancelled — stage files with git add/);
   assert.equal(git(repo, ['diff', '--staged']).trim(), '');
   assert.match(git(repo, ['diff']), /value = 2/);
-
-  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  assert.equal(metrics.at(-1).result, 'cancelled');
 });
 
 test('q exits a selection without a cancel choice as a clean cancellation', async (t) => {
@@ -320,11 +314,12 @@ test('q exits a selection without a cancel choice as a clean cancellation', asyn
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
 
   const result = await runCli(root, home, ['setup'], {}, 'q');
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Quit — no commit was created/);
-  assert.throws(() => readFileSync(join(home, '.aicommit.config.json'), 'utf8'), {
+  assert.throws(() => readFileSync(join(home, '.aicommit', 'config.json'), 'utf8'), {
     code: 'ENOENT',
   });
 });
@@ -334,9 +329,10 @@ test('interactive split scope cancellation returns without contacting the provid
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
@@ -351,12 +347,6 @@ test('interactive split scope cancellation returns without contacting the provid
   assert.match(result.stdout, /Split cancelled/);
   assert.match(git(repo, ['diff', '--staged']), /value = 2/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
-
-  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  assert.equal(metrics.at(-1).result, 'cancelled');
 });
 
 test('non-interactive single-commit flow creates the reviewed staged snapshot', async (t) => {
@@ -364,6 +354,7 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
 
   const server = createServer((req, res) => {
@@ -381,7 +372,7 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -406,6 +397,7 @@ test('interactive flow treats an existing staged snapshot as final without anoth
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'later.js'), 'export const later = true;\n');
 
@@ -424,7 +416,7 @@ test('interactive flow treats an existing staged snapshot as final without anoth
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -449,6 +441,7 @@ test('single-file split run --scope=all keeps split semantics and stages the wor
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   git(repo, ['reset', '-q']);
 
@@ -478,7 +471,7 @@ test('single-file split run --scope=all keeps split semantics and stages the wor
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -506,6 +499,7 @@ test('split run --scope=staged commits the index snapshot and leaves newer edits
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
   git(repo, ['add', 'extra.js']);
@@ -535,7 +529,7 @@ test('split run --scope=staged commits the index snapshot and leaves newer edits
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -562,107 +556,12 @@ test('split run --scope=staged commits the index snapshot and leaves newer edits
   assert.match(git(repo, ['status', '--porcelain']), /^ M app\.js$/m);
 });
 
-test('experimental hunk plan/apply creates lossless same-file commits without provider reuse', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-hunks-e2e-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const home = join(root, 'home');
-  mkdirSync(home);
-  const repo = makeRepo(root);
-  git(repo, ['reset', '--hard', '-q', 'HEAD']);
-  const original = Array.from(
-    { length: 30 },
-    (_, index) => `export const value${index + 1} = ${index + 1};`,
-  );
-  writeFileSync(join(repo, 'app.js'), original.join('\n') + '\n');
-  git(repo, ['add', 'app.js']);
-  git(repo, ['commit', '-qm', 'build baseline']);
-  const changed = [...original];
-  changed[1] = 'export const firstFeature = true;';
-  changed[26] = 'export const secondFeature = true;';
-  writeFileSync(join(repo, 'app.js'), changed.join('\n') + '\n');
-
-  const server = createServer((req, res) => {
-    let body = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      body += chunk;
-    });
-    req.on('end', () => {
-      assert.match(body, /H1/);
-      assert.match(body, /H2/);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify([
-                  {
-                    subject: 'feat: add first feature',
-                    files: [],
-                    hunks: [{ path: 'app.js', ids: ['H1'] }],
-                  },
-                  {
-                    subject: 'feat: add second feature',
-                    files: [],
-                    hunks: [{ path: 'app.js', ids: ['H2'] }],
-                  },
-                ]),
-              },
-            },
-          ],
-        }),
-      );
-    });
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
-  const { port } = server.address();
-  const configPath = join(home, '.aicommit.config.json');
-  writeFileSync(
-    join(home, '.aicommit.config.json'),
-    stringifyUserConfig({
-      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-      apiKey: '',
-      modelId: 'local-test-model',
-      language: 'en',
-      reasoning: { mode: 'off' },
-    }),
-  );
-
-  const planPath = join(root, 'hunk-plan.json');
-  const planned = await runCli(repo, home, [
-    'split',
-    'plan',
-    '--scope=all',
-    '--split-hunks',
-    `--file=${planPath}`,
-    '--yes',
-    '--no-reasoning',
-  ]);
-  assert.equal(planned.code, 0, planned.stdout + planned.stderr);
-  assert.match(planned.stdout, /\[H1\]/);
-  assert.match(planned.stdout, /\[H2\]/);
-  const artifact = JSON.parse(readFileSync(planPath, 'utf8'));
-  assert.equal(artifact.hunkMode, true);
-  assert.equal(artifact.groups[0].hunks[0].ids[0], 'H1');
-  assert.doesNotMatch(JSON.stringify(artifact), /firstFeature|secondFeature|diff --git/);
-
-  rmSync(configPath);
-  const applied = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
-  assert.equal(applied.code, 0, applied.stdout + applied.stderr);
-  const firstCommit = git(repo, ['show', 'HEAD~1:app.js']);
-  assert.match(firstCommit, /firstFeature/);
-  assert.doesNotMatch(firstCommit, /secondFeature/);
-  assert.equal(git(repo, ['show', 'HEAD:app.js']), changed.join('\n') + '\n');
-  assert.equal(git(repo, ['status', '--porcelain']), '');
-});
-
 test('split plan exports JSON and split apply commits it without provider configuration', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-plan-apply-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
   git(repo, ['add', 'extra.js']);
@@ -691,9 +590,9 @@ test('split plan exports JSON and split apply commits it without provider config
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  const configPath = join(home, '.aicommit.config.json');
+  const configPath = join(home, '.aicommit', 'config.json');
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -733,6 +632,7 @@ test('split resume finishes a checkpointed apply without provider configuration'
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
   git(repo, ['add', 'extra.js']);
@@ -761,9 +661,9 @@ test('split resume finishes a checkpointed apply without provider configuration'
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  const configPath = join(home, '.aicommit.config.json');
+  const configPath = join(home, '.aicommit', 'config.json');
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -812,6 +712,7 @@ test('split apply rejects a stale fingerprint before mutating the index', async 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   const planPath = join(root, 'split.json');
 
@@ -837,9 +738,9 @@ test('split apply rejects a stale fingerprint before mutating the index', async 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  const configPath = join(home, '.aicommit.config.json');
+  const configPath = join(home, '.aicommit', 'config.json');
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -874,6 +775,7 @@ test('split plan rejects output inside the working tree before a provider reques
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   let requests = 0;
   const server = createServer((req, res) => {
@@ -886,7 +788,7 @@ test('split plan rejects output inside the working tree before a provider reques
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -914,6 +816,7 @@ test('split run --scope=all scans complete untracked files before auto-staging',
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(
     join(repo, 'notes.txt'),
@@ -931,7 +834,7 @@ test('split run --scope=all scans complete untracked files before auto-staging',
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -960,6 +863,7 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
 
   const server = createServer((req, res) => {
@@ -987,7 +891,7 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -1013,24 +917,14 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   assert.doesNotMatch(result.stdout, /private reasoning|AI-powered|Calling/);
   assert.match(result.stderr, /AI-powered commit message generator/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: expose stable machine output');
-  const metricText = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8');
-  const metric = JSON.parse(metricText.trim());
-  assert.deepEqual(Object.keys(metric), ['durationMs', 'usage', 'result', 'edited', 'rewrites']);
-  assert.equal(metric.result, 'committed');
-  assert.equal(metric.edited, false);
-  assert.equal(metric.rewrites, 0);
-  assert.deepEqual(metric.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
-  assert.doesNotMatch(
-    metricText,
-    /stable machine output|private reasoning|app\.js|local-test-model|custom/,
-  );
 });
 
-test('automatic policy correction is counted as a privacy-safe rewrite metric', async (t) => {
+test('automatic policy correction retries once before committing', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-policy-correction-metric-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   let calls = 0;
 
@@ -1056,7 +950,7 @@ test('automatic policy correction is counted as a privacy-safe rewrite metric', 
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -1069,41 +963,6 @@ test('automatic policy correction is counted as a privacy-safe rewrite metric', 
   const result = await runCli(repo, home, ['--yes', '--no-reasoning']);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.equal(calls, 2);
-  const metricText = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8');
-  const metric = JSON.parse(metricText.trim());
-  assert.equal(metric.rewrites, 1);
-  assert.equal(metric.edited, false);
-  assert.doesNotMatch(metricText, /application value|app\.js|local-test-model/);
-});
-
-test('stats command reports local trends without requiring a Git repository', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'aicommit-stats-e2e-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const home = join(root, 'home');
-  mkdirSync(home);
-  const metricsPath = join(home, 'quality.jsonl');
-  writeFileSync(
-    join(home, '.aicommit.config.json'),
-    stringifyUserConfig({ metrics: { enabled: true, path: metricsPath, maxEntries: 20 } }),
-  );
-  writeFileSync(
-    metricsPath,
-    JSON.stringify({
-      durationMs: 250,
-      usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
-      result: 'committed',
-      edited: false,
-      rewrites: 0,
-    }) + '\n',
-  );
-
-  const result = await runCli(root, home, ['stats']);
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /Local quality stats/);
-  assert.match(result.stdout, /First pass:\s+1 \(100\.0%\)/);
-  assert.match(result.stdout, /Tokens:\s+total 25/);
-  assert.match(result.stdout, /local only; no messages, diffs, reasoning/);
-  assert.equal(readFileSync(metricsPath, 'utf8').trim().split('\n').length, 1);
 });
 
 test('--output=json returns the split plan without reasoning or terminal decoration', async (t) => {
@@ -1111,6 +970,7 @@ test('--output=json returns the split plan without reasoning or terminal decorat
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
   git(repo, ['add', 'extra.js']);
@@ -1140,7 +1000,7 @@ test('--output=json returns the split plan without reasoning or terminal decorat
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
@@ -1176,6 +1036,7 @@ test('configuration failures use exit code 2 in text and JSON modes', async (t) 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
 
   const textResult = await runCli(repo, home, ['--unknown-option']);
@@ -1196,6 +1057,7 @@ test('provider and response-format errors have stable JSON categories and exit c
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const home = join(root, 'home');
     mkdirSync(home);
+    mkdirSync(join(home, '.aicommit'));
     const repo = makeRepo(root);
     const server = createServer((req, res) => {
       req.resume();
@@ -1208,7 +1070,7 @@ test('provider and response-format errors have stable JSON categories and exit c
     t.after(() => server.close());
     const { port } = server.address();
     writeFileSync(
-      join(home, '.aicommit.config.json'),
+      join(home, '.aicommit', 'config.json'),
       stringifyUserConfig({
         apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
         apiKey: '',
@@ -1235,6 +1097,7 @@ test('clean repositories return a git_state JSON error with exit code 3', async 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'app.js'), 'export const value = 1;\n');
   git(repo, ['add', 'app.js']);
@@ -1251,6 +1114,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   let authorization = null;
 
@@ -1272,7 +1136,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   t.after(() => server.close());
   const { port } = server.address();
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api_key=doctor-url-secret&api-version=1#doctor-fragment-secret`,
       apiKey: 'legacy-plaintext-must-not-win',

@@ -1,14 +1,11 @@
 import { readFile, chmod } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
-import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
 
 import chalk from 'chalk';
 
-import { fileExists, deepMerge } from './utils.js';
+import { deepMerge, fileExists } from './utils.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { resolveCredential } from './credentials.js';
-import { DEFAULT_METRICS } from './metrics.js';
 import { DEFAULT_COMMIT_POLICY, mergeCommitPolicy, validateCommitPolicyConfig } from './policy.js';
 import {
   DEFAULT_REPOSITORY_CONTEXT,
@@ -18,7 +15,7 @@ import {
 } from './context.js';
 import { readTeamPolicy } from './team-policy.js';
 import { isProviderType, PROVIDER_TYPES } from './providers.js';
-import { isExtensionProviderType, validateExtensionsConfig } from './extensions.js';
+import { projectConfigPath, resolveConfigLocations, userConfigLocations } from './config-paths.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
 // be able to redirect requests while inheriting the API key from the user's
@@ -38,9 +35,7 @@ export const PROJECT_CONNECTION_KEYS = new Set([
   'extraBody',
   'retry',
   'credentialHelper',
-  'metrics',
   'allowProjectPrompt',
-  'extensions',
 ]);
 
 const PROJECT_SAFE_KEYS = new Set([
@@ -143,16 +138,6 @@ export const DEFAULT_CONFIG = {
   credentialHelper: {
     enabled: false,
     username: 'aicommit',
-  },
-  // Minimal local-only run metrics. There is deliberately no upload target.
-  metrics: { ...DEFAULT_METRICS },
-  // Executable extensions are selected only from the user-owned config.
-  // Their v1 manifests must explicitly deny credential access and run in a
-  // permissioned child process instead of sharing this process.
-  extensions: {
-    manifests: [],
-    timeoutMs: 3000,
-    maxContextChars: 2000,
   },
   // Cap on diff characters sent to the model per call. Oversized diffs are
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
@@ -370,7 +355,7 @@ export function validateUserConfig(value) {
 }
 
 // Select a Provider and one of its named Model profiles, then flatten both
-// layers so request, split, and extension code keep consuming one runtime
+// layers so request and split code keep consuming one runtime
 // config with a concrete modelId.
 function resolveSelection(config, catalog, cliProvider, cliModel) {
   const providers = catalog.providers;
@@ -462,26 +447,9 @@ export function validateConfig(config) {
   }
   if (
     typeof config.providerType !== 'string' ||
-    (config.providerType !== '' &&
-      !isProviderType(config.providerType) &&
-      !isExtensionProviderType(config.providerType))
+    (config.providerType !== '' && !isProviderType(config.providerType))
   ) {
-    throw new Error(
-      `Invalid config "providerType": expected ${PROVIDER_TYPES.join(', ')}, extension:<id>, or "".`,
-    );
-  }
-  validateExtensionsConfig(config.extensions);
-  if (!config.metrics || typeof config.metrics !== 'object' || Array.isArray(config.metrics)) {
-    throw new Error('Invalid config "metrics": expected an object.');
-  }
-  if (typeof config.metrics.enabled !== 'boolean') {
-    throw new Error('Invalid config "metrics.enabled": expected a boolean.');
-  }
-  if (
-    typeof config.metrics.path !== 'string' ||
-    (config.metrics.path && !isAbsolute(config.metrics.path))
-  ) {
-    throw new Error('Invalid config "metrics.path": expected an absolute path or "".');
+    throw new Error(`Invalid config "providerType": expected ${PROVIDER_TYPES.join(', ')}, or "".`);
   }
   if (
     typeof config.apiKeyEnv !== 'string' ||
@@ -558,7 +526,6 @@ export function validateConfig(config) {
   assertNumber(config.retry, 'maxAttempts', { integer: true, min: 1, max: 10 });
   assertNumber(config.retry, 'baseDelayMs', { integer: true, min: 0, max: 60000 });
   assertNumber(config.retry, 'maxDelayMs', { integer: true, min: 0, max: 300000 });
-  assertNumber(config.metrics, 'maxEntries', { integer: true, min: 1, max: 10000 });
   if (config.retry.maxDelayMs < config.retry.baseDelayMs) {
     throw new Error('Invalid config "retry.maxDelayMs": must be >= retry.baseDelayMs.');
   }
@@ -596,6 +563,11 @@ export function getProjectRoot() {
   }
 }
 
+function warnLegacyConfig(kind, locations) {
+  console.error(chalk.yellow(`  ⚠ Using legacy ${kind} config: ${locations.legacy}`));
+  console.error(chalk.dim(`    Move it to ${locations.canonical}.`));
+}
+
 export async function loadConfig(
   cliProvider = null,
   { model: cliModel = null, resolveCredentials = true } = {},
@@ -605,8 +577,10 @@ export async function loadConfig(
   let catalog = DEFAULT_PROVIDER_CATALOG;
   const loaded = [];
 
-  const userPath = join(homedir(), '.aicommit.config.json');
-  if (await fileExists(userPath)) {
+  const userLocations = await resolveConfigLocations(userConfigLocations());
+  const userPath = userLocations.activePath;
+  if (userPath) {
+    if (userLocations.usingLegacy) warnLegacyConfig('user', userLocations);
     let parsed;
     try {
       parsed = JSON.parse(await readFile(userPath, 'utf-8'));
@@ -635,7 +609,7 @@ export async function loadConfig(
     modelName,
   } = resolveSelection(config, catalog, cliProvider, cliModel);
 
-  const projectPath = join(projectRoot, '.aicommit.config.json');
+  const projectPath = projectConfigPath(projectRoot);
   if (projectPath !== userPath && (await fileExists(projectPath))) {
     let parsed;
     try {
@@ -653,7 +627,7 @@ export async function loadConfig(
         ),
       );
       console.error(
-        chalk.dim('    Put provider credentials and endpoints in ~/.aicommit.config.json.'),
+        chalk.dim('    Put provider credentials and endpoints in ~/.aicommit/config.json.'),
       );
     }
   }
@@ -670,6 +644,12 @@ export async function loadConfig(
     });
     loaded.push('team policy');
   }
+
+  // These v2.0-era settings are intentionally ignored after the related
+  // features were removed. Keeping old config files loadable makes the
+  // product simplification a non-disruptive upgrade for normal users.
+  delete resolvedConfig.metrics;
+  delete resolvedConfig.extensions;
 
   validateConfig(resolvedConfig);
   const credential = resolveCredentials

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -108,7 +109,7 @@ test('mergeSetupConfig does not mutate the input', () => {
 test('runSetup saves a preset provider atomically with environment credentials', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const targetPath = join(root, '.aicommit.config.json');
+  const targetPath = join(root, '.aicommit', 'config.json');
   const previousKey = process.env.AICOMMIT_SETUP_TEST_KEY;
   process.env.AICOMMIT_SETUP_TEST_KEY = 'secret-from-env';
   t.after(() => {
@@ -165,14 +166,58 @@ test('runSetup saves a preset provider atomically with environment credentials',
   if (process.platform !== 'win32') {
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
   }
-  assert.deepEqual(readdirSync(root), ['.aicommit.config.json']);
+  assert.deepEqual(readdirSync(root), ['.aicommit']);
+  assert.deepEqual(readdirSync(join(root, '.aicommit')), ['config.json']);
   assert.deepEqual(spinnerEvents, ['Connection OK — 42ms']);
+});
+
+test('runSetup migrates a valid legacy user config to the canonical path', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-legacy-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const legacyPath = join(root, '.aicommit.config.json');
+  const canonicalPath = join(root, '.aicommit', 'config.json');
+  writeFileSync(
+    legacyPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      defaultProvider: 'openai',
+      providers: {
+        openai: {
+          providerType: 'openai',
+          apiUrl: 'https://api.openai.com/v1/chat/completions',
+          apiKey: 'legacy-key',
+          defaultModel: 'quality',
+          models: { quality: { modelId: 'legacy-model' } },
+        },
+      },
+      temperature: 0.3,
+    }),
+  );
+
+  const selections = ['openai', 'quality', 'en'];
+  const modelInputs = ['quality', 'gpt-quality'];
+  await runSetup({
+    home: root,
+    selectPrompt: async () => selections.shift(),
+    inputPrompt: async () => modelInputs.shift(),
+    passwordPrompt: async () => '',
+    confirmPrompt: async () => false,
+    spinnerFactory: () => assert.fail('connection test should not run'),
+    presetLoader: bundledPresetLoader,
+  });
+
+  const migrated = JSON.parse(readFileSync(canonicalPath, 'utf8'));
+  assert.equal(migrated.temperature, 0.3);
+  assert.equal(migrated.providers.openai.apiKey, 'legacy-key');
+  assert.equal(migrated.providers.openai.models.quality.modelId, 'gpt-quality');
+  assert.equal(readFileSync(legacyPath, 'utf8').includes('legacy-model'), true);
 });
 
 test('runSetup preserves invalid config and cancels after a failed connection test', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-invalid-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const targetPath = join(root, '.aicommit.config.json');
+  const targetPath = join(root, '.aicommit', 'config.json');
+  mkdirSync(join(root, '.aicommit'));
   writeFileSync(targetPath, '{invalid json\n');
   chmodSync(targetPath, 0o600);
 
@@ -207,16 +252,16 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   });
 
   assert.equal(readFileSync(targetPath, 'utf-8'), '{invalid json\n');
-  const backup = readdirSync(root).find((name) => name.includes('.invalid-'));
+  const backup = readdirSync(join(root, '.aicommit')).find((name) => name.includes('.invalid-'));
   assert.ok(backup, 'invalid source config is backed up');
-  assert.equal(readFileSync(join(root, backup), 'utf-8'), '{invalid json\n');
+  assert.equal(readFileSync(join(root, '.aicommit', backup), 'utf-8'), '{invalid json\n');
   assert.deepEqual(spinnerEvents, [['fail', 'Connection failed']]);
 });
 
 test('setup discovers a new compatible provider only from preset data', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-preset-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const targetPath = join(root, '.aicommit.config.json');
+  const targetPath = join(root, '.aicommit', 'config.json');
   const base = (await bundledPresetLoader()).manifest;
   const manifest = JSON.parse(JSON.stringify(base));
   manifest.version = '2.1.0';

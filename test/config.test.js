@@ -237,23 +237,6 @@ test('validateConfig validates credential helper settings', () => {
   );
 });
 
-test('validateConfig validates local metric settings', () => {
-  assert.equal(validateConfig(cfg()).metrics.enabled, true);
-  assert.throws(() => validateConfig(cfg({ metrics: null })), /metrics/);
-  assert.throws(
-    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, enabled: 'yes' } })),
-    /metrics\.enabled/,
-  );
-  assert.throws(
-    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, path: 'relative.jsonl' } })),
-    /metrics\.path/,
-  );
-  assert.throws(
-    () => validateConfig(cfg({ metrics: { ...DEFAULT_CONFIG.metrics, maxEntries: 0 } })),
-    /maxEntries/,
-  );
-});
-
 test('validateConfig validates repository context budgets', () => {
   assert.equal(validateConfig(cfg()).repositoryContext.enabled, true);
   assert.throws(() => validateConfig(cfg({ repositoryContext: null })), /repositoryContext/);
