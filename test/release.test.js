@@ -3,13 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const readText = async (path) => (await readFile(path, 'utf8')).replaceAll('\r\n', '\n');
 
 test('CI and npm release workflows run only for version tags', async () => {
-  const ci = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const release = await readFile(
-    new URL('../.github/workflows/release.yml', import.meta.url),
-    'utf8',
-  );
+  const ci = await readText(new URL('../.github/workflows/ci.yml', import.meta.url));
+  const release = await readText(new URL('../.github/workflows/release.yml', import.meta.url));
   assert.match(ci, /push:\n    tags:\n      - 'v\*'/);
   assert.doesNotMatch(ci, /pull_request:|branches:/);
   assert.match(release, /push:\n    tags:\n      - 'v\*'/);
@@ -18,10 +16,7 @@ test('CI and npm release workflows run only for version tags', async () => {
 });
 
 test('release workflow publishes one verified npm tarball with OIDC', async () => {
-  const release = await readFile(
-    new URL('../.github/workflows/release.yml', import.meta.url),
-    'utf8',
-  );
+  const release = await readText(new URL('../.github/workflows/release.yml', import.meta.url));
   assert.match(release, /id-token: write/);
   assert.match(release, /PACK_FILENAME=\$\(npm pack --json/);
   assert.match(release, /PACKAGE_TARBALL=\.\/dist\/\$\{PACK_FILENAME\}/);
@@ -35,8 +30,8 @@ test('release workflow publishes one verified npm tarball with OIDC', async () =
 });
 
 test('release, rollback, and verification docs remain executable', async () => {
-  const distribution = await readFile(new URL('../docs/distribution.md', import.meta.url), 'utf8');
-  const releasing = await readFile(new URL('../RELEASING.md', import.meta.url), 'utf8');
+  const distribution = await readText(new URL('../docs/distribution.md', import.meta.url));
+  const releasing = await readText(new URL('../RELEASING.md', import.meta.url));
   assert.match(distribution, /npm audit signatures/);
   assert.match(distribution, /@hifullmoon\/aicommit@<last-good-version>/);
   assert.doesNotMatch(distribution, /homebrew|brew |Formula/i);

@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-27
+
+### Fixed
+
+- Made tag-only workflow validation portable across LF and CRLF checkouts.
+
 ## [2.0.0] - 2026-08-27
 
 ### Added
@@ -126,7 +132,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.1
 [2.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.0
 [1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
 [1.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.0
