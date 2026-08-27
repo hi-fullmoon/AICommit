@@ -23,7 +23,6 @@ AICommit is a local CLI that sends selected repository context directly to the c
 - untrusted diff, file, model, and reasoning text must not execute terminal control sequences;
 - common sensitive content should be detected and protected before the default model request;
 - remote endpoints must use HTTPS, while plaintext HTTP is limited to loopback development services.
-- third-party extension API v1 must deny resolved credential access, run out of process with a sanitized environment, and fail instead of falling back to unsandboxed execution;
 - npm releases must use Trusted Publishing provenance.
 
 Sensitive-content detection is intentionally a defense in depth and cannot replace a dedicated secret scanner. Interactive users can explicitly choose to send original content after a warning. Review the selected endpoint and diff before doing so.

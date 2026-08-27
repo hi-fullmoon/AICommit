@@ -13,7 +13,7 @@ npm ci
 npm test
 ```
 
-Use a personal `~/.aicommit.config.json` or environment variables for provider credentials. Never add real credentials, private diffs, or captured model requests to fixtures.
+Use a personal `~/.aicommit/config.json` or environment variables for provider credentials. Never add real credentials, private diffs, or captured model requests to fixtures.
 
 If the repository has `.aicommit.policy.json`, validate the commit message locally with `aicommit policy check --file=<commit-message-file>` and use the same `policy check --range=<base>..<head>` command in CI. Do not put provider or credential settings in the team policy.
 

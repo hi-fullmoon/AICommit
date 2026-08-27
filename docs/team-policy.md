@@ -46,7 +46,7 @@ Both paths call the same validator. `--output=json` returns the effective policy
 
 1. Move Conventional Commit types, scope rules, subject length, body rules, breaking-change handling, and language out of free-form `prompt` text and into `.aicommit.policy.json`.
 2. Declare every field instead of relying on personal defaults. Start with optional scopes and narrow the values only after current history has been sampled.
-3. Keep provider credentials in `~/.aicommit.config.json` or environment variables; never copy them into the repository policy.
+3. Keep provider credentials in `~/.aicommit/config.json` or environment variables; never copy them into the repository policy.
 4. If commitlint already defines `type-enum`, `scope-enum`, `subject-max-length`, or `header-max-length`, keep that file committed. AICommit reads recognized scalar values as data and never executes the config.
 5. Run the local hook and CI example on the same known-good and known-bad messages. Their `policyFingerprint` and issue codes must match before making the gate required.
 
@@ -54,7 +54,7 @@ Both paths call the same validator. `--output=json` returns the effective policy
 
 1. 将 Conventional Commit 类型、scope 规则、标题长度、正文规则、破坏性变更和语言要求从自由文本 `prompt` 迁移到 `.aicommit.policy.json`。
 2. 明确声明所有字段，不依赖个人默认值。可先保留可选 scope，再根据现有提交历史逐步收紧取值。
-3. provider 凭据继续放在 `~/.aicommit.config.json` 或环境变量中，绝不要复制到仓库策略。
+3. provider 凭据继续放在 `~/.aicommit/config.json` 或环境变量中，绝不要复制到仓库策略。
 4. 如果 commitlint 已定义 `type-enum`、`scope-enum`、`subject-max-length` 或 `header-max-length`，继续提交该配置。AICommit 只按数据读取识别出的标量规则，不执行配置文件。
 5. 用同一组已知正确/错误消息分别运行本地 hook 与 CI 示例；在强制启用门禁前，确认两者的 `policyFingerprint` 和问题代码一致。
 

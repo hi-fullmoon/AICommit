@@ -44,9 +44,9 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key and one or more models, choosing a default model and commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed or old-format existing file is backed up before replacement.
+It walks you through choosing built-in provider defaults (OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key and one or more models, choosing a default model and commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit/config.json`); a malformed or old-format existing file is backed up before replacement. The legacy `~/.aicommit.config.json` path remains readable and `aicommit setup` migrates its settings to the canonical path when saving.
 
-To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
+To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from the project config at `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
 To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. Environment variables take priority over every other credential source and are recommended for CI and other stateless environments.
 
@@ -101,7 +101,7 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `apiUrl`             | OpenAI-compatible chat completions endpoint                                                                                                                                                                                  |
 | `apiKey`             | API key (empty string allowed for local models)                                                                                                                                                                              |
 | `apiKeyEnv`          | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                 |
-| `providerType`       | Required adapter: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, `custom`, or a user-installed `extension:<id>`                                                                                                    |
+| `providerType`       | Required adapter: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, or `custom`                                                                                                                                       |
 | `defaultModel`       | Required model alias used when `-m` is not given                                                                                                                                                                             |
 | `models`             | Named model profiles under one provider                                                                                                                                                                                      |
 | `modelId`            | Required API model identifier inside each model profile                                                                                                                                                                      |
@@ -115,8 +115,6 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `timeoutMs`          | Per-request timeout in milliseconds (default: `120000`)                                                                                                                                                                      |
 | `retry`              | Transient retry limits: `maxAttempts`, `baseDelayMs`, and `maxDelayMs` (defaults: `3`, `500`, and `5000`)                                                                                                                    |
 | `credentialHelper`   | Opt in to `git credential fill` with `enabled` and `username` (defaults: `false` and `aicommit`)                                                                                                                             |
-| `metrics`            | Local-only metrics controls: `enabled`, absolute `path` or empty for the default, and `maxEntries` (defaults: `true`, empty, and `500`)                                                                                      |
-| `extensions`         | User-owned absolute manifest paths plus execution timeout/context ceiling; repository config cannot enable or redirect extensions                                                                                            |
 | `maxDiffChars`       | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`)                                                                                                        |
 | `maxFileDiffChars`   | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`)                                                                        |
 | `splitMaxDiffChars`  | Diff chars sent to the split-planning call; split mode needs less hunk detail than final message generation (default: `16000`)                                                                                               |
@@ -163,7 +161,7 @@ aicommit doctor -p kimi-code
 
 `kimi-for-coding` is available to all Kimi Code membership tiers and follows the service's rolling model upgrades. Kimi Code membership keys use `api.kimi.com`; Kimi Platform pay-as-you-go keys use a different endpoint and are not interchangeable.
 
-See the bilingual [provider compatibility table](docs/provider-compatibility.md) for streaming, reasoning, token-budget, usage, authentication, preset, and extension-adapter boundaries.
+See the bilingual [provider compatibility table](docs/provider-compatibility.md) for streaming, reasoning, token-budget, usage, and authentication boundaries.
 
 ### Repository policy and bounded context
 
@@ -217,22 +215,9 @@ Every provider adapter maps the same generation contract: messages, streaming, r
 
 Requests retry only transient failures: HTTP 429, recoverable 5xx responses, network interruption, and interrupted response bodies. Retries are bounded by `retry.maxAttempts`, use capped exponential backoff, and honor `Retry-After` when present. Authentication, invalid-parameter, and content-safety failures are returned immediately without retrying.
 
-### Versioned provider presets
+### Built-in provider defaults
 
-Setup defaults live in a strict manifest separate from request adapters and the Git/interaction flow. A compatible provider can be added by updating preset data and referencing an existing adapter:
-
-```bash
-aicommit preset show
-aicommit preset validate --file=provider-presets.json
-aicommit preset install --file=provider-presets.json
-aicommit preset rollback
-```
-
-The active user manifest is `~/.aicommit/provider-presets.json`; each update keeps the previous valid version for rollback. Manifests declare their own semantic version, supported core range, and adapter-contract version, and cannot contain credentials. Core prerelease versions and build metadata are parsed using SemVer rules; build metadata does not affect compatibility ordering. See the bilingual [preset compatibility/update guide](docs/provider-presets.md) and [published schema](schemas/aicommit-provider-presets.schema.json).
-
-### Credential-denied extensions
-
-Three minimal extension interfaces are available: bounded repository context, commit-message validation, and provider request/response adaptation. User-installed single-file ESM extensions run outside the CLI process under Node's permission model and declare `credentials: false`; they receive neither resolved credentials nor inherited secret environment variables. Repository config cannot install or select extension code. Node.js 20+ is required only when executable extensions are enabled; the core CLI remains compatible with Node.js 18. See the bilingual [extension contract, security model, and executable example](docs/extensions.md), plus the [manifest schema](schemas/aicommit-extension.schema.json).
+Setup uses validated provider defaults shipped with AICommit. For another OpenAI-compatible service, add a named provider directly to the user config; no separate manifest installation or third-party executable code is required.
 
 ### Saving tokens
 
@@ -245,9 +230,9 @@ Token spend per call is dominated by the diff; aicommit already strips lock file
 
 ## Privacy and data flow
 
-The bilingual [privacy model](docs/privacy.md) maps every local, provider, extension, metric, and distribution trust boundary. The summary below covers the default runtime path.
+The bilingual [privacy model](docs/privacy.md) maps the local process, provider, credential, and distribution trust boundaries. The summary below covers the default runtime path.
 
-AICommit has no hosted backend and no metrics-upload implementation. At runtime it only makes generation requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
+AICommit has no hosted backend and does not record or upload usage metrics. At runtime it only makes generation requests to the `apiUrl` selected from your user-owned provider configuration. The API key is sent to that endpoint as authorization; verify custom endpoints before trusting them with credentials or repository content.
 
 Commit-generation requests can contain:
 
@@ -260,11 +245,7 @@ Commit-generation requests can contain:
 
 AICommit does not intentionally send unrelated repository files, historical commit bodies, environment variables, or its local configuration file. Every selected diff, path list, history sample, preview, and convention excerpt is placed inside an explicit JSON envelope marked as untrusted data; the authoritative system policy instructs the model never to follow embedded repository instructions. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection and prompt boundaries are guardrails, not complete secret or prompt-injection defenses.
 
-Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, retry policy, metrics, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` or the OS-backed Git credential helper for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
-
-Successful and failed commit runs write a minimal local JSONL metric by default to `~/.aicommit/metrics.jsonl`. Each record contains exactly duration, normalized token usage, a bounded result category, whether the message was edited, and the rewrite count (including automatic policy correction). It never contains the diff, reasoning, commit message, file names, provider, model, or credentials. The file retains the newest 500 records by default and is written with owner-only permissions where supported.
-
-Use `aicommit stats` to view first-pass acceptance, edit/rewrite/failure rates, P50/P95 latency, token totals, and recent-vs-previous trends. After ten successful runs it compares two chronological baseline windows and reports progress toward the roadmap's 20% relative edit/rewrite-rate improvement target. `aicommit stats clear|enable|disable` manages the same local store; clearing is permanent. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings, and there is no upload implementation.
+Project-level configuration is treated as untrusted: it cannot change the endpoint, provider, credentials, retry policy, reasoning request controls, or increase user-configured data/cost ceilings. Prefer `apiKeyEnv` or the OS-backed Git credential helper for credentials. The setup wizard can save a literal key in the user config when requested; that file is written atomically with owner-only permissions where the OS supports them.
 
 ## Usage
 
@@ -275,14 +256,11 @@ aicommit config show     # show the effective config with secrets redacted
 aicommit config validate # validate config without resolving credentials
 aicommit config path     # print user and project config paths
 aicommit completion bash # generate Bash completion on stdout
-aicommit stats           # show local quality, latency, and token trends
-aicommit stats clear     # permanently clear local metric history
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
 aicommit split           # choose staged/all scope, then split logical commits
 aicommit split --scope=staged # split only the reviewed index snapshot
 aicommit split --scope=all # split the complete working-tree snapshot
-aicommit split --scope=staged --split-hunks # experimental same-file hunk splitting
 aicommit --dry-run       # generate and review without creating a commit
 aicommit split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
@@ -306,7 +284,6 @@ aicommit -h              # help
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                       |
 | `-p`, `--provider` | Use the named provider from `providers`                                      |
 | `-m`, `--model`    | Use a named model profile from the selected provider                         |
-| `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default     |
 | `--scope`          | `staged` or `all` scope for `aicommit split` and `aicommit split plan`       |
 | `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`          |
 | `--dry-run`        | Generate and review a message or split plan without creating commits         |
@@ -382,7 +359,7 @@ Stable process exits are shared by text and JSON modes:
 
 `aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Endpoint userinfo, credential-like query parameters, and fragments are also redacted from normal output and credential-resolution errors. Use `aicommit doctor -p <provider> -m <model>` to select a configured provider/model pair or `aicommit doctor --output=json` in automation.
 
-For stable error categories, npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
+For stable error categories, npm verification failures, provider configuration, and split recovery, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
 
 Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). In interactive selection prompts, `q` exits immediately. If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. Once anything is staged, that index snapshot is authoritative; other working-tree changes are left untouched.
 
@@ -411,13 +388,11 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`aicommit split` (also available as the explicit `aicommit split run`) asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--scope=staged` or `--scope=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
+`aicommit split` (also available as the explicit `aicommit split run`) asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into file-level logical commits. Use `--scope=staged` or `--scope=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
 
 For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
 
 Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If you intentionally finished or replaced the interrupted work through another Git workflow, run `aicommit split abort`; it removes only the stale checkpoint and never rewrites HEAD, the index, or the worktree. New committing split runs detect a checkpoint before contacting the provider. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
-
-Split remains file-level by default. `--split-hunks` opts in to experimental same-file splitting for tracked text modifications with multiple unified-diff hunks. The JSON plan and checkpoint store only hunk IDs, line ranges, and hashes—not patch content. Before the first commit, AICommit applies every selected patch to a temporary index and requires the final tree to reproduce the captured target blobs exactly; parsing, patching, binary/mode-change, or lossless-validation failures fall back to a file-level plan. The worktree is never modified by hunk execution.
 
 ## Development and releases
 

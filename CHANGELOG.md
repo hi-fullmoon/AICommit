@@ -4,6 +4,19 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Changed
+
+- Made quality and cross-platform compatibility checks blocking prerequisites of npm publishing in the single tag-triggered release workflow.
+- Moved user configuration to `~/.aicommit/config.json` with legacy-path compatibility; project configuration remains `./.aicommit.config.json`.
+- Simplified the primary help and documentation around the everyday setup, doctor, commit, and file-level split workflows; automation and team-policy commands are now presented as advanced tools.
+
+### Removed
+
+- Removed local run metrics and the `stats` command; aicommit no longer creates `~/.aicommit/metrics.jsonl`.
+- Removed executable extensions and extension-backed provider adapters to reduce the trusted-code and compatibility surface.
+- Removed user-installable provider preset lifecycle commands; setup now uses the validated defaults shipped with each aicommit release.
+- Removed the experimental `--split-hunks` planning entry point. Existing versioned hunk plan artifacts remain readable for recovery and compatibility.
+
 ## [2.0.1] - 2026-08-27
 
 ### Fixed

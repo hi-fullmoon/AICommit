@@ -46,9 +46,9 @@ npm install --global @hifullmoon/aicommit
 aicommit setup
 ```
 
-向导会引导你从当前生效的版本化预设清单中选择 Provider（内置预设包括 OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和一个或多个模型、选择默认模型和提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit.config.json`；如果已有文件格式错误或属于旧格式，替换前会先备份。
+向导会引导你选择内置 Provider 默认值（OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和一个或多个模型、选择默认模型和提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit/config.json`；如果已有文件格式错误或属于旧格式，替换前会先备份。旧路径 `~/.aicommit.config.json` 仍可读取，运行 `aicommit setup` 并保存时会把其中设置迁移到规范路径。
 
-如需手动配置，请从 [.aicommit.config.example.json](.aicommit.config.example.json) 开始。AICommit 先加载用户配置，再将 `./.aicommit.config.json` 中白名单内的生成偏好深度合并到用户配置之上。项目配置可以设置 `language`、`commitPolicy`、`stripFiles`、`temperature`，也可以降低 diff、token、timeout 或仓库上下文上限。项目拥有的 `prompt` 默认会被忽略，除非用户配置明确设置 `allowProjectPrompt: true`。连接或 Provider 字段（包括 `apiKeyEnv`）、推理请求控制、未知字段，以及任何试图提高上限的配置，都会被忽略并给出警告。这样可以防止克隆的仓库重定向已鉴权请求，或在不知情的情况下扩大成本和数据范围。
+如需手动配置，请从 [.aicommit.config.example.json](.aicommit.config.example.json) 开始。AICommit 先加载用户配置，再将项目配置 `./.aicommit.config.json` 中白名单内的生成偏好深度合并到用户配置之上。项目配置可以设置 `language`、`commitPolicy`、`stripFiles`、`temperature`，也可以降低 diff、token、timeout 或仓库上下文上限。项目拥有的 `prompt` 默认会被忽略，除非用户配置明确设置 `allowProjectPrompt: true`。连接或 Provider 字段（包括 `apiKeyEnv`）、推理请求控制、未知字段，以及任何试图提高上限的配置，都会被忽略并给出警告。这样可以防止克隆的仓库重定向已鉴权请求，或在不知情的情况下扩大成本和数据范围。
 
 如需避免把密钥写入 JSON，请设置 `"apiKeyEnv": "OPENAI_API_KEY"`（并将 `apiKey` 留空），或在 setup 向导中输入 `env:OPENAI_API_KEY`。环境变量优先于所有其他凭据来源，推荐用于 CI 和其他无状态环境。
 
@@ -103,7 +103,7 @@ AICommit 也可以读取操作系统上已经配置的 Git credential helper。�
 | `apiUrl`             | OpenAI 兼容的 Chat Completions 端点                                                                                                   |
 | `apiKey`             | API Key；本地模型允许使用空字符串                                                                                                     |
 | `apiKeyEnv`          | 保存 API Key 的环境变量名，优先于 `apiKey`（默认：空）                                                                                |
-| `providerType`       | 必填适配器：`openai`、`openrouter`、`deepseek`、`minimax`、`ollama`、`custom` 或用户安装的 `extension:<id>`                           |
+| `providerType`       | 必填适配器：`openai`、`openrouter`、`deepseek`、`minimax`、`ollama` 或 `custom`                                                       |
 | `defaultModel`       | 必填；未指定 `-m` 时使用的模型别名                                                                                                    |
 | `models`             | 一个 Provider 下的命名模型配置                                                                                                        |
 | `modelId`            | 每个模型配置中必填的 API 模型标识                                                                                                     |
@@ -117,8 +117,6 @@ AICommit 也可以读取操作系统上已经配置的 Git credential helper。�
 | `timeoutMs`          | 单次请求超时，单位为毫秒（默认：`120000`）                                                                                            |
 | `retry`              | 瞬时错误重试限制：`maxAttempts`、`baseDelayMs`、`maxDelayMs`（默认：`3`、`500`、`5000`）                                              |
 | `credentialHelper`   | 通过 `enabled` 和 `username` 选择性启用 `git credential fill`（默认：`false`、`aicommit`）                                            |
-| `metrics`            | 仅本地指标控制：`enabled`、绝对路径 `path`（空表示默认路径）、`maxEntries`（默认：`true`、空、`500`）                                 |
-| `extensions`         | 用户拥有的绝对扩展清单路径，以及执行超时和上下文上限；项目配置不能启用或重定向扩展                                                    |
 | `maxDiffChars`       | 单次发送给模型的 diff 字符数；超限后改为 `--stat` 摘要和截断的 hunk（默认：`30000`）                                                  |
 | `maxFileDiffChars`   | 单文件 diff 上限；超限文件只保留前部 hunk，避免一个大文件挤占全部上下文（默认：`3000`）                                               |
 | `splitMaxDiffChars`  | 拆分规划请求的 diff 字符数；规划阶段需要的 hunk 细节少于最终信息生成（默认：`16000`）                                                 |
@@ -165,7 +163,7 @@ aicommit doctor -p kimi-code
 
 `kimi-for-coding` 对所有 Kimi Code 会员档位开放，并随服务滚动升级模型。Kimi Code 会员 Key 使用 `api.kimi.com`；Kimi 开放平台按量付费 Key 使用不同端点，两者不能混用。
 
-流式输出、推理、token 预算、usage、鉴权、预设和扩展适配边界，请参阅双语 [Provider 兼容表](docs/provider-compatibility.md)。
+流式输出、推理、token 预算、usage 和鉴权边界，请参阅双语 [Provider 兼容表](docs/provider-compatibility.md)。
 
 ### 仓库策略与受限上下文
 
@@ -219,22 +217,9 @@ aicommit policy check --range=origin/main..HEAD --output=json
 
 请求只对瞬时错误重试：HTTP 429、可恢复的 5xx、网络中断和响应体中断。重试次数受 `retry.maxAttempts` 限制，使用带上限的指数退避，并遵循 `Retry-After`。鉴权、非法参数和内容安全错误会立即返回，不会重试。
 
-### 版本化 Provider 预设
+### 内置 Provider 默认值
 
-setup 默认值保存在严格的清单中，与请求适配器及 Git / 交互流程分离。添加兼容 Provider 只需更新预设数据，并引用已有适配器：
-
-```bash
-aicommit preset show
-aicommit preset validate --file=provider-presets.json
-aicommit preset install --file=provider-presets.json
-aicommit preset rollback
-```
-
-当前用户清单位于 `~/.aicommit/provider-presets.json`；每次更新都会保留上一份有效版本，以便回滚。清单声明自己的语义版本、支持的核心版本范围和适配器契约版本，并且不能包含凭据。核心预发布版本和构建元数据按 SemVer 规则解析；构建元数据不影响兼容性排序。参阅双语[预设兼容与更新指南](docs/provider-presets.md)及已发布的 [schema](schemas/aicommit-provider-presets.schema.json)。
-
-### 无凭据扩展
-
-AICommit 提供三种最小扩展接口：受限仓库上下文、提交信息校验，以及 Provider 请求 / 响应适配。用户安装的单文件 ESM 扩展在 CLI 进程之外、Node 权限模型下运行，并声明 `credentials: false`；扩展既不会收到已解析凭据，也不会继承秘密环境变量。仓库配置不能安装或选择扩展代码。只有启用可执行扩展时才需要 Node.js 20+；核心 CLI 仍兼容 Node.js 18。参阅双语[扩展契约、安全模型和可执行示例](docs/extensions.md)，以及[扩展清单 schema](schemas/aicommit-extension.schema.json)。
+setup 使用随 AICommit 一起发布并经过校验的 Provider 默认值。需要其他 OpenAI 兼容服务时，直接在用户配置中增加命名 Provider；无需安装额外清单或执行第三方代码。
 
 ### 节省 Token
 
@@ -247,9 +232,9 @@ AICommit 提供三种最小扩展接口：受限仓库上下文、提交信息�
 
 ## 隐私与数据流
 
-双语[隐私模型](docs/privacy.md)描述了本地进程、Provider、扩展、指标和分发环节的信任边界。下面概述默认运行路径。
+双语[隐私模型](docs/privacy.md)描述了本地进程、Provider、凭据和分发环节的信任边界。下面概述默认运行路径。
 
-AICommit 没有托管后端，也没有指标上传实现。运行时只会向用户配置选定的 `apiUrl` 发起生成请求。API Key 会作为鉴权信息发送到该端点；在把凭据或仓库内容交给自定义端点前，请先验证其可信度。
+AICommit 没有托管后端，也不会记录或上传使用指标。运行时只会向用户配置选定的 `apiUrl` 发起生成请求。API Key 会作为鉴权信息发送到该端点；在把凭据或仓库内容交给自定义端点前，请先验证其可信度。
 
 提交生成请求可能包含：
 
@@ -262,11 +247,7 @@ AICommit 没有托管后端，也没有指标上传实现。运行时只会向�
 
 AICommit 不会主动发送无关的仓库文件、历史提交正文、环境变量或本地配置文件。每个选中的 diff、路径列表、历史样本、预览和约定摘录都会放入标记为“不可信数据”的显式 JSON 信封；权威 system policy 会要求模型绝不执行仓库内容中嵌入的指令。lock 文件、配置的 `stripFiles`、超大段落、常见敏感文件名、私钥材料、云访问 Key ID 和疑似凭据赋值，会在默认请求前被省略、截断或脱敏。交互警告仍允许你明确发送原始 diff，请谨慎确认。检测规则和 prompt 边界属于安全护栏，不能完全替代秘密扫描或 prompt injection 防护。
 
-项目级配置被视为不可信：它不能修改端点、Provider、凭据、重试策略、指标、推理请求控制，也不能提高用户配置的数据或成本上限。凭据建议使用 `apiKeyEnv` 或由操作系统保护的 Git credential helper。如果用户明确要求，setup 向导也可以把明文 Key 写入用户配置；在操作系统支持时，该文件会以仅所有者可读写权限原子保存。
-
-默认情况下，成功和失败的提交运行会向 `~/.aicommit/metrics.jsonl` 写入最小化的本地 JSONL 指标。每条记录只包含耗时、标准化 token 用量、受限结果分类、消息是否被编辑，以及重写次数（包括自动策略修正）。它绝不包含 diff、推理、提交信息、文件名、Provider、模型或凭据。默认只保留最新 500 条记录，并在系统支持时使用仅所有者权限写入。
-
-使用 `aicommit stats` 查看首次接受率、编辑 / 重写 / 失败率、P50 / P95 延迟、token 总量，以及近期窗口和前一窗口的趋势。成功运行达到 10 次后，它会比较两个按时间排序的基线窗口，并报告相对于路线图“编辑 / 重写率降低 20%”目标的进度。`aicommit stats clear|enable|disable` 管理同一本地数据；清除操作不可恢复。可以在用户配置中将 `metrics.enabled` 设为 `false`、指定绝对 `metrics.path`，或修改 `metrics.maxEntries`。项目配置不能覆盖这些设置，也不存在上传实现。
+项目级配置被视为不可信：它不能修改端点、Provider、凭据、重试策略、推理请求控制，也不能提高用户配置的数据或成本上限。凭据建议使用 `apiKeyEnv` 或由操作系统保护的 Git credential helper。如果用户明确要求，setup 向导也可以把明文 Key 写入用户配置；在操作系统支持时，该文件会以仅所有者可读写权限原子保存。
 
 ## 使用方法
 
@@ -277,14 +258,11 @@ aicommit config show     # 显示脱敏后的有效配置
 aicommit config validate # 校验配置，但不解析凭据
 aicommit config path     # 显示用户配置和项目配置路径
 aicommit completion bash # 向 stdout 生成 Bash 补全脚本
-aicommit stats           # 显示本地质量、延迟和 token 趋势
-aicommit stats clear     # 永久清除本地指标历史
 aicommit                 # 在当前目录生成提交信息并提交
 aicommit /path/to/repo   # 或指定目标目录
 aicommit split           # 选择 staged / all 范围并拆分逻辑提交
 aicommit split --scope=staged # 只拆分已审阅的 index 快照
 aicommit split --scope=all # 拆分完整工作区快照
-aicommit split --scope=staged --split-hunks # 实验性同文件 hunk 拆分
 aicommit --dry-run       # 生成并审阅，但不创建提交
 aicommit split --dry-run # 审阅拆分计划，但不创建提交
 aicommit --yes           # 非交互提交已明确暂存的变更
@@ -308,7 +286,6 @@ aicommit -h              # 帮助
 | `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                          |
 | `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                  |
 | `-m`, `--model`    | 使用所选 Provider 下的命名模型配置                                  |
-| `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                            |
 | `--scope`          | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
 | `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
 | `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                              |
@@ -384,7 +361,7 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 `aicommit doctor` 会检查当前 Node.js 与 Git 版本、已加载的配置来源、端点安全、所选适配器能力、脱敏后的凭据来源，以及实时 Provider 连接。它会显示 `env:OPENAI_API_KEY`、`git credential helper`、`keyless localhost` 等来源标签，但绝不会显示凭据值。端点 userinfo、疑似凭据的查询参数和 URL fragment 也会从正常输出及凭据解析错误中脱敏。使用 `aicommit doctor -p <provider> -m <model>` 选择已配置的 Provider / 模型组合，或在自动化中使用 `aicommit doctor --output=json`。
 
-稳定错误分类、npm 校验失败、split 恢复、预设兼容和扩展隔离错误，请参阅双语[故障排查矩阵](docs/troubleshooting.md)。
+稳定错误分类、npm 校验失败、Provider 配置和 split 恢复问题，请参阅双语[故障排查矩阵](docs/troubleshooting.md)。
 
 基本流程：读取暂存 diff，发送给 AI，然后让你选择**接受**（Enter）、**编辑**（`e`）或**取消**（`n`）。在交互式选择提示中，按 `q` 会立即退出。如果没有暂存内容，但工作区存在未暂存或未跟踪变更，AICommit 会先询问是否为你暂存——可以一次性执行 `git add -A`，也可以逐文件选择——然后继续。一旦存在暂存内容，就以该 index 快照为准，其余工作区变更保持不动。
 
@@ -413,13 +390,11 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### 拆分提交模式
 
-`aicommit split`（也可以显式写成 `aicommit split run`）会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。扩展校验错误会随计划显示，必须通过编辑或重新生成修复后才能提交。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
+`aicommit split`（也可以显式写成 `aicommit split run`）会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更做文件级分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
 
 如需可审计的两步流程，使用 `aicommit split plan --scope=staged|all --file=<path>` 导出版本化 JSON 工件，再用 `aicommit split apply --file=<path>` 在接触 index 前重新校验 base commit、变更集和内容指纹。计划文件应保存在工作区之外或 `.git` 下，避免被纳入自身计划。
 
 执行过程使用临时 index，并在 `.git/aicommit` 下保存不含代码内容的 checkpoint。hook、Git 错误、中断或崩溃发生后，已完成提交仍保留在历史中，待处理快照也会保留；失败报告会显示已 checkpoint、执行中、待处理，以及当前工作区 / index 状态。解决问题后运行 `aicommit split resume`。恢复流程会先协调“提交完成后崩溃”的可能窗口，再创建任何新提交，因此不会重复或遗漏已完成分组。如果你通过其他 Git 流程有意完成或替换了中断工作，请运行 `aicommit split abort`；它只删除过期 checkpoint，绝不会改写 HEAD、index 或工作区。新的 split 提交流程会在联系 Provider 前检测现有 checkpoint。如果规划或预检在第一组之前失败，不会创建任何 split 提交，真实 index 也保持不变。
-
-split 默认仍按文件拆分。`--split-hunks` 可选择性启用实验性的同文件拆分，适用于包含多个 unified-diff hunk 的 tracked 文本修改。JSON 计划和 checkpoint 只保存 hunk ID、行范围和哈希，不保存 patch 内容。第一次提交前，AICommit 会把每个选中 patch 应用到临时 index，并要求最终 tree 精确还原捕获的目标 blob；解析、patch、二进制 / mode-change 或无损校验失败时会退回文件级计划。hunk 执行绝不会修改工作区。
 
 ## 开发与发布
 
