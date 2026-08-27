@@ -4,6 +4,20 @@
 
 AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合 Conventional Commits 规范的提交信息，并在你确认后执行提交。
 
+## 使用预览
+
+### 生成 Conventional Commit
+
+![AICommit 生成并创建 Conventional Commit](docs/assets/readme/generate-commit.png)
+
+### 检查配置与连接
+
+![AICommit doctor 检查运行环境、配置、凭据和 Provider 连接](docs/assets/readme/doctor-diagnostics.png)
+
+### 规划并执行逻辑提交
+
+![AICommit 创建并执行带指纹校验的拆分提交计划](docs/assets/readme/split-workflow.png)
+
 ## 安装
 
 使用 npm：

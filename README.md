@@ -4,6 +4,20 @@
 
 AI-powered git commit message generator: reads your diff, asks an AI model for a conventional commit message, and commits after your confirmation.
 
+## Usage preview
+
+### Generate a conventional commit
+
+![AICommit generating and creating a conventional commit](docs/assets/readme/generate-commit.png)
+
+### Diagnose configuration and connectivity
+
+![AICommit doctor checking runtime, configuration, credentials, and provider connectivity](docs/assets/readme/doctor-diagnostics.png)
+
+### Plan and apply logical commits
+
+![AICommit creating and applying a fingerprinted split-commit plan](docs/assets/readme/split-workflow.png)
+
 ## Install
 
 ```bash
