@@ -1,11 +1,9 @@
 import { createRequire } from 'node:module';
-import { lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { lstat, readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isProviderType } from './providers.js';
-import { fileExists } from './utils.js';
 
 const require = createRequire(import.meta.url);
 const { version: CORE_VERSION } = require('../package.json');
@@ -13,8 +11,6 @@ const { version: CORE_VERSION } = require('../package.json');
 export const PROVIDER_PRESET_KIND = 'aicommit-provider-presets';
 export const PROVIDER_PRESET_SCHEMA_VERSION = 2;
 export const PROVIDER_ADAPTER_CONTRACT_VERSION = 1;
-export const PROVIDER_PRESET_FILENAME = 'provider-presets.json';
-export const PROVIDER_PRESET_BACKUP_FILENAME = 'provider-presets.previous.json';
 export const BUNDLED_PROVIDER_PRESET_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../presets/provider-presets.json',
@@ -275,15 +271,6 @@ export function assertProviderPresetCompatibility(value, coreVersion = CORE_VERS
   return value;
 }
 
-export function providerPresetPaths(home = homedir()) {
-  const directory = join(home, '.aicommit');
-  return {
-    bundled: BUNDLED_PROVIDER_PRESET_PATH,
-    user: join(directory, PROVIDER_PRESET_FILENAME),
-    backup: join(directory, PROVIDER_PRESET_BACKUP_FILENAME),
-  };
-}
-
 async function readManifest(path, coreVersion) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink()) {
@@ -302,88 +289,11 @@ async function readManifest(path, coreVersion) {
   return value;
 }
 
-export async function loadProviderPresetManifest({
-  path = null,
-  home = homedir(),
-  coreVersion,
-} = {}) {
-  const paths = providerPresetPaths(home);
-  const selected = path
-    ? resolve(path)
-    : (await fileExists(paths.user))
-      ? paths.user
-      : paths.bundled;
+export async function loadProviderPresetManifest({ path = null, coreVersion } = {}) {
+  const selected = path ? resolve(path) : BUNDLED_PROVIDER_PRESET_PATH;
   return {
     manifest: await readManifest(selected, coreVersion),
     path: selected,
-    source: path ? 'file' : selected === paths.user ? 'user' : 'bundled',
+    source: path ? 'file' : 'bundled',
   };
-}
-
-async function assertWritableTarget(path) {
-  if (!(await fileExists(path))) return;
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink()) {
-    throw new Error(`Refusing to replace non-regular provider preset path: ${path}`);
-  }
-}
-
-async function writeTextAtomic(path, text) {
-  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await writeFile(temp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-    await rename(temp, path);
-  } catch (err) {
-    await unlink(temp).catch(() => {});
-    throw err;
-  }
-}
-
-async function writeAtomic(path, value) {
-  await writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-export async function installProviderPresetManifest(
-  sourcePath,
-  { home = homedir(), coreVersion } = {},
-) {
-  if (!sourcePath) throw new Error('preset install requires --file=<manifest>.');
-  const source = await loadProviderPresetManifest({ path: sourcePath, home, coreVersion });
-  const paths = providerPresetPaths(home);
-  const directory = dirname(paths.user);
-  if (await fileExists(directory)) {
-    const info = await lstat(directory);
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error(`Refusing to use non-regular provider preset directory: ${directory}`);
-    }
-  } else {
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-  }
-  await assertWritableTarget(paths.user);
-  await assertWritableTarget(paths.backup);
-  let invalidBackupPath = null;
-  if (await fileExists(paths.user)) {
-    try {
-      const current = await readManifest(paths.user, coreVersion);
-      await writeAtomic(paths.backup, current);
-    } catch {
-      invalidBackupPath = join(dirname(paths.user), `provider-presets.invalid-${Date.now()}.json`);
-      await writeTextAtomic(invalidBackupPath, await readFile(paths.user, 'utf8'));
-    }
-  }
-  await writeAtomic(paths.user, source.manifest);
-  return {
-    manifest: source.manifest,
-    path: paths.user,
-    backupPath: paths.backup,
-    invalidBackupPath,
-  };
-}
-
-export async function rollbackProviderPresetManifest({ home = homedir(), coreVersion } = {}) {
-  const paths = providerPresetPaths(home);
-  if (!(await fileExists(paths.backup))) {
-    throw new Error(`No previous provider preset is available at ${paths.backup}.`);
-  }
-  return installProviderPresetManifest(paths.backup, { home, coreVersion });
 }

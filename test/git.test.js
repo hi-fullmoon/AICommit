@@ -164,6 +164,7 @@ test('sensitive model input protection omits risky files and redacts credentials
   assert.equal(isSensitiveFile('.env.production'), true);
   assert.equal(isSensitiveFile('.env.example'), false);
   assert.equal(isSensitiveFile('.aicommit.config.json'), true);
+  assert.equal(isSensitiveFile('.aicommit/config.json'), true);
 
   const preview = protectSensitiveText(
     'API_KEY=preview-secret-value\nAWS=AKIAABCDEFGHIJKLMNOP\n',

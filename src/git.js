@@ -332,7 +332,7 @@ export function gitCommit(message, projectRoot, diagnosticsOnly = false) {
 }
 
 const SENSITIVE_FILE_RE =
-  /(?:^|\/)(?:\.env(?:\..+)?|\.aicommit\.config\.json|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials?(?:\.[^/]*)?|service[-_]?account(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|key|keystore))$/i;
+  /(?:^|\/)(?:\.env(?:\..+)?|\.aicommit\.config\.json|\.aicommit\/config\.json|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials?(?:\.[^/]*)?|service[-_]?account(?:\.[^/]*)?|[^/]+\.(?:pem|p12|pfx|key|keystore))$/i;
 const PRIVATE_KEY_RE = /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/i;
 const AWS_KEY_RE = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
 const ASSIGNED_SECRET_RE =

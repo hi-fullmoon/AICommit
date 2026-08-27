@@ -6,7 +6,6 @@ import { checkConnection } from './api.js';
 import { loadConfig, isSecureApiUrl } from './config.js';
 import { classifyError, ERROR_CATEGORIES, fail } from './errors.js';
 import { getProviderAdapter } from './providers.js';
-import { configureExtensionHost, resolveProviderAdapter } from './extensions.js';
 import { formatMs, formatUsage, redactSensitiveUrl, sanitizeTerminalText } from './utils.js';
 
 function nodeSupported(version = process.versions.node) {
@@ -70,8 +69,7 @@ export async function runDoctor(cliProvider = null, cliModel = null) {
 
   const { config, loaded, providerName, modelName, credentialSourceLabel, credentialWarning } =
     loadedConfig;
-  const extensionHost = await configureExtensionHost(config);
-  const adapter = await resolveProviderAdapter(config, getProviderAdapter);
+  const adapter = getProviderAdapter(config);
   const provider = providerName || adapter.id;
   addCheck(checks, 'Config', 'pass', loaded.length ? loaded.join(' + ') : 'built-in defaults');
   addCheck(checks, 'Model', 'pass', `${providerName}/${modelName} (${config.modelId})`);
@@ -93,15 +91,6 @@ export async function runDoctor(cliProvider = null, cliModel = null) {
   );
   addCheck(checks, 'Credentials', credentialWarning ? 'warn' : 'pass', credentialSourceLabel);
   if (credentialWarning) warnings.push(credentialWarning);
-  if (extensionHost.extensions.length) {
-    addCheck(
-      checks,
-      'Extensions',
-      'pass',
-      extensionHost.extensions.map((item) => `${item.id}@${item.version}`).join(', '),
-    );
-  }
-
   let report;
   try {
     report = await checkConnection(config);
