@@ -102,6 +102,7 @@ test('fault matrix resumes SIGINT and post-commit crash windows without duplicat
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const scenarios = [
     {
       name: 'ctrl-c before commit',
@@ -154,6 +155,7 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = prepareTwoFileRepo(root, 'repo');
   const planPath = join(root, 'concurrent.json');
   await writeStagedPlan(repo, planPath, [
@@ -194,6 +196,7 @@ test('split abort clears stale recovery metadata without rewriting replacement w
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = prepareTwoFileRepo(root, 'repo');
   const planPath = join(root, 'abort.json');
   await writeStagedPlan(repo, planPath, [
@@ -227,6 +230,7 @@ test('fault matrix preserves rename, deletion, and binary groups through plan/ap
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'old.txt'), 'rename me\n');
   writeFileSync(join(repo, 'deleted.txt'), 'delete me\n');
@@ -263,7 +267,7 @@ test('fault matrix preserves rename, deletion, and binary groups through plan/ap
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  const configPath = join(home, '.aicommit.config.json');
+  const configPath = join(home, '.aicommit', 'config.json');
   writeFileSync(
     configPath,
     stringifyUserConfig({
@@ -301,6 +305,7 @@ test('fault matrix rejects a changed submodule before the first commit and prese
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   const repo = makeRepo(root);
   writeFileSync(join(repo, 'root.txt'), 'base\n');
   git(repo, ['add', 'root.txt']);

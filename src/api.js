@@ -8,7 +8,6 @@ import {
   validateCommitCandidate,
 } from './policy.js';
 import { encodeUntrustedData } from './trust.js';
-import { extensionHostFor, resolveProviderAdapter } from './extensions.js';
 
 // Default per-request timeout; overridable via the "timeoutMs" config key.
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -167,7 +166,7 @@ async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) 
 export async function requestGeneration(config, request) {
   secureEndpoint(config.apiUrl);
   const timeout = config.timeoutMs || DEFAULT_TIMEOUT_MS;
-  const adapter = await resolveProviderAdapter(config, getProviderAdapter);
+  const adapter = getProviderAdapter(config);
   const payload = await adapter.buildRequest({
     messages: request.messages,
     temperature: request.temperature,
@@ -370,7 +369,7 @@ function hitTokenLimit(data) {
 // happened. Disable it only for providers where we know the switch is valid;
 // unknown compatible endpoints keep their configured behavior.
 async function reasoningForFollowUp(config) {
-  const adapter = await resolveProviderAdapter(config, getProviderAdapter);
+  const adapter = getProviderAdapter(config);
   return adapter.reasoningForFollowUp(config.reasoning);
 }
 
@@ -660,23 +659,7 @@ export async function generateCommitMessage(
   // Validate against the versioned policy and give the provider exactly one
   // cheap correction attempt. The diff is never re-sent: the prior reply plus
   // concrete violations are sufficient to repair formatting and constraints.
-  const validate = async (candidate) => {
-    const builtIn = validateCommitCandidate(candidate, { policy, diff });
-    const host = extensionHostFor(config);
-    if (!host) return builtIn;
-    const extensionIssues = await host.validateMessage(candidate, policy);
-    const issues = [...builtIn.issues, ...extensionIssues];
-    const errors = issues.filter((item) => item.severity === 'error');
-    const warnings = issues.filter((item) => item.severity === 'warning');
-    return {
-      ...builtIn,
-      valid: errors.length === 0,
-      needsCorrection: errors.length > 0,
-      issues,
-      errors,
-      warnings,
-    };
-  };
+  const validate = (candidate) => validateCommitCandidate(candidate, { policy, diff });
 
   let validation = await validate(message);
   if (message.trim() && validation.needsCorrection) {

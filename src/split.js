@@ -62,13 +62,7 @@ import {
   splitCheckpointPath,
   writeSplitCheckpoint,
 } from './split-checkpoint.js';
-import {
-  discoverSplitHunks,
-  fallbackHunkGroups,
-  stripHunkCatalog,
-  validateHunkTransaction,
-} from './split-hunks.js';
-import { extensionHostFor } from './extensions.js';
+import { fallbackHunkGroups, stripHunkCatalog, validateHunkTransaction } from './split-hunks.js';
 import { runModelTask } from './generation-ui.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1321,23 +1315,6 @@ export function executeSplit(
 
 // Returns a structured result when split mode handled the run; false means
 // "fall back to the normal single-commit flow" for a lone interactive file.
-export async function validateSplitExtensionMessages(groups, config, warnings = []) {
-  const host = extensionHostFor(config);
-  if (!host) return [];
-  const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
-  const violations = [];
-  for (const [index, group] of groups.entries()) {
-    const issues = await host.validateMessage(group.message, policy);
-    const errors = issues.filter((item) => item.severity === 'error');
-    for (const issue of issues.filter((item) => item.severity === 'warning')) {
-      const warning = `Split group ${index + 1}: ${issue.message}`;
-      if (!warnings.includes(warning)) warnings.push(warning);
-    }
-    if (errors.length) violations.push({ group: index + 1, errors });
-  }
-  return violations;
-}
-
 export async function splitFlow(
   config,
   projectRoot,
@@ -1348,7 +1325,6 @@ export async function splitFlow(
     machineOutput = false,
     provider = null,
     exportPlanPath = null,
-    splitHunks = false,
   } = {},
 ) {
   const reasoningEnabled = config.reasoning.mode === 'on';
@@ -1411,42 +1387,13 @@ export async function splitFlow(
     throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
   }
 
-  if (allFiles.length === 1 && !yes && !exportPlanPath && !splitHunks) {
+  if (allFiles.length === 1 && !yes && !exportPlanPath) {
     console.log('\n  ' + chalk.dim('Only one changed file — falling back to single-commit mode.'));
     return false;
   }
 
   const branch = getBranch(projectRoot);
   const head = hasHead(projectRoot);
-  const baseHead = head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null;
-  let hunkSnapshots = null;
-  let hunkMode = false;
-  if (splitHunks) {
-    try {
-      hunkSnapshots = captureCheckpointSnapshots(projectRoot, scope, allFiles);
-      const discovered = discoverSplitHunks(projectRoot, baseHead, allFiles, hunkSnapshots);
-      if (discovered.some((change) => change.hunks?.length)) {
-        allFiles = discovered;
-        hunkMode = true;
-      } else {
-        warnings.push('Experimental hunk split found no eligible multi-hunk text modifications.');
-        console.log(
-          '  ' +
-            chalk.yellow(
-              '⚠ Hunk split found no eligible multi-hunk text modifications; using file-level planning.',
-            ),
-        );
-      }
-    } catch (err) {
-      warnings.push(`Experimental hunk discovery fell back to file-level planning: ${err.message}`);
-      console.log(
-        '  ' +
-          chalk.yellow(
-            `⚠ Hunk discovery could not prove a safe patch boundary; using file-level planning (${sanitizeTerminalText(err.message)}).`,
-          ),
-      );
-    }
-  }
 
   console.log(
     '\n  ' +
@@ -1461,10 +1408,6 @@ export async function splitFlow(
   }
 
   const contextReport = collectRepositoryContext(projectRoot, allFiles, config.repositoryContext);
-  const extensionContext = await extensionHostFor(config)?.collectContext({
-    files: allFiles,
-    branch,
-  });
   config = {
     ...config,
     commitPolicy: applyCommitlintPolicy(
@@ -1472,12 +1415,9 @@ export async function splitFlow(
       contextReport.constraints,
       config.language,
     ),
-    repositoryContextText: [contextReport.text, extensionContext?.text]
-      .filter(Boolean)
-      .join('\n\n'),
+    repositoryContextText: contextReport.text,
   };
   warnings.push(...contextReport.warnings);
-  warnings.push(...(extensionContext?.warnings || []));
   console.log(
     '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
   );
@@ -1631,51 +1571,13 @@ export async function splitFlow(
     });
   }
 
-  const validateOrFallbackHunks = () => {
-    if (!hunkMode) return;
-    const provisional = createSplitPlanArtifact({
-      scope,
-      baseHead,
-      fingerprint: plannedStateFingerprint,
-      language: config.language,
-      commitPolicy: config.commitPolicy,
-      changes: allFiles,
-      groups,
-      hunkMode: true,
-    });
-    try {
-      validateHunkTransaction(projectRoot, provisional, hunkSnapshots);
-    } catch (err) {
-      warnings.push(`Experimental hunk plan fell back to file-level grouping: ${err.message}`);
-      console.log(
-        '\n  ' +
-          chalk.yellow(
-            `⚠ Hunk plan was not lossless; falling back to file-level grouping (${sanitizeTerminalText(err.message)}).`,
-          ),
-      );
-      groups = fallbackHunkGroups(groups, allFiles);
-      allFiles = stripHunkCatalog(allFiles);
-      hunkMode = false;
-    }
-  };
-  validateOrFallbackHunks();
-
   // Review / edit / regenerate loop
   let regenCounts = groups.map(() => 0);
   let planEdited = false;
   let rewriteCount = 0;
 
   while (true) {
-    const extensionViolations = await validateSplitExtensionMessages(groups, config, warnings);
     displayPlan(groups, allFiles);
-    if (extensionViolations.length) {
-      console.log('\n  ' + chalk.yellow.bold('⚠ Extension validation blocked this plan:'));
-      for (const violation of extensionViolations) {
-        for (const issue of violation.errors) {
-          console.log(`    Group ${violation.group}: ${sanitizeTerminalText(issue.message)}`);
-        }
-      }
-    }
 
     const action = yes
       ? dryRun
@@ -1731,7 +1633,6 @@ export async function splitFlow(
       const edited = await editPlan(groups, allFiles, config.language, config.commitPolicy);
       if (edited) {
         groups = edited;
-        validateOrFallbackHunks();
         regenCounts = groups.map(() => 0);
         planEdited = true;
       }
@@ -1814,22 +1715,6 @@ export async function splitFlow(
       continue; // show the updated plan again
     }
 
-    if (extensionViolations.length) {
-      const details = extensionViolations
-        .map(
-          (violation) =>
-            `Split group ${violation.group}: ${violation.errors
-              .map((item) => item.message)
-              .join(' ')}`,
-        )
-        .join(' ');
-      if (!yes) {
-        console.log(chalk.dim('\n  Edit the plan or regenerate its messages before continuing.\n'));
-        continue;
-      }
-      throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, details);
-    }
-
     break; // commit, or finish the dry run
   }
 
@@ -1841,7 +1726,7 @@ export async function splitFlow(
     commitPolicy: config.commitPolicy,
     changes: allFiles,
     groups,
-    hunkMode,
+    hunkMode: false,
   });
   let writtenPlanPath = null;
   if (exportPlanPath) {

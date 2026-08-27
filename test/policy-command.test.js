@@ -42,6 +42,7 @@ test('local message files and CI ranges use the same committed team policy', (t)
   const ciHome = join(root, 'ci-home');
   const repo = join(root, 'repo');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   mkdirSync(ciHome);
   mkdirSync(repo);
   git(repo, ['init', '-q']);
@@ -55,7 +56,7 @@ test('local message files and CI ranges use the same committed team policy', (t)
     '!f() { : > "$AICOMMIT_HELPER_MARKER"; echo password=helper-secret; }; f',
   ]);
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     JSON.stringify({
       schemaVersion: 1,
       language: 'zh',

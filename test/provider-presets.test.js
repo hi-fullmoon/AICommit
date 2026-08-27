@@ -1,19 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import {
   assertProviderPresetCompatibility,
   BUNDLED_PROVIDER_PRESET_PATH,
-  installProviderPresetManifest,
   loadProviderPresetManifest,
-  providerPresetPaths,
-  rollbackProviderPresetManifest,
   validateProviderPresetManifest,
 } from '../src/provider-presets.js';
-import { runPresetCommand } from '../src/preset-command.js';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -108,64 +102,4 @@ test('preset validation rejects credentials, unsafe endpoints, dialect overrides
     () => assertProviderPresetCompatibility(incompatible, '1.4.0'),
     /requires aicommit/,
   );
-});
-
-test('user preset installs are atomic, preferred over bundled data, and rollbackable', async (t) => {
-  const home = await mkdtemp(join(tmpdir(), 'aicommit-provider-presets-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  const base = (
-    await loadProviderPresetManifest({
-      path: BUNDLED_PROVIDER_PRESET_PATH,
-      coreVersion: '1.5.1',
-    })
-  ).manifest;
-  const first = clone(base);
-  first.version = '1.1.0';
-  first.providers[0].models[first.providers[0].defaultModel].modelId = 'preset-first';
-  const second = clone(base);
-  second.version = '1.2.0';
-  second.providers[0].models[second.providers[0].defaultModel].modelId = 'preset-second';
-  const firstPath = join(home, 'first.json');
-  const secondPath = join(home, 'second.json');
-  await writeFile(firstPath, JSON.stringify(first));
-  await writeFile(secondPath, JSON.stringify(second));
-
-  await installProviderPresetManifest(firstPath, { home, coreVersion: '1.5.1' });
-  let active = await loadProviderPresetManifest({ home, coreVersion: '1.5.1' });
-  assert.equal(active.source, 'user');
-  assert.equal(active.manifest.version, '1.1.0');
-
-  await installProviderPresetManifest(secondPath, { home, coreVersion: '1.5.1' });
-  active = await loadProviderPresetManifest({ home, coreVersion: '1.5.1' });
-  assert.equal(active.manifest.version, '1.2.0');
-  const paths = providerPresetPaths(home);
-  assert.equal(JSON.parse(await readFile(paths.backup, 'utf8')).version, '1.1.0');
-
-  await rollbackProviderPresetManifest({ home, coreVersion: '1.5.1' });
-  active = await loadProviderPresetManifest({ home, coreVersion: '1.5.1' });
-  assert.equal(active.manifest.version, '1.1.0');
-  assert.equal(JSON.parse(await readFile(paths.backup, 'utf8')).version, '1.2.0');
-  if (process.platform !== 'win32') {
-    assert.equal((await stat(paths.user)).mode & 0o777, 0o600);
-    assert.equal((await stat(paths.backup)).mode & 0o777, 0o600);
-  }
-
-  const report = await runPresetCommand('show', { home, machineOutput: true });
-  assert.equal(report.data.source, 'user');
-  assert.equal(report.data.version, '1.1.0');
-  assert.equal(
-    report.data.manifest.providers[0].models[report.data.manifest.providers[0].defaultModel]
-      .modelId,
-    'preset-first',
-  );
-
-  await writeFile(paths.user, '{invalid json\n');
-  const repaired = await installProviderPresetManifest(secondPath, {
-    home,
-    coreVersion: '1.5.1',
-  });
-  assert.ok(repaired.invalidBackupPath);
-  assert.equal(await readFile(repaired.invalidBackupPath, 'utf8'), '{invalid json\n');
-  active = await loadProviderPresetManifest({ home, coreVersion: '1.5.1' });
-  assert.equal(active.manifest.version, '1.2.0');
 });

@@ -4,25 +4,43 @@ import { join } from 'node:path';
 import { getProjectRoot, loadConfig } from './config.js';
 import { fileExists, stringifyConfigRedacted } from './utils.js';
 import { TEAM_POLICY_FILENAME } from './team-policy.js';
+import { projectConfigPath, resolveConfigLocations, userConfigLocations } from './config-paths.js';
 
 function redactedObject(value) {
   return JSON.parse(stringifyConfigRedacted(value));
 }
 
 export async function inspectConfigPaths(projectRoot = getProjectRoot()) {
-  const user = join(homedir(), '.aicommit.config.json');
-  const project = join(projectRoot, '.aicommit.config.json');
+  const userLocations = await resolveConfigLocations(userConfigLocations(homedir()));
+  const project = projectConfigPath(projectRoot);
+  const projectExists = project !== userLocations.activePath && (await fileExists(project));
   const teamPolicy = join(projectRoot, TEAM_POLICY_FILENAME);
   return {
-    user: { path: user, exists: await fileExists(user) },
-    project: { path: project, exists: project !== user && (await fileExists(project)) },
+    user: {
+      path: userLocations.canonical,
+      exists: Boolean(userLocations.activePath),
+      activePath: userLocations.activePath,
+      legacyPath: userLocations.legacy,
+      legacyExists: userLocations.legacyExists,
+      usingLegacy: userLocations.usingLegacy,
+    },
+    project: {
+      path: project,
+      exists: projectExists,
+      activePath: projectExists ? project : null,
+    },
     teamPolicy: { path: teamPolicy, exists: await fileExists(teamPolicy) },
   };
 }
 
 function printPaths(paths) {
-  console.log(`User config:    ${paths.user.path}${paths.user.exists ? '' : ' (not found)'}`);
-  console.log(`Project config: ${paths.project.path}${paths.project.exists ? '' : ' (not found)'}`);
+  const displayConfigPath = (item) => {
+    if (!item.exists) return `${item.path} (not found)`;
+    if (item.usingLegacy) return `${item.activePath} (legacy; move to ${item.path})`;
+    return item.path;
+  };
+  console.log(`User config:    ${displayConfigPath(paths.user)}`);
+  console.log(`Project config: ${displayConfigPath(paths.project)}`);
   console.log(
     `Team policy:    ${paths.teamPolicy.path}${paths.teamPolicy.exists ? '' : ' (not found)'}`,
   );

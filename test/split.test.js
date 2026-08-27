@@ -30,10 +30,8 @@ import {
   preflightSplit,
   resumeSplit,
   splitFlow,
-  validateSplitExtensionMessages,
 } from '../src/split.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { EXTENSION_HOST } from '../src/extensions.js';
 import { readSplitCheckpoint, splitCheckpointPath } from '../src/split-checkpoint.js';
 import { decodeUntrustedData } from '../src/trust.js';
 
@@ -105,35 +103,6 @@ test('normalizePlan drops unknown, duplicate, and empty groups', () => {
   const result = normalizePlan(groups, allFiles, 'en');
   assert.equal(result.length, 1);
   assert.equal(result[0].message, 'feat: a\n\nx');
-});
-
-test('split extension validation returns reviewable violations and deduped warnings', async () => {
-  const config = { ...DEFAULT_CONFIG, language: 'en' };
-  Object.defineProperty(config, EXTENSION_HOST, {
-    value: {
-      async validateMessage(message) {
-        return message.includes('ticket-')
-          ? [{ severity: 'warning', code: 'style', message: 'prefer a shorter ticket form' }]
-          : [{ severity: 'error', code: 'ticket', message: 'ticket id required' }];
-      },
-    },
-  });
-  const warnings = [];
-  const groups = [
-    { message: 'feat: add retries', files: ['a.js'] },
-    { message: 'fix: ticket-123 handle timeout', files: ['b.js'] },
-  ];
-
-  const violations = await validateSplitExtensionMessages(groups, config, warnings);
-  assert.deepEqual(violations, [
-    {
-      group: 1,
-      errors: [{ severity: 'error', code: 'ticket', message: 'ticket id required' }],
-    },
-  ]);
-  assert.deepEqual(warnings, ['Split group 2: prefer a shorter ticket form']);
-  await validateSplitExtensionMessages(groups, config, warnings);
-  assert.deepEqual(warnings, ['Split group 2: prefer a shorter ticket form']);
 });
 
 test('condenseFileList lists every file when under the cap', () => {

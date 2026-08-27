@@ -36,6 +36,9 @@ test('parseArgs rejects removed compatibility switches and split actions', () =>
   assert.throws(() => parseArgs(['-c']), /Unknown option/);
   assert.throws(() => parseArgs(['split', '--resume']), /Unknown option/);
   assert.throws(() => parseArgs(['metrics', 'clear']), /Unexpected extra argument/);
+  assert.throws(() => parseArgs(['stats']), /command was removed/);
+  assert.throws(() => parseArgs(['preset', 'show']), /command was removed/);
+  assert.throws(() => parseArgs(['split', '--split-hunks']), /Unknown option/);
 });
 
 test('parseArgs recognizes split plan/apply artifact commands', () => {
@@ -72,26 +75,6 @@ test('parseArgs recognizes split plan/apply artifact commands', () => {
   assert.equal(abort.splitCommand, 'abort');
   assert.equal(abort.splitPlanFile, null);
   assert.throws(() => parseArgs(['split', 'abort', '--file=x']), /accepts only/);
-});
-
-test('parseArgs keeps experimental hunk splitting opt-in and scoped to planning', () => {
-  assert.equal(parseArgs(['split', 'run', '--scope=staged']).splitHunks, false);
-  const direct = parseArgs(['split', 'run', '--scope=all', '--split-hunks']);
-  assert.equal(direct.splitHunks, true);
-  const exported = parseArgs([
-    'split',
-    'plan',
-    '--scope=staged',
-    '--split-hunks',
-    '--file=plan.json',
-  ]);
-  assert.equal(exported.splitHunks, true);
-  assert.throws(() => parseArgs(['--split-hunks']), /only valid with/);
-  assert.throws(
-    () => parseArgs(['split', 'apply', '--file=plan.json', '--split-hunks']),
-    /only valid with/,
-  );
-  assert.throws(() => parseArgs(['split', 'resume', '--split-hunks']), /only valid with/);
 });
 
 test('parseArgs keeps dry-run disabled by default and for setup', () => {
@@ -181,28 +164,4 @@ test('parseArgs recognizes team policy template and check inputs', () => {
   );
   assert.throws(() => parseArgs(['--range=HEAD']), /only valid with/);
   assert.throws(() => parseArgs(['policy', 'check', '--provider=x']), /policy check accepts only/);
-});
-
-test('parseArgs recognizes provider preset inspection and lifecycle commands', () => {
-  assert.equal(parseArgs(['preset', 'show', '--output=json']).presetAction, 'show');
-  assert.equal(parseArgs(['preset', 'validate']).presetAction, 'validate');
-  assert.equal(parseArgs(['preset', 'path']).presetAction, 'path');
-  const install = parseArgs(['preset', 'install', '--file=next.json']);
-  assert.equal(install.presetAction, 'install');
-  assert.equal(install.presetFile, 'next.json');
-  assert.equal(parseArgs(['preset', 'rollback']).presetAction, 'rollback');
-  assert.throws(() => parseArgs(['preset']), /show, validate, path, install, or rollback/);
-  assert.throws(() => parseArgs(['preset', 'install']), /requires --file/);
-  assert.throws(() => parseArgs(['preset', 'show', '--file=x']), /only valid with preset/);
-  assert.throws(() => parseArgs(['preset', 'show', '/tmp/repo']), /preset accepts only/);
-});
-
-test('parseArgs recognizes local stats and its privacy-management aliases', () => {
-  assert.equal(parseArgs(['stats']).statsAction, 'show');
-  assert.equal(parseArgs(['stats', 'show']).statsAction, 'show');
-  assert.equal(parseArgs(['stats', 'clear']).statsAction, 'clear');
-  assert.equal(parseArgs(['stats', 'enable']).statsAction, 'enable');
-  assert.equal(parseArgs(['stats', 'disable']).statsAction, 'disable');
-  assert.throws(() => parseArgs(['stats', 'upload']), /stats accepts one action/);
-  assert.equal(parseArgs([]).statsAction, null);
 });

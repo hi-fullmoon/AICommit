@@ -45,14 +45,11 @@ import { abortSplit, applySplitPlan, resumeSplit, splitFlow } from './split.js';
 import { runModelTask } from './generation-ui.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
-import { configureExtensionHost } from './extensions.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
-import { configureMetrics, runStatsCommand } from './metrics.js';
 import { runConfigCommand } from './config-command.js';
 import { generateCompletion } from './completion.js';
 import { runPolicyCommand } from './policy-command.js';
-import { runPresetCommand } from './preset-command.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -95,7 +92,6 @@ async function runMain() {
     output,
     debug,
     split,
-    splitHunks,
     splitCommand,
     splitPlanFile,
     dryRun,
@@ -106,10 +102,7 @@ async function runMain() {
     policyAction,
     policyMessageFile,
     policyRange,
-    presetAction,
-    presetFile,
     completionShell,
-    statsAction,
     help,
     version,
   } = parseArgs();
@@ -119,13 +112,8 @@ async function runMain() {
     process.stdout.write(generateCompletion(completionShell));
     return { exitReason: 'completion' };
   }
-  if (statsAction) {
-    await runStatsCommand(statsAction);
-    return { exitReason: `stats_${statsAction}` };
-  }
-
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !doctor && !configAction && !policyAction && !presetAction) {
+  if (machineOutput && !yes && !doctor && !configAction && !policyAction) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -162,10 +150,6 @@ async function runMain() {
     });
   }
 
-  if (presetAction) {
-    return runPresetCommand(presetAction, { file: presetFile, machineOutput });
-  }
-
   // ── Banner ──────────────────────────────────────────────────────────
 
   console.log('');
@@ -193,7 +177,6 @@ async function runMain() {
     cliProvider,
     { model: cliModel },
   );
-  const extensionHost = await configureExtensionHost(config);
   const selectedProvider = providerName || detectProviderType(config.apiUrl, config.providerType);
   const warnings = [];
 
@@ -263,8 +246,6 @@ async function runMain() {
     console.log('  ' + chalk.green('✓') + chalk.dim(' Reasoning: off (via CLI)'));
   }
 
-  configureMetrics(config.metrics);
-
   // An empty apiKey is valid for local, keyless endpoints (Ollama, LM Studio,
   // LiteLLM); the request layer omits the Authorization header for them, so a
   // missing key must not abort the run here.
@@ -326,7 +307,6 @@ async function runMain() {
       machineOutput,
       provider: selectedProvider,
       exportPlanPath: splitCommand === 'plan' ? splitPlanFile : null,
-      splitHunks,
     });
     if (handled) return handled === true ? { exitReason: 'success' } : handled;
     // Only one changed file — continue with the normal single-commit flow.
@@ -506,12 +486,8 @@ async function runMain() {
     contextReport.constraints,
     config.language,
   );
-  const extensionContext = await extensionHost.collectContext({ files: changedFiles, branch });
-  config.repositoryContextText = [contextReport.text, extensionContext.text]
-    .filter(Boolean)
-    .join('\n\n');
+  config.repositoryContextText = contextReport.text;
   warnings.push(...contextReport.warnings);
-  warnings.push(...extensionContext.warnings);
   console.log(
     '  ' + chalk.dim(`Context: ${sanitizeTerminalText(repositoryContextSummary(contextReport))}`),
   );

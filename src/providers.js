@@ -23,7 +23,6 @@ function endpoint(apiUrl) {
 export function detectProviderType(apiUrl, explicitType = '') {
   if (explicitType) {
     const normalized = explicitType.toLowerCase();
-    if (/^extension:[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized)) return normalized;
     if (!PROVIDER_TYPE_SET.has(normalized)) {
       throw new Error(
         `Unknown providerType "${explicitType}". Use one of: ${PROVIDER_TYPES.join(', ')}.`,
@@ -75,9 +74,9 @@ function openAIReasoningEffort(modelId, enabled, effort) {
   );
 }
 
-function mergeRequestExtensions(payload, extensions) {
-  if (!extensions || typeof extensions !== 'object' || Array.isArray(extensions)) return;
-  const { model: _model, messages: _messages, ...safe } = extensions;
+function mergeRequestExtras(payload, extras) {
+  if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return;
+  const { model: _model, messages: _messages, ...safe } = extras;
   Object.assign(payload, safe);
 }
 
@@ -223,7 +222,7 @@ function applyReasoning(payload, provider, modelId, reasoning, nativeOllama) {
   }
 
   const customBody = enabled ? reasoning?.enabledBody : reasoning?.disabledBody;
-  if (customBody !== undefined) mergeRequestExtensions(payload, customBody);
+  if (customBody !== undefined) mergeRequestExtras(payload, customBody);
 }
 
 function reasoningForFollowUp(provider, modelId, reasoning) {
@@ -282,7 +281,7 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
         payload.max_tokens = maxTokens;
       }
 
-      mergeRequestExtensions(payload, extraBody);
+      mergeRequestExtras(payload, extraBody);
       applyReasoning(payload, provider, modelId, reasoning, nativeOllama);
       if (streaming && !nativeOllama) {
         payload.stream = true;

@@ -36,6 +36,7 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   const home = join(root, 'home');
   const repo = join(root, 'repo');
   mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
   mkdirSync(repo);
   execFileSync('git', ['init', '-q'], { cwd: repo });
   const helperMarker = join(root, 'credential-helper-called');
@@ -48,7 +49,7 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
     ],
     { cwd: repo },
   );
-  const userPath = join(home, '.aicommit.config.json');
+  const userPath = join(home, '.aicommit', 'config.json');
   const projectPath = join(repo, '.aicommit.config.json');
   writeFileSync(
     userPath,
@@ -125,4 +126,42 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   assert.equal(invalid.code, 2, invalid.stdout + invalid.stderr);
   assert.match(JSON.parse(invalid.stdout).error.message, /Failed to parse user config/);
   assert.doesNotMatch(invalid.stdout + invalid.stderr, /environment-secret-must-not-be-read/);
+});
+
+test('legacy user config remains readable while the canonical user path takes precedence', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-config-legacy-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  const repo = join(root, 'repo');
+  mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
+  mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+
+  const legacyUser = join(home, '.aicommit.config.json');
+  const projectPath = join(repo, '.aicommit.config.json');
+  const canonicalUser = join(home, '.aicommit', 'config.json');
+  writeFileSync(legacyUser, JSON.stringify(userConfig({ language: 'zh' })));
+  writeFileSync(projectPath, JSON.stringify({ language: 'en' }));
+
+  const fallback = runCli(repo, home, ['config', 'show', '--output=json']);
+  assert.equal(fallback.code, 0, fallback.stdout + fallback.stderr);
+  assert.equal(JSON.parse(fallback.stdout).data.config.language, 'en');
+  assert.match(fallback.stderr, /Using legacy user config/);
+  assert.doesNotMatch(fallback.stderr, /Using legacy project config/);
+
+  const paths = runCli(repo, home, ['config', 'path', '--output=json']);
+  const pathData = JSON.parse(paths.stdout).data.paths;
+  assert.equal(pathData.user.path, canonicalUser);
+  assert.equal(pathData.user.activePath, legacyUser);
+  assert.equal(pathData.user.usingLegacy, true);
+  assert.equal(pathData.project.path, join(realpathSync.native(repo), '.aicommit.config.json'));
+  assert.equal(realpathSync.native(pathData.project.activePath), realpathSync.native(projectPath));
+
+  writeFileSync(canonicalUser, JSON.stringify(userConfig({ language: 'en' })));
+  writeFileSync(projectPath, JSON.stringify({ language: 'zh' }));
+  const canonical = runCli(repo, home, ['config', 'show', '--output=json']);
+  assert.equal(canonical.code, 0, canonical.stdout + canonical.stderr);
+  assert.equal(JSON.parse(canonical.stdout).data.config.language, 'zh');
+  assert.doesNotMatch(canonical.stderr, /Using legacy/);
 });
