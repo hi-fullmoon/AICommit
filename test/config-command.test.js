@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CLI = fileURLToPath(new URL('../bin/aicommit.js', import.meta.url));
@@ -106,13 +106,15 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   const pathOutput = JSON.parse(paths.stdout);
   assert.equal(pathOutput.data.paths.user.path, userPath);
   assert.equal(pathOutput.data.paths.user.exists, true);
+  assert.equal(basename(pathOutput.data.paths.project.path), '.aicommit.config.json');
   assert.equal(
-    pathOutput.data.paths.project.path,
-    join(realpathSync(repo), '.aicommit.config.json'),
+    realpathSync.native(dirname(pathOutput.data.paths.project.path)),
+    realpathSync.native(repo),
   );
+  assert.equal(basename(pathOutput.data.paths.teamPolicy.path), '.aicommit.policy.json');
   assert.equal(
-    pathOutput.data.paths.teamPolicy.path,
-    join(realpathSync(repo), '.aicommit.policy.json'),
+    realpathSync.native(dirname(pathOutput.data.paths.teamPolicy.path)),
+    realpathSync.native(repo),
   );
   assert.equal(pathOutput.data.paths.teamPolicy.exists, false);
 

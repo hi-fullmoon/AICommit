@@ -620,7 +620,7 @@ test('checkpoint resumes after a later hook failure without duplicate or omitted
   const interrupted = readSplitCheckpoint(repo);
   assert.equal(interrupted.checkpoint.completed.length, 1);
   assert.equal(interrupted.checkpoint.inFlight.index, 1);
-  assert.equal(statSync(interrupted.path).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(statSync(interrupted.path).mode & 0o777, 0o600);
   assert.doesNotMatch(readFileSync(interrupted.path, 'utf8'), /checkpoint-secret-marker/);
 
   rmSync(hook);

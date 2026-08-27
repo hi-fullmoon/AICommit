@@ -101,12 +101,19 @@ function pathIsWithin(parent, candidate) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
+function canonicalExistingPath(path) {
+  // On Windows the native implementation expands 8.3 aliases such as
+  // RUNNER~1 consistently. The JS fallback can preserve whichever spelling
+  // it received, causing two paths to the same directory to compare unequal.
+  return realpathSync.native(path);
+}
+
 function canonicalDestination(path) {
   let cursor = resolve(path);
   const suffix = [];
   while (true) {
     try {
-      return join(realpathSync(cursor), ...suffix);
+      return join(canonicalExistingPath(cursor), ...suffix);
     } catch {
       const parent = dirname(cursor);
       if (parent === cursor) return resolve(path);
@@ -120,7 +127,7 @@ function safeExportPlanPath(projectRoot, path) {
   const absolute = resolve(path);
   const rawGitDir = readGit(['rev-parse', '--git-dir'], projectRoot).trim();
   const gitDir = isAbsolute(rawGitDir) ? rawGitDir : resolve(projectRoot, rawGitDir);
-  const canonicalRoot = realpathSync(projectRoot);
+  const canonicalRoot = canonicalExistingPath(projectRoot);
   const canonicalGitDir = canonicalDestination(gitDir);
   const canonicalPlan = canonicalDestination(absolute);
   if (pathIsWithin(canonicalRoot, canonicalPlan) && !pathIsWithin(canonicalGitDir, canonicalPlan)) {
