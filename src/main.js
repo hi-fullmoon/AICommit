@@ -28,6 +28,7 @@ import {
   statusIcon,
   confirmAction,
   editMessage,
+  isPromptQuitError,
   vimSelect,
   vimCheckbox,
 } from './ui.js';
@@ -82,7 +83,7 @@ async function pickPathsToStage(unstaged, untracked, message) {
   return picked.flat();
 }
 
-export async function main() {
+async function runMain() {
   // ── CLI arguments ───────────────────────────────────────────────────
 
   const {
@@ -764,5 +765,21 @@ export async function main() {
       cause: err,
       reported: true,
     });
+  }
+}
+
+export async function main() {
+  try {
+    return await runMain();
+  } catch (error) {
+    if (!isPromptQuitError(error)) throw error;
+    console.log(chalk.dim('\n  Quit — no commit was created.\n'));
+    return {
+      warnings: [],
+      exitReason: 'cancelled',
+      committed: false,
+      edited: false,
+      rewrites: 0,
+    };
   }
 }

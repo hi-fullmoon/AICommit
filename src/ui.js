@@ -128,6 +128,21 @@ export function formatReasoningPanel(reasoning, options = {}) {
 
 const CTRL_O_RELEASE_MS = 180;
 
+export class PromptQuitError extends Error {
+  constructor() {
+    super('User quit the interactive prompt.');
+    this.name = 'PromptQuitError';
+  }
+}
+
+export function isPromptQuitError(error) {
+  return error instanceof PromptQuitError;
+}
+
+function isQuitKey(key) {
+  return key?.name === 'q' && !key.ctrl && !key.meta && !key.shift;
+}
+
 function useCtrlOToggleGate() {
   const gate = useRef({ locked: false, timer: null });
   useEffect(() => () => clearTimeout(gate.current.timer), []);
@@ -291,6 +306,7 @@ const reasoningSelect = createPrompt((config, done) => {
   const choices = normalizeSelectChoices(config.choices);
   const first = choices.findIndex((choice) => !choice.disabled);
   if (first === -1) throw new Error('No selectable choices.');
+  const quitChoice = choices.find((choice) => !choice.disabled && choice.value === 'cancel');
 
   const [active, setActive] = useState(first);
   const [expanded, setExpanded] = useState(false);
@@ -308,6 +324,12 @@ const reasoningSelect = createPrompt((config, done) => {
   const maxOffset = Math.max(0, completeView.totalLines - pageSize);
 
   useKeypress((key, rl) => {
+    if (isQuitKey(key)) {
+      if (!quitChoice) throw new PromptQuitError();
+      setStatus('quit');
+      done(quitChoice.value);
+      return;
+    }
     if (key.ctrl && key.name === 'o') {
       rl.clearLine(0);
       if (acceptCtrlOToggle(ctrlOGate)) {
@@ -352,8 +374,9 @@ const reasoningSelect = createPrompt((config, done) => {
     }
   });
 
-  if (status === 'done') {
-    return `${chalk.green('?')} ${config.message} ${chalk.cyan(selected.short)}`;
+  if (status !== 'idle') {
+    const answer = status === 'quit' ? quitChoice : selected;
+    return `${chalk.green('?')} ${config.message} ${chalk.cyan(answer.short)}`;
   }
 
   const panel = formatReasoningPanel(config.reasoning.text, {
@@ -371,25 +394,29 @@ const reasoningSelect = createPrompt((config, done) => {
     .join('\n');
   const description = selected.description ? `\n  ${chalk.cyan(selected.description)}` : '';
   const pageHelp = expanded && maxOffset > 0 ? ' · PgUp/PgDn reasoning' : '';
-  const help = chalk.dim(`  ↑↓/j k navigate · Enter select · Ctrl+O reasoning${pageHelp}`);
+  const help = chalk.dim(`  ↑↓/j k navigate · Enter select · q quit · Ctrl+O reasoning${pageHelp}`);
 
   return `${panel}\n\n${chalk.green('?')} ${config.message}\n${rows}${description}\n${help}\x1B[?25l`;
 });
 
-// Vim-friendly prompts: wraps @inquirer prompts with j/k → arrow key
-// remapping. We intercept keypress events BEFORE @inquirer sees them and
-// translate j→down, k→up by emitting synthetic arrow-key events.
-// @inquirer ignores the original j/k characters, so only the arrow keys
-// take effect.
-async function withVimKeys(promptFn, options) {
+// Vim-friendly prompts: wraps @inquirer prompts with j/k navigation and q to
+// quit. The q shortcut resolves to an existing cancel choice when possible so
+// callers can run their normal cleanup; prompts without one unwind through a
+// dedicated error that main turns into a successful cancellation.
+async function withVimKeys(promptFn, options, { quitValue, hasQuitValue = false } = {}) {
   // Ensure keypress events are enabled on stdin (idempotent)
   readline.emitKeypressEvents(process.stdin);
 
   let inTranslate = false; // guard against re-entering our own synthetic emits
+  let quitRequested = false;
+  let activePrompt;
 
   const interceptor = (_str, key) => {
     if (inTranslate || !key) return;
-    if (key.name === 'j') {
+    if (isQuitKey(key)) {
+      quitRequested = true;
+      activePrompt?.cancel();
+    } else if (key.name === 'j') {
       inTranslate = true;
       process.stdin.emit('keypress', undefined, {
         name: 'down',
@@ -416,7 +443,12 @@ async function withVimKeys(promptFn, options) {
   process.stdin.prependListener('keypress', interceptor);
 
   try {
-    return await promptFn(options);
+    activePrompt = promptFn(options);
+    return await activePrompt;
+  } catch (error) {
+    if (!quitRequested) throw error;
+    if (hasQuitValue) return quitValue;
+    throw new PromptQuitError();
   } finally {
     process.stdin.removeListener('keypress', interceptor);
   }
@@ -426,11 +458,32 @@ export async function vimSelect(options, reasoning) {
   if (reasoning) {
     return reasoningSelect({ ...options, reasoning });
   }
-  return withVimKeys(select, options);
+  const quitChoice = options.choices.find(
+    (choice) => typeof choice === 'object' && choice?.value === 'cancel' && !choice.disabled,
+  );
+  const promptOptions = options.instructions
+    ? options
+    : {
+        ...options,
+        instructions: {
+          navigation: '↑↓/j k navigate · Enter select · q quit',
+          pager: '↑↓/j k navigate · Enter select · q quit',
+        },
+      };
+  return withVimKeys(select, promptOptions, {
+    quitValue: quitChoice?.value,
+    hasQuitValue: Boolean(quitChoice),
+  });
 }
 
 export async function vimCheckbox(options) {
-  return withVimKeys(checkbox, options);
+  const promptOptions = options.instructions
+    ? options
+    : {
+        ...options,
+        instructions: '↑↓/j k navigate · Space select · Enter confirm · q quit',
+      };
+  return withVimKeys(checkbox, promptOptions);
 }
 
 export async function confirmAction(message, reasoning) {

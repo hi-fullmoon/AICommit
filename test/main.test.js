@@ -276,6 +276,51 @@ test('interactive cancellation returns through cleanup and records a cancelled m
   assert.equal(metrics.at(-1).result, 'cancelled');
 });
 
+test('q cancels an interactive selection immediately', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-q-cancel-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  git(repo, ['reset', '-q']);
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
+      apiKey: '',
+      modelId: 'offline-model',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['--no-reasoning'], {}, 'q');
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Cancelled — stage files with git add/);
+  assert.equal(git(repo, ['diff', '--staged']).trim(), '');
+  assert.match(git(repo, ['diff']), /value = 2/);
+
+  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(metrics.at(-1).result, 'cancelled');
+});
+
+test('q exits a selection without a cancel choice as a clean cancellation', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-q-setup-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+
+  const result = await runCli(root, home, ['setup'], {}, 'q');
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Quit — no commit was created/);
+  assert.throws(() => readFileSync(join(home, '.aicommit.config.json'), 'utf8'), {
+    code: 'ENOENT',
+  });
+});
+
 test('interactive split scope cancellation returns without contacting the provider', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-cancel-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
