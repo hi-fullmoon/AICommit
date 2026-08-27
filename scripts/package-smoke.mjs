@@ -48,14 +48,14 @@ function makeRepo(root) {
   return repo;
 }
 
-function installedCli(prefix) {
+function installedCli(prefix, packageName) {
   const binLink =
     process.platform === 'win32' ? join(prefix, 'aicommit.cmd') : join(prefix, 'bin', 'aicommit');
   assert.ok(existsSync(binLink), `npm did not create the aicommit bin link at ${binLink}`);
 
   const entry =
     process.platform === 'win32'
-      ? join(prefix, 'node_modules', 'aicommit', 'bin', 'aicommit.js')
+      ? join(prefix, 'node_modules', ...packageName.split('/'), 'bin', 'aicommit.js')
       : realpathSync(binLink);
   assert.ok(existsSync(entry), `installed CLI entry is missing at ${entry}`);
   return entry;
@@ -152,8 +152,8 @@ async function main() {
       ],
       { cwd: root },
     );
-    const entry = installedCli(prefix);
     const manifest = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
+    const entry = installedCli(prefix, manifest.name);
 
     if (Number(process.versions.node.split('.')[0]) >= 20) {
       const installedRoot = dirname(dirname(entry));

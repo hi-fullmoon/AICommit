@@ -9,6 +9,20 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const FORMULA_CLASS = /^[A-Z][A-Za-z0-9]*$/;
 
+export function npmPackageCoordinates(name, version) {
+  const match = /^@([a-z0-9][a-z0-9._-]*)\/([a-z0-9][a-z0-9._-]*)$/.exec(name || '');
+  if (!match) throw new Error('package.json name must be a scoped npm package.');
+  if (!SEMVER.test(version || '')) throw new Error('package.json has an invalid version.');
+  const [, scope, packageName] = match;
+  return {
+    scope,
+    packageName,
+    canonicalTarballName: `${packageName}-${version}.tgz`,
+    packedTarballName: `${scope}-${packageName}-${version}.tgz`,
+    registryUrl: `https://registry.npmjs.org/@${scope}/${packageName}/-/${packageName}-${version}.tgz`,
+  };
+}
+
 async function regularFile(path, label) {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) {
@@ -54,22 +68,24 @@ export async function prepareReleaseAssets({
   formulaClass = 'Aicommit',
 }) {
   const manifest = JSON.parse(await readFile(join(PROJECT_ROOT, 'package.json'), 'utf8'));
-  if (!SEMVER.test(manifest.version || '')) throw new Error('package.json has an invalid version.');
+  const coordinates = npmPackageCoordinates(manifest.name, manifest.version);
   const tarball = resolve(tarballPath);
   await regularFile(tarball, 'npm tarball');
-  const expectedName = `aicommit-${manifest.version}.tgz`;
-  if (basename(tarball) !== expectedName) {
-    throw new Error(`Expected npm tarball ${expectedName}, got ${basename(tarball)}.`);
+  const acceptedNames = new Set([coordinates.canonicalTarballName, coordinates.packedTarballName]);
+  if (!acceptedNames.has(basename(tarball))) {
+    throw new Error(
+      `Expected npm tarball ${[...acceptedNames].join(' or ')}, got ${basename(tarball)}.`,
+    );
   }
   if (!/^[a-z0-9-]+\.rb$/.test(formulaName) || !FORMULA_CLASS.test(formulaClass)) {
     throw new Error('Invalid Homebrew formula output name or class.');
   }
   const output = resolve(outputDirectory);
   await mkdir(output, { recursive: true });
-  const packagedTarball = join(output, expectedName);
+  const packagedTarball = join(output, coordinates.canonicalTarballName);
   if (packagedTarball !== tarball) await copyFile(tarball, packagedTarball);
   const tarballSha256 = await digest(packagedTarball);
-  const registryUrl = `https://registry.npmjs.org/aicommit/-/${expectedName}`;
+  const registryUrl = coordinates.registryUrl;
   const formula = await renderHomebrewFormula({
     version: manifest.version,
     sha256: tarballSha256,

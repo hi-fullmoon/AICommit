@@ -5,7 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { prepareReleaseAssets, renderHomebrewFormula } from '../scripts/release-assets.mjs';
+import {
+  npmPackageCoordinates,
+  prepareReleaseAssets,
+  renderHomebrewFormula,
+} from '../scripts/release-assets.mjs';
+import { assertOrgMembership, scopedPackage } from '../scripts/publish-npm-org.mjs';
 import { validateSignedTagRecords } from '../scripts/verify-github-tag.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -14,7 +19,7 @@ const manifest = JSON.parse(await readFile(new URL('../package.json', import.met
 test('release assets bind the npm tarball, Homebrew formula, SBOM, and checksums', async () => {
   const root = await mkdtemp(join(tmpdir(), 'aicommit-release-assets-'));
   try {
-    const tarball = join(root, `aicommit-${manifest.version}.tgz`);
+    const tarball = join(root, `hi-fullmoon-aicommit-${manifest.version}.tgz`);
     const sbom = join(root, `aicommit-${manifest.version}.spdx.json`);
     await writeFile(tarball, 'deterministic tarball fixture');
     await writeFile(sbom, '{"spdxVersion":"SPDX-2.3"}\n');
@@ -22,7 +27,7 @@ test('release assets bind the npm tarball, Homebrew formula, SBOM, and checksums
     assert.equal(result.tarballSha256, hash('deterministic tarball fixture'));
     assert.equal(
       result.formulaUrl,
-      `https://registry.npmjs.org/aicommit/-/aicommit-${manifest.version}.tgz`,
+      `https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-${manifest.version}.tgz`,
     );
     const formula = await readFile(result.formulaPath, 'utf8');
     assert.match(formula, /class Aicommit < Formula/);
@@ -43,7 +48,7 @@ test('formula rendering rejects insecure or incomplete release coordinates', asy
   const valid = {
     version: '1.4.0',
     sha256: 'a'.repeat(64),
-    url: 'https://registry.npmjs.org/aicommit/-/aicommit-1.4.0.tgz',
+    url: 'https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-1.4.0.tgz',
   };
   assert.match(await renderHomebrewFormula(valid), /sha256 "a{64}"/);
   await assert.rejects(
@@ -51,6 +56,23 @@ test('formula rendering rejects insecure or incomplete release coordinates', asy
     /HTTPS/,
   );
   await assert.rejects(() => renderHomebrewFormula({ ...valid, sha256: 'not-a-hash' }), /sha256/);
+});
+
+test('npm organization coordinates keep the scoped registry identity and canonical assets', () => {
+  assert.deepEqual(scopedPackage('@hi-fullmoon/aicommit'), {
+    organization: 'hi-fullmoon',
+    packageName: 'aicommit',
+  });
+  assert.deepEqual(npmPackageCoordinates('@hi-fullmoon/aicommit', '1.4.0'), {
+    scope: 'hi-fullmoon',
+    packageName: 'aicommit',
+    canonicalTarballName: 'aicommit-1.4.0.tgz',
+    packedTarballName: 'hi-fullmoon-aicommit-1.4.0.tgz',
+    registryUrl: 'https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-1.4.0.tgz',
+  });
+  assert.equal(assertOrgMembership({ zhengbiwen: 'owner' }, 'zhengbiwen', 'hi-fullmoon'), 'owner');
+  assert.throws(() => assertOrgMembership({}, 'zhengbiwen', 'hi-fullmoon'), /not a member/);
+  assert.throws(() => scopedPackage('aicommit'), /@organization\/package/);
 });
 
 test('release tag verifier requires an annotated, valid signature on the checked-out commit', () => {
@@ -111,12 +133,14 @@ test('release and CI workflows preserve signed npm and Homebrew distribution gat
   assert.match(release, /verify-github-tag\.mjs/);
   assert.match(release, /uses: actions\/attest@v4/g);
   assert.match(release, /npm publish "dist\/aicommit-\$\{VERSION\}\.tgz" --provenance/);
+  assert.match(release, /PACK_FILENAME=\$\(npm pack --json/);
   assert.match(release, /gh release upload/);
   assert.match(release, /cmp dist\/aicommit\.rb Formula\/aicommit\.rb/);
   assert.match(release, /brew install --formula Formula\/aicommit\.rb/);
   assert.match(ci, /homebrew-smoke:/);
   assert.match(ci, /AICOMMIT_HOMEBREW_SMOKE: '1'/);
   assert.equal(manifest.publishConfig.provenance, true);
+  assert.equal(manifest.name, '@hi-fullmoon/aicommit');
 });
 
 test('release, rollback, verification, and preset compatibility docs remain executable', async () => {
