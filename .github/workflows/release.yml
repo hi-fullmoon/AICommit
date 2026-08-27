@@ -1,22 +1,9 @@
 name: Release
 
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing GitHub release tag to publish
-        required: true
-        type: string
-      npm_dist_tag:
-        description: npm distribution tag
-        required: true
-        default: latest
-        type: choice
-        options:
-          - latest
-          - next
+  push:
+    tags:
+      - 'v*'
 
 concurrency:
   group: npm-release
@@ -37,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -45,45 +32,16 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Verify release
-        run: GITHUB_REF_NAME="$RELEASE_TAG" npm run release:npm:check
+        run: npm run release:npm:check
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-      - name: Pack release and verify the Homebrew formula
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+      - name: Pack release
         run: |
-          VERSION=$(node -p "require('./package.json').version")
           mkdir -p dist
           PACK_FILENAME=$(npm pack --json --pack-destination dist | node -e \
             "let input=''; process.stdin.on('data', c => input += c); process.stdin.on('end', () => process.stdout.write(JSON.parse(input)[0].filename))")
-          node scripts/release-assets.mjs \
-            --tarball "dist/${PACK_FILENAME}" \
-            --output dist
-          cmp dist/aicommit.rb Formula/aicommit.rb
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "PACKAGE_TARBALL=./dist/${PACK_FILENAME}" >> "$GITHUB_ENV"
       - name: Publish with npm Trusted Publishing
-        run: npm publish "./dist/aicommit-${VERSION}.tgz" --access public --tag "$NPM_DIST_TAG"
+        run: npm publish "$PACKAGE_TARBALL" --access public --tag "$NPM_DIST_TAG"
         env:
-          NPM_DIST_TAG: ${{ inputs.npm_dist_tag || (github.event.release.prerelease && 'next' || 'latest') }}
-
-  verify-homebrew:
-    name: Verify Homebrew install
-    needs: publish-npm
-    runs-on: macos-latest
-    timeout-minutes: 15
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
-      - name: Install the published formula from a temporary tap
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew tap-new --no-git aicommit-ci/release
-          cp Formula/aicommit.rb "$(brew --repository aicommit-ci/release)/Formula/aicommit.rb"
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install --formula aicommit-ci/release/aicommit
-          aicommit --version
-          aicommit --help >/dev/null
-          HOME="$RUNNER_TEMP/aicommit-home" aicommit config validate --output=json
-      - name: Uninstall smoke formula
-        if: always()
-        run: |
-          brew uninstall --force aicommit-ci/release/aicommit || true
-          brew untap --force aicommit-ci/release || true
+          NPM_DIST_TAG: ${{ contains(github.ref_name, '-') && 'next' || 'latest' }}

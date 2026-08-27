@@ -254,9 +254,17 @@ async function main() {
     writeFileSync(
       join(home, '.aicommit.config.json'),
       JSON.stringify({
-        apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-        apiKey: '',
-        modelId: 'package-smoke-model',
+        schemaVersion: 1,
+        defaultProvider: 'smoke',
+        providers: {
+          smoke: {
+            providerType: 'custom',
+            apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+            apiKey: '',
+            defaultModel: 'default',
+            models: { default: { modelId: 'package-smoke-model' } },
+          },
+        },
         reasoning: { mode: 'off' },
       }),
     );

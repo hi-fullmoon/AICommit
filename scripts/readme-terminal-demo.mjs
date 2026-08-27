@@ -58,9 +58,17 @@ function writeConfig(home, port) {
   writeFileSync(
     join(home, '.aicommit.config.json'),
     JSON.stringify({
-      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
-      apiKey: '',
-      modelId: 'readme-demo-model',
+      schemaVersion: 1,
+      defaultProvider: 'demo',
+      providers: {
+        demo: {
+          providerType: 'custom',
+          apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+          apiKey: '',
+          defaultModel: 'default',
+          models: { default: { modelId: 'readme-demo-model' } },
+        },
+      },
       language: 'en',
       reasoning: { mode: 'off' },
     }),
