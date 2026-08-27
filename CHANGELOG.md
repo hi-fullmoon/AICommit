@@ -4,6 +4,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-27
+
 ### Changed
 
 - Made quality and cross-platform compatibility checks blocking prerequisites of npm publishing in the single tag-triggered release workflow.
@@ -145,7 +147,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.1.0
 [2.0.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.1
 [2.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.0
 [1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
