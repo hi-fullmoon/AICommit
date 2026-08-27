@@ -29,6 +29,7 @@
     "eval": "node eval/run.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "test:homebrew": "node scripts/homebrew-smoke.mjs",
+    "docs:terminal-demo": "node scripts/readme-terminal-demo.mjs",
     "release:assets": "node scripts/release-assets.mjs",
     "release:npm:check": "node scripts/publish-npm-org.mjs",
     "release:npm:publish": "node scripts/publish-npm-org.mjs --publish",
