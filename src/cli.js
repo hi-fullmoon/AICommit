@@ -18,7 +18,7 @@ function showHelp() {
     ${chalk.dim('$')} aicommit policy <template|check> [options]
     ${chalk.dim('$')} aicommit preset <show|validate|path|install|rollback> [options]
     ${chalk.dim('$')} aicommit completion <bash|zsh|fish>
-    ${chalk.dim('$')} aicommit split <run|plan|apply|resume|abort> [options]
+    ${chalk.dim('$')} aicommit split [run|plan|apply|resume|abort] [options]
 
   ${chalk.bold('Commands:')}
     setup                 Interactive configuration wizard
@@ -30,7 +30,7 @@ function showHelp() {
     policy check          Validate a message file or Git range with the effective team policy
     preset                Inspect, validate, install, or roll back provider preset manifests
     completion            Generate Bash, Zsh, or Fish completion on stdout
-    split run             Plan and create logical commits
+    split, split run      Plan and create logical commits
     split plan            Generate and export a fingerprinted JSON plan
     split apply           Validate and apply an exported JSON plan
     split resume          Resume the repository's unfinished transaction
@@ -46,7 +46,7 @@ function showHelp() {
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
     --split-hunks         Experimental same-file hunk planning (default: off)
-    --scope=<scope>       Scope for "split run|plan": staged, all
+    --scope=<scope>       Scope for "split|split plan": staged, all
     --file=<path>         Split-plan artifact or commit-message file
     --range=<revision>    Git revision/range for "policy check" (default: HEAD)
     --reasoning=<level>   Set reasoning effort (enabled by default: medium)
@@ -73,10 +73,10 @@ function showHelp() {
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
     aicommit -p deepseek  Switch to the "deepseek" provider from config
-    aicommit split run    Choose staged/all scope, then plan logical commits
-    aicommit split run --scope=staged  Split only the reviewed index snapshot
-    aicommit split run --scope=all --yes  Split the complete working tree non-interactively
-    aicommit split run --scope=staged --split-hunks  Split eligible text hunks
+    aicommit split        Choose staged/all scope, then plan logical commits
+    aicommit split --scope=staged  Split only the reviewed index snapshot
+    aicommit split --scope=all --yes  Split the complete working tree non-interactively
+    aicommit split --scope=staged --split-hunks  Split eligible text hunks
     aicommit split plan --scope=staged --file=.aicommit-plan.json --yes
     aicommit split apply --file=.aicommit-plan.json --yes
     aicommit split resume --yes  Resume pending groups from the checkpoint
@@ -203,14 +203,23 @@ export function parseArgs(args = process.argv.slice(2)) {
 
   let splitCommand = null;
   if (args[0] === 'split') {
-    splitCommand = args[1];
-    if (!['run', 'plan', 'apply', 'resume', 'abort'].includes(splitCommand)) {
+    const requestedAction = args[1];
+    const actions = ['run', 'plan', 'apply', 'resume', 'abort'];
+    if (!requestedAction || requestedAction.startsWith('-')) {
+      // Keep the common path short: `aicommit split` is the interactive
+      // split flow, while explicit actions remain available for automation
+      // and recovery.
+      splitCommand = 'run';
+      args = args.slice(1);
+    } else if (actions.includes(requestedAction)) {
+      splitCommand = requestedAction;
+      args = args.slice(2);
+    } else {
       throw fail(
         ERROR_CATEGORIES.CONFIG,
         'split requires one action: run, plan, apply, resume, or abort.',
       );
     }
-    args = args.slice(2);
   }
 
   const doctor = args[0] === 'doctor';

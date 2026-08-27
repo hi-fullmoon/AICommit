@@ -12,9 +12,17 @@ test('parseArgs recognizes dry-run in normal and split modes', () => {
   const split = parseArgs(['split', 'run', '--dry-run']);
   assert.equal(split.dryRun, true);
   assert.equal(split.split, 'prompt');
+
+  const shortSplit = parseArgs(['split', '--dry-run']);
+  assert.equal(shortSplit.splitCommand, 'run');
+  assert.equal(shortSplit.dryRun, true);
+  assert.equal(shortSplit.split, 'prompt');
 });
 
 test('parseArgs requires an explicit staged/all scope for non-interactive split', () => {
+  assert.equal(parseArgs(['split']).splitCommand, 'run');
+  assert.equal(parseArgs(['split', '--scope=staged', '--yes']).split, 'staged');
+  assert.equal(parseArgs(['split', '--scope=all', '--yes']).split, 'all');
   assert.equal(parseArgs(['split', 'run', '--scope=staged', '--yes']).split, 'staged');
   assert.equal(parseArgs(['split', 'run', '--scope=all', '--yes']).split, 'all');
   assert.throws(() => parseArgs(['split', 'run', '--scope=other']), /Invalid split scope/);
@@ -26,7 +34,7 @@ test('parseArgs rejects removed compatibility switches and split actions', () =>
   assert.throws(() => parseArgs(['--split=all']), /Unknown option/);
   assert.throws(() => parseArgs(['--check']), /Unknown option/);
   assert.throws(() => parseArgs(['-c']), /Unknown option/);
-  assert.throws(() => parseArgs(['split', '--resume']), /run, plan, apply, resume, or abort/);
+  assert.throws(() => parseArgs(['split', '--resume']), /Unknown option/);
   assert.throws(() => parseArgs(['metrics', 'clear']), /Unexpected extra argument/);
 });
 

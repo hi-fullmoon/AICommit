@@ -281,15 +281,15 @@ aicommit stats           # 显示本地质量、延迟和 token 趋势
 aicommit stats clear     # 永久清除本地指标历史
 aicommit                 # 在当前目录生成提交信息并提交
 aicommit /path/to/repo   # 或指定目标目录
-aicommit split run       # 选择 staged / all 范围并拆分逻辑提交
-aicommit split run --scope=staged # 只拆分已审阅的 index 快照
-aicommit split run --scope=all # 拆分完整工作区快照
-aicommit split run --scope=staged --split-hunks # 实验性同文件 hunk 拆分
+aicommit split           # 选择 staged / all 范围并拆分逻辑提交
+aicommit split --scope=staged # 只拆分已审阅的 index 快照
+aicommit split --scope=all # 拆分完整工作区快照
+aicommit split --scope=staged --split-hunks # 实验性同文件 hunk 拆分
 aicommit --dry-run       # 生成并审阅，但不创建提交
-aicommit split run --dry-run # 审阅拆分计划，但不创建提交
+aicommit split --dry-run # 审阅拆分计划，但不创建提交
 aicommit --yes           # 非交互提交已明确暂存的变更
 aicommit --yes --dry-run # 非交互预览所有变更；退出时恢复暂存状态
-aicommit split run --scope=all --yes # 非交互规划并提交所有工作区变更
+aicommit split --scope=all --yes # 非交互规划并提交所有工作区变更
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # 恢复中断的拆分事务
@@ -302,20 +302,20 @@ aicommit --yes --output=json # 向 stdout 输出一个通过 schema 校验的 JS
 aicommit -h              # 帮助
 ```
 
-| 选项               | 说明                                                                    |
-| ------------------ | ----------------------------------------------------------------------- |
-| `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                              |
-| `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                      |
-| `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                                |
-| `--scope`          | `aicommit split run` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
-| `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径        |
-| `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                                  |
-| `-y`, `--yes`      | 不提示直接接受；普通模式要求变更已明确暂存                              |
-| `--reasoning`      | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`           |
-| `--no-reasoning`   | 所选 Provider / 模型支持时显式关闭推理                                  |
-| `--output`         | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes`     |
-| `-v`, `--version`  | 显示版本                                                                |
-| `-h`, `--help`     | 显示帮助                                                                |
+| 选项               | 说明                                                                |
+| ------------------ | ------------------------------------------------------------------- |
+| `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                          |
+| `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                  |
+| `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                            |
+| `--scope`          | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
+| `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
+| `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                              |
+| `-y`, `--yes`      | 不提示直接接受；普通模式要求变更已明确暂存                          |
+| `--reasoning`      | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`       |
+| `--no-reasoning`   | 所选 Provider / 模型支持时显式关闭推理                              |
+| `--output`         | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes` |
+| `-v`, `--version`  | 显示版本                                                            |
+| `-h`, `--help`     | 显示帮助                                                            |
 
 ### 配置检查
 
@@ -411,7 +411,7 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### 拆分提交模式
 
-`aicommit split run` 会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。扩展校验错误会随计划显示，必须通过编辑或重新生成修复后才能提交。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
+`aicommit split`（也可以显式写成 `aicommit split run`）会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。扩展校验错误会随计划显示，必须通过编辑或重新生成修复后才能提交。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
 
 如需可审计的两步流程，使用 `aicommit split plan --scope=staged|all --file=<path>` 导出版本化 JSON 工件，再用 `aicommit split apply --file=<path>` 在接触 index 前重新校验 base commit、变更集和内容指纹。计划文件应保存在工作区之外或 `.git` 下，避免被纳入自身计划。
 

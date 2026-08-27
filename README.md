@@ -279,15 +279,15 @@ aicommit stats           # show local quality, latency, and token trends
 aicommit stats clear     # permanently clear local metric history
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
-aicommit split run       # choose staged/all scope, then split logical commits
-aicommit split run --scope=staged # split only the reviewed index snapshot
-aicommit split run --scope=all # split the complete working-tree snapshot
-aicommit split run --scope=staged --split-hunks # experimental same-file hunk splitting
+aicommit split           # choose staged/all scope, then split logical commits
+aicommit split --scope=staged # split only the reviewed index snapshot
+aicommit split --scope=all # split the complete working-tree snapshot
+aicommit split --scope=staged --split-hunks # experimental same-file hunk splitting
 aicommit --dry-run       # generate and review without creating a commit
-aicommit split run --dry-run # review a split plan without creating commits
+aicommit split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
 aicommit --yes --dry-run # non-interactively preview all changes; restores staging
-aicommit split run --scope=all --yes # non-interactively plan and commit all working-tree changes
+aicommit split --scope=all --yes # non-interactively plan and commit all working-tree changes
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # resume an interrupted split transaction
@@ -305,7 +305,7 @@ aicommit -h              # help
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                       |
 | `-p`, `--provider` | Use the named provider from `providers`                                      |
 | `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default     |
-| `--scope`          | `staged` or `all` scope for `aicommit split run` and `aicommit split plan`   |
+| `--scope`          | `staged` or `all` scope for `aicommit split` and `aicommit split plan`       |
 | `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`          |
 | `--dry-run`        | Generate and review a message or split plan without creating commits         |
 | `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes       |
@@ -409,7 +409,7 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`aicommit split run` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--scope=staged` or `--scope=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
+`aicommit split` (also available as the explicit `aicommit split run`) asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--scope=staged` or `--scope=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
 
 For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
 

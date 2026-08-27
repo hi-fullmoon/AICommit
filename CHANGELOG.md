@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- `aicommit split` now runs the standard interactive split flow directly; `aicommit split run` remains available as an explicit alias.
 - Publish the CLI as the public npm organization package `@hifullmoon/aicommit`, with guarded bootstrap and Trusted Publishing release paths.
 - Repository team policies now reject `-l`/`--lang` overrides, inherited policy languages are enforced during candidate validation, and split extension violations remain reviewable before commit.
 - Provider preset compatibility now accepts valid core prerelease/build versions and compares prereleases using SemVer precedence.
