@@ -6,19 +6,23 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 
 ## 使用预览
 
-以下截图来自临时 Git 仓库中的真实交互式终端会话。Provider 使用无需凭据的本地 mock。
+以下截图来自本仓库中的真实交互式终端会话。Provider、模型、路径和耗时均为截图时的实际环境。
 
-### 生成 Conventional Commit
+### 交互式暂存工作区变更
 
-![AICommit 生成并创建 Conventional Commit](docs/assets/readme/generate-commit.png)
+![AICommit 提示暂存全部变更或选择文件](docs/assets/readme/stage-changes.png)
 
 ### 检查配置与连接
 
 ![AICommit doctor 检查运行环境、配置、凭据和 Provider 连接](docs/assets/readme/doctor-diagnostics.png)
 
-### 规划并执行逻辑提交
+### 规划逻辑提交
 
-![AICommit 创建并执行带指纹校验的拆分提交计划](docs/assets/readme/split-workflow.png)
+![AICommit 根据工作区变更规划两个逻辑提交](docs/assets/readme/split-workflow.png)
+
+### 检查生成的提交信息
+
+![AICommit 展示生成的 Conventional Commit 并等待确认](docs/assets/readme/generate-commit.png)
 
 ## 安装
 
