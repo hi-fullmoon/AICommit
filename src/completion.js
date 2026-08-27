@@ -11,6 +11,7 @@ const TOP_LEVEL = [
   '--version',
   '--lang',
   '--provider',
+  '--model',
   '--split-hunks',
   '--scope',
   '--reasoning',
@@ -30,7 +31,7 @@ _aicommit() {
   command="\${COMP_WORDS[1]}"
 
   case "$command" in
-    config) COMPREPLY=( $(compgen -W "show validate path --provider --output --debug" -- "$cur") ); return ;;
+    config) COMPREPLY=( $(compgen -W "show validate path --provider --model --output --debug" -- "$cur") ); return ;;
     policy) COMPREPLY=( $(compgen -W "template check --file --range --output --debug" -- "$cur") ); return ;;
     preset) COMPREPLY=( $(compgen -W "show validate path install rollback --file --output --debug" -- "$cur") ); return ;;
     completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return ;;
@@ -66,6 +67,7 @@ _aicommit() {
     '--version[show version]'
     '--lang=[commit language]:language:(zh en)'
     '--provider=[provider name]:provider:'
+    '--model=[model name]:model:'
     '--split-hunks[experimental same-file hunk splitting]'
     '--scope=[split scope]:scope:(staged all)'
     '--file=[split plan or commit-message file]:path:_files'
@@ -115,6 +117,7 @@ complete -c aicommit -s h -l help -d 'Show help'
 complete -c aicommit -s v -l version -d 'Show version'
 complete -c aicommit -s l -l lang -x -a 'zh en' -d 'Commit language'
 complete -c aicommit -s p -l provider -x -d 'Provider name'
+complete -c aicommit -s m -l model -x -d 'Model name'
 complete -c aicommit -l split-hunks -d 'Experimental same-file hunk splitting'
 complete -c aicommit -l scope -x -a 'staged all' -d 'Split plan scope'
 complete -c aicommit -l file -r -d 'Split plan file'

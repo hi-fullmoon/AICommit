@@ -45,6 +45,7 @@ function showHelp() {
     -v, --version         Show version number
     -l, --lang=<zh|en>    Commit message language (default: zh)
     -p, --provider=<name> Use the named provider from config "providers"
+    -m, --model=<name>    Use a named model from the selected provider
     --split-hunks         Experimental same-file hunk planning (default: off)
     --scope=<scope>       Scope for "split|split plan": staged, all
     --file=<path>         Split-plan artifact or commit-message file
@@ -72,7 +73,7 @@ function showHelp() {
     aicommit stats        Show local acceptance, quality, latency, and token trends
     aicommit              Commit changes in current directory (Chinese)
     aicommit --lang=en    Generate English commit message
-    aicommit -p deepseek  Switch to the "deepseek" provider from config
+    aicommit -p deepseek -m chat  Select a configured provider and model
     aicommit split        Choose staged/all scope, then plan logical commits
     aicommit split --scope=staged  Split only the reviewed index snapshot
     aicommit split --scope=all --yes  Split the complete working tree non-interactively
@@ -109,6 +110,7 @@ function parsedDefaults(overrides = {}) {
     targetPath: null,
     cliLang: null,
     cliProvider: null,
+    cliModel: null,
     cliReasoning: null,
     output: 'text',
     debug: false,
@@ -228,6 +230,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let targetPath = null;
   let cliLang = null;
   let cliProvider = null;
+  let cliModel = null;
   let cliReasoning = null;
   let output = 'text';
   let debug = false;
@@ -387,6 +390,23 @@ export function parseArgs(args = process.argv.slice(2)) {
       continue;
     }
 
+    if (arg === '-m' || arg === '--model') {
+      cliModel = takeValue(args, i, arg, 'name');
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith('--model=')) {
+      cliModel = arg.slice('--model='.length);
+      if (!cliModel) throw fail(ERROR_CATEGORIES.CONFIG, 'Missing value for --model.');
+      continue;
+    }
+
+    if (arg.startsWith('-m') && arg.length > 2) {
+      cliModel = arg.slice(2);
+      continue;
+    }
+
     if (!arg.startsWith('-')) {
       if (targetPath) {
         throw fail(
@@ -439,7 +459,7 @@ export function parseArgs(args = process.argv.slice(2)) {
           'split apply reads its scope from the plan; do not pass --scope or --split-hunks.',
         );
       }
-      if (cliProvider || cliLang || cliReasoning || dryRun) {
+      if (cliProvider || cliModel || cliLang || cliReasoning || dryRun) {
         throw fail(
           ERROR_CATEGORIES.CONFIG,
           'split apply accepts only --file, --yes, --output, and --debug.',
@@ -451,6 +471,7 @@ export function parseArgs(args = process.argv.slice(2)) {
         split ||
         splitHunks ||
         cliProvider ||
+        cliModel ||
         cliLang ||
         cliReasoning ||
         dryRun
@@ -484,15 +505,23 @@ export function parseArgs(args = process.argv.slice(2)) {
   ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
-      'config accepts only an optional path, --provider, --output, and --debug.',
+      'config accepts only an optional path, --provider, --model, --output, and --debug.',
     );
   }
-  if (configAction === 'path' && cliProvider) {
-    throw fail(ERROR_CATEGORIES.CONFIG, 'config path does not accept --provider.');
+  if (configAction === 'path' && (cliProvider || cliModel)) {
+    throw fail(ERROR_CATEGORIES.CONFIG, 'config path does not accept --provider or --model.');
   }
   if (
     policyAction &&
-    (cliProvider || cliLang || cliReasoning || split || splitHunks || splitCommand || dryRun || yes)
+    (cliProvider ||
+      cliModel ||
+      cliLang ||
+      cliReasoning ||
+      split ||
+      splitHunks ||
+      splitCommand ||
+      dryRun ||
+      yes)
   ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
@@ -509,6 +538,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     presetAction &&
     (targetPath ||
       cliProvider ||
+      cliModel ||
       cliLang ||
       cliReasoning ||
       split ||
@@ -534,7 +564,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
-      'doctor accepts only --provider, --output, and --debug options.',
+      'doctor accepts only --provider, --model, --output, and --debug options.',
     );
   }
 
@@ -542,6 +572,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     targetPath,
     cliLang,
     cliProvider,
+    cliModel,
     cliReasoning,
     output,
     debug,

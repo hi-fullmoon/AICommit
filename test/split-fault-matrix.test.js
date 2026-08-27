@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { userConfig } from '../test-support/config-fixture.js';
 
 import { DEFAULT_COMMIT_POLICY } from '../src/policy.js';
 import { getSplitStateFingerprint, getStagedChangedFiles } from '../src/split.js';
@@ -21,6 +22,10 @@ import { splitCheckpointPath } from '../src/split-checkpoint.js';
 import { createSplitPlanArtifact, writeSplitPlanArtifact } from '../src/split-plan.js';
 
 const CLI = fileURLToPath(new URL('../bin/aicommit.js', import.meta.url));
+
+function stringifyUserConfig(config) {
+  return JSON.stringify(userConfig(config));
+}
 
 function git(repo, args) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -261,7 +266,7 @@ test('fault matrix preserves rename, deletion, and binary groups through plan/ap
   const configPath = join(home, '.aicommit.config.json');
   writeFileSync(
     configPath,
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',

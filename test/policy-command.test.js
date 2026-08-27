@@ -57,19 +57,17 @@ test('local message files and CI ranges use the same committed team policy', (t)
   writeFileSync(
     join(home, '.aicommit.config.json'),
     JSON.stringify({
+      schemaVersion: 1,
       language: 'zh',
       defaultProvider: 'personal',
       providers: {
         personal: {
-          language: 'zh',
-          commitPolicy: {
-            version: 1,
-            types: ['chore'],
-            scope: { mode: 'forbidden', values: [] },
-            subject: { maxLength: 10 },
-            body: { mode: 'forbidden', maxLines: 0 },
-            breakingChange: 'forbid',
-            language: 'zh',
+          providerType: 'custom',
+          apiUrl: 'https://api.example.test/v1/chat/completions',
+          apiKeyEnv: 'AICOMMIT_POLICY_TEST_KEY',
+          defaultModel: 'default',
+          models: {
+            default: { modelId: 'policy-test-model' },
           },
         },
       },
@@ -82,7 +80,6 @@ test('local message files and CI ranges use the same committed team policy', (t)
         breakingChange: 'forbid',
         language: 'zh',
       },
-      apiKeyEnv: 'AICOMMIT_POLICY_TEST_KEY',
       credentialHelper: { enabled: true, username: 'aicommit' },
       repositoryContext: { commitlint: { enabled: false } },
     }),

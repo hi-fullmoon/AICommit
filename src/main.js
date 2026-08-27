@@ -90,6 +90,7 @@ async function runMain() {
     targetPath,
     cliLang,
     cliProvider,
+    cliModel,
     cliReasoning,
     output,
     debug,
@@ -148,6 +149,7 @@ async function runMain() {
   if (configAction) {
     return runConfigCommand(configAction, {
       provider: cliProvider,
+      model: cliModel,
       machineOutput,
     });
   }
@@ -183,12 +185,14 @@ async function runMain() {
     return applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
   }
 
-  if (doctor) return runDoctor(cliProvider);
+  if (doctor) return runDoctor(cliProvider, cliModel);
 
   // ── 1. Config ───────────────────────────────────────────────────────
 
-  const { config, projectRoot, loaded, providerName, teamPolicyPath } =
-    await loadConfig(cliProvider);
+  const { config, projectRoot, loaded, providerName, modelName, teamPolicyPath } = await loadConfig(
+    cliProvider,
+    { model: cliModel },
+  );
   const extensionHost = await configureExtensionHost(config);
   const selectedProvider = providerName || detectProviderType(config.apiUrl, config.providerType);
   const warnings = [];
@@ -235,8 +239,8 @@ async function runMain() {
   }
   const reasoningEnabled = config.reasoning.mode === 'on';
 
-  const viaCli = cliProvider ? chalk.dim(' (via CLI)') : '';
-  const modelLabel = providerName ? `${providerName} (${config.modelId})` : config.modelId;
+  const viaCli = cliProvider || cliModel ? chalk.dim(' (via CLI)') : '';
+  const modelLabel = `${providerName}/${modelName} (${config.modelId})`;
   console.log(
     '  ' + chalk.green('✓') + chalk.dim(` Model: ${sanitizeTerminalText(modelLabel)}${viaCli}`),
   );
@@ -278,12 +282,14 @@ async function runMain() {
     console.log(chalk.dim(`  config files: ${loaded.join(', ') || '(none — defaults only)'}`));
     console.log(chalk.dim(`  cliLang:      ${cliLang || '(not set)'}`));
     console.log(chalk.dim(`  cliProvider:  ${cliProvider || '(not set)'}`));
+    console.log(chalk.dim(`  cliModel:     ${cliModel || '(not set)'}`));
     console.log(
       chalk.dim(
         `  reasoning:    ${config.reasoning.mode === 'on' ? config.reasoning.effort : config.reasoning.mode}${cliReasoning ? ' (via CLI)' : ''}`,
       ),
     );
     console.log(chalk.dim(`  providerName: ${providerName || '(not set)'}`));
+    console.log(chalk.dim(`  modelName:    ${modelName || '(not set)'}`));
     console.log(chalk.dim(`  split:        ${split}`));
     console.log(chalk.dim(`  dryRun:       ${dryRun}`));
     console.log(chalk.dim(`  yes:          ${yes}`));

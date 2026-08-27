@@ -33,7 +33,7 @@ function gitVersion() {
   }).trim();
 }
 
-export async function runDoctor(cliProvider = null) {
+export async function runDoctor(cliProvider = null, cliModel = null) {
   const checks = [];
   const warnings = [];
   console.log('\n  ' + chalk.cyan.bold('Doctor diagnostics'));
@@ -60,7 +60,7 @@ export async function runDoctor(cliProvider = null) {
 
   let loadedConfig;
   try {
-    loadedConfig = await loadConfig(cliProvider);
+    loadedConfig = await loadConfig(cliProvider, { model: cliModel });
   } catch (err) {
     const classified = classifyError(err);
     addCheck(checks, 'Config', 'fail', classified.message);
@@ -68,11 +68,13 @@ export async function runDoctor(cliProvider = null) {
     throw classified;
   }
 
-  const { config, loaded, providerName, credentialSourceLabel, credentialWarning } = loadedConfig;
+  const { config, loaded, providerName, modelName, credentialSourceLabel, credentialWarning } =
+    loadedConfig;
   const extensionHost = await configureExtensionHost(config);
   const adapter = await resolveProviderAdapter(config, getProviderAdapter);
   const provider = providerName || adapter.id;
   addCheck(checks, 'Config', 'pass', loaded.length ? loaded.join(' + ') : 'built-in defaults');
+  addCheck(checks, 'Model', 'pass', `${providerName}/${modelName} (${config.modelId})`);
   addCheck(
     checks,
     'Endpoint security',

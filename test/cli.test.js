@@ -107,6 +107,19 @@ test('parseArgs recognizes explicit non-interactive confirmation', () => {
   assert.equal(parseArgs([]).yes, false);
 });
 
+test('parseArgs accepts named model selection with a provider', () => {
+  const selected = parseArgs(['-p', 'openai', '-m', 'quality']);
+  assert.equal(selected.cliProvider, 'openai');
+  assert.equal(selected.cliModel, 'quality');
+  assert.equal(parseArgs(['--model=fast']).cliModel, 'fast');
+  assert.equal(parseArgs(['-mfast']).cliModel, 'fast');
+  assert.throws(() => parseArgs(['--model=']), /Missing value/);
+  assert.throws(
+    () => parseArgs(['split', 'apply', '--file=plan.json', '-m', 'fast']),
+    /accepts only/,
+  );
+});
+
 test('parseArgs accepts reasoning levels and the disable alias', () => {
   assert.equal(parseArgs(['--reasoning=low']).cliReasoning, 'low');
   assert.equal(parseArgs(['--reasoning', 'high']).cliReasoning, 'high');
@@ -123,9 +136,10 @@ test('parseArgs accepts text and JSON output modes', () => {
 });
 
 test('parseArgs recognizes doctor and restricts it to diagnostic options', () => {
-  const doctor = parseArgs(['doctor', '--provider=local', '--output=json']);
+  const doctor = parseArgs(['doctor', '--provider=local', '--model=fast', '--output=json']);
   assert.equal(doctor.doctor, true);
   assert.equal(doctor.cliProvider, 'local');
+  assert.equal(doctor.cliModel, 'fast');
   assert.equal(doctor.output, 'json');
   assert.throws(() => parseArgs(['doctor', '--yes']), /doctor accepts only/);
   assert.equal(parseArgs([]).doctor, false);

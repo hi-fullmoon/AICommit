@@ -8,8 +8,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderTeamPolicyTemplate } from '../src/team-policy.js';
+import { userConfig } from '../test-support/config-fixture.js';
 
 const CLI = fileURLToPath(new URL('../bin/aicommit.js', import.meta.url));
+
+function stringifyUserConfig(config) {
+  return JSON.stringify(userConfig(config));
+}
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' });
@@ -90,11 +95,14 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
 
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api-version=1&api_key=endpoint-query-secret#endpoint-fragment-secret`,
       apiKey: '',
       apiKeyEnv: 'AICOMMIT_E2E_API_KEY',
-      modelId: 'local-test-model',
+      models: {
+        default: { modelId: 'local-test-model' },
+        alternate: { modelId: 'alternate-test-model' },
+      },
       language: 'en',
       reasoning: { mode: 'off' },
     }),
@@ -118,14 +126,14 @@ test('CLI ignores project connection overrides and returns failure for a rejecte
   writeFileSync(hook, '#!/bin/sh\nexit 1\n');
   chmodSync(hook, 0o755);
 
-  const result = await runCli(repo, home, ['--yes', '--no-reasoning'], {
+  const result = await runCli(repo, home, ['--yes', '--no-reasoning', '--model=alternate'], {
     AICOMMIT_E2E_API_KEY: 'user-owned-secret',
   });
   assert.equal(result.signal, null);
   assert.equal(result.code, 3, result.stdout + result.stderr);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].headers.authorization, 'Bearer user-owned-secret');
-  assert.equal(requests[0].body.model, 'local-test-model');
+  assert.equal(requests[0].body.model, 'alternate-test-model');
   assert.doesNotMatch(JSON.stringify(requests[0].body), /project-context-secret|ATTACKER\.md/);
   assert.match(result.stderr, /Ignored unsafe settings from untrusted project config/);
   assert.match(result.stdout, new RegExp(`Endpoint: http://127\\.0\\.0\\.1:${port}`));
@@ -148,7 +156,7 @@ test('repository team policy cannot be overridden with --lang', async (t) => {
   const repo = makeRepo(root);
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
       modelId: 'offline-model',
@@ -174,7 +182,7 @@ test('credential helper failures redact endpoint secrets in text and doctor JSON
   writeFileSync(gitConfig, '');
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl:
         'https://url-user:url-password@provider.example/v1?api_key=query-secret#fragment-secret',
       apiKey: '',
@@ -227,7 +235,7 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
 
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -254,7 +262,7 @@ test('interactive cancellation returns through cleanup and records a cancelled m
   git(repo, ['reset', '-q']);
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
       modelId: 'offline-model',
@@ -285,7 +293,7 @@ test('q cancels an interactive selection immediately', async (t) => {
   git(repo, ['reset', '-q']);
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
       modelId: 'offline-model',
@@ -329,7 +337,7 @@ test('interactive split scope cancellation returns without contacting the provid
   const repo = makeRepo(root);
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
       apiKey: '',
       modelId: 'offline-model',
@@ -374,7 +382,7 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -417,7 +425,7 @@ test('interactive flow treats an existing staged snapshot as final without anoth
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -471,7 +479,7 @@ test('single-file split run --scope=all keeps split semantics and stages the wor
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -528,7 +536,7 @@ test('split run --scope=staged commits the index snapshot and leaves newer edits
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -612,8 +620,8 @@ test('experimental hunk plan/apply creates lossless same-file commits without pr
   const { port } = server.address();
   const configPath = join(home, '.aicommit.config.json');
   writeFileSync(
-    configPath,
-    JSON.stringify({
+    join(home, '.aicommit.config.json'),
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -685,8 +693,8 @@ test('split plan exports JSON and split apply commits it without provider config
   const { port } = server.address();
   const configPath = join(home, '.aicommit.config.json');
   writeFileSync(
-    configPath,
-    JSON.stringify({
+    join(home, '.aicommit.config.json'),
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -755,8 +763,8 @@ test('split resume finishes a checkpointed apply without provider configuration'
   const { port } = server.address();
   const configPath = join(home, '.aicommit.config.json');
   writeFileSync(
-    configPath,
-    JSON.stringify({
+    join(home, '.aicommit.config.json'),
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -831,8 +839,8 @@ test('split apply rejects a stale fingerprint before mutating the index', async 
   const { port } = server.address();
   const configPath = join(home, '.aicommit.config.json');
   writeFileSync(
-    configPath,
-    JSON.stringify({
+    join(home, '.aicommit.config.json'),
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -879,7 +887,7 @@ test('split plan rejects output inside the working tree before a provider reques
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -924,7 +932,7 @@ test('split run --scope=all scans complete untracked files before auto-staging',
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -980,7 +988,7 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -995,7 +1003,7 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   const output = JSON.parse(result.stdout);
   assert.equal(output.ok, true);
   assert.equal(output.message, 'fix: expose stable machine output');
-  assert.equal(output.provider, 'custom');
+  assert.equal(output.provider, 'test');
   assert.equal(output.model, 'local-test-model');
   assert.equal(output.exitReason, 'success');
   assert.equal(output.committed, true);
@@ -1049,7 +1057,7 @@ test('automatic policy correction is counted as a privacy-safe rewrite metric', 
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -1076,7 +1084,7 @@ test('stats command reports local trends without requiring a Git repository', as
   const metricsPath = join(home, 'quality.jsonl');
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({ metrics: { enabled: true, path: metricsPath, maxEntries: 20 } }),
+    stringifyUserConfig({ metrics: { enabled: true, path: metricsPath, maxEntries: 20 } }),
   );
   writeFileSync(
     metricsPath,
@@ -1133,7 +1141,7 @@ test('--output=json returns the split plan without reasoning or terminal decorat
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
       apiKey: '',
       modelId: 'local-test-model',
@@ -1201,7 +1209,7 @@ test('provider and response-format errors have stable JSON categories and exit c
     const { port } = server.address();
     writeFileSync(
       join(home, '.aicommit.config.json'),
-      JSON.stringify({
+      stringifyUserConfig({
         apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
         apiKey: '',
         modelId: 'local-test-model',
@@ -1265,7 +1273,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   const { port } = server.address();
   writeFileSync(
     join(home, '.aicommit.config.json'),
-    JSON.stringify({
+    stringifyUserConfig({
       apiUrl: `http://127.0.0.1:${port}/v1/chat/completions?api_key=doctor-url-secret&api-version=1#doctor-fragment-secret`,
       apiKey: 'legacy-plaintext-must-not-win',
       apiKeyEnv: 'AICOMMIT_DOCTOR_KEY',
@@ -1281,7 +1289,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   const output = JSON.parse(result.stdout);
   assert.equal(output.ok, true);
   assert.equal(output.exitReason, 'doctor_ok');
-  assert.equal(output.provider, 'custom');
+  assert.equal(output.provider, 'test');
   assert.equal(output.model, 'doctor-model');
   assert.deepEqual(output.usage, { inputTokens: 4, outputTokens: 1, totalTokens: 5 });
   assert.equal(authorization, 'Bearer doctor-secret-value');
@@ -1289,6 +1297,7 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
     'Node.js:',
     'Git:',
     'Config:',
+    'Model: test/default \\(doctor-model\\)',
     'Endpoint security:',
     'Provider capabilities:',
     'Credentials: env:AICOMMIT_DOCTOR_KEY',

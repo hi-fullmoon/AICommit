@@ -33,10 +33,10 @@ test('preset CLI validates, installs, reports, and rolls back independent manife
   const base = JSON.parse(readFileSync(BUNDLED_PROVIDER_PRESET_PATH, 'utf8'));
   const first = JSON.parse(JSON.stringify(base));
   first.version = '1.1.0';
-  first.providers[0].modelId = 'first-model';
+  first.providers[0].models[first.providers[0].defaultModel].modelId = 'first-model';
   const second = JSON.parse(JSON.stringify(base));
   second.version = '1.2.0';
-  second.providers[0].modelId = 'second-model';
+  second.providers[0].models[second.providers[0].defaultModel].modelId = 'second-model';
   const firstPath = join(root, 'first.json');
   const secondPath = join(root, 'second.json');
   writeFileSync(firstPath, JSON.stringify(first));
@@ -56,12 +56,14 @@ test('preset CLI validates, installs, reports, and rolls back independent manife
   }
   let shown = runCli(root, home, ['preset', 'show', '--output=json']);
   assert.equal(shown.code, 0, shown.stdout + shown.stderr);
-  assert.equal(JSON.parse(shown.stdout).data.manifest.providers[0].modelId, 'second-model');
+  let shownProvider = JSON.parse(shown.stdout).data.manifest.providers[0];
+  assert.equal(shownProvider.models[shownProvider.defaultModel].modelId, 'second-model');
 
   const rolledBack = runCli(root, home, ['preset', 'rollback', '--output=json']);
   assert.equal(rolledBack.code, 0, rolledBack.stdout + rolledBack.stderr);
   shown = runCli(root, home, ['preset', 'show', '--output=json']);
-  assert.equal(JSON.parse(shown.stdout).data.manifest.providers[0].modelId, 'first-model');
+  shownProvider = JSON.parse(shown.stdout).data.manifest.providers[0];
+  assert.equal(shownProvider.models[shownProvider.defaultModel].modelId, 'first-model');
 
   const invalid = JSON.parse(JSON.stringify(base));
   invalid.providers[0].apiKey = 'secret-value-must-not-leak';
