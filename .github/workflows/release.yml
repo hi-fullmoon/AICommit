@@ -3,6 +3,20 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to publish
+        required: true
+        type: string
+      npm_dist_tag:
+        description: npm distribution tag
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - next
 
 concurrency:
   group: npm-release
@@ -23,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -44,9 +58,9 @@ jobs:
           cmp dist/aicommit.rb Formula/aicommit.rb
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
       - name: Publish with npm Trusted Publishing
-        run: npm publish "dist/aicommit-${VERSION}.tgz" --access public --tag "$NPM_DIST_TAG"
+        run: npm publish "./dist/aicommit-${VERSION}.tgz" --access public --tag "$NPM_DIST_TAG"
         env:
-          NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
+          NPM_DIST_TAG: ${{ inputs.npm_dist_tag || (github.event.release.prerelease && 'next' || 'latest') }}
 
   verify-homebrew:
     name: Verify Homebrew install
@@ -57,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
       - name: Install the published formula from a temporary tap
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew tap-new --no-git aicommit-ci/release
