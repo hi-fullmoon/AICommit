@@ -24,7 +24,7 @@ AICommit is a local CLI that sends selected repository context directly to the c
 - common sensitive content should be detected and protected before the default model request;
 - remote endpoints must use HTTPS, while plaintext HTTP is limited to loopback development services.
 - third-party extension API v1 must deny resolved credential access, run out of process with a sanitized environment, and fail instead of falling back to unsandboxed execution;
-- distributed tarballs must be bound to a GitHub-verified signed tag, GitHub/Sigstore build attestation, npm provenance, and the Homebrew formula SHA-256.
+- npm releases must use Trusted Publishing provenance, and the Homebrew formula must pin the published npm tarball by SHA-256.
 
 Sensitive-content detection is intentionally a defense in depth and cannot replace a dedicated secret scanner. Interactive users can explicitly choose to send original content after a warning. Review the selected endpoint and diff before doing so.
 

@@ -3,7 +3,7 @@ class Aicommit < Formula
   homepage "https://github.com/hi-fullmoon/AICommit"
   url "https://registry.npmjs.org/@hifullmoon/aicommit/-/aicommit-1.5.0.tgz"
   version "1.5.0"
-  sha256 "56dec5dbdcf643f0ce6021b06db1ec491bf07011bd4e725ebd985275f2422fea"
+  sha256 "1aa155cc5108e14aac3d3df696144af91bc3f25a77ce36ad3882fa2533b9ffec"
   license "MIT"
 
   depends_on "node"

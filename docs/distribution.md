@@ -1,25 +1,27 @@
-# Distribution and verification / 分发与校验
+# Distribution / 分发
 
-AICommit publishes the same version through npm, an in-repository Homebrew tap, and a signed GitHub Release asset set. Runtime behavior is identical; Homebrew installs the npm tarball whose SHA-256 is pinned in the formula.
+AICommit 通过 npm 与 Homebrew 发布。Homebrew formula 安装同一个 npm tarball，并用 SHA-256 固定其内容。
 
-AICommit 通过 npm、仓库内 Homebrew tap 和带签名证明的 GitHub Release 资产发布同一版本。运行行为一致；Homebrew 安装的是 formula 中固定 SHA-256 的 npm tarball。
+AICommit is distributed through npm and Homebrew. The Homebrew formula installs the same npm tarball and pins it by SHA-256.
 
 ## npm
 
 ```bash
+# install / 安装
 npm install --global @hifullmoon/aicommit
-aicommit --version
 
 # upgrade / 升级
 npm install --global @hifullmoon/aicommit@latest
 
 # pin or roll back / 固定或回滚
 npm install --global @hifullmoon/aicommit@1.4.0
+
+aicommit --version
 ```
 
-The release workflow uses npm Trusted Publishing on a GitHub-hosted runner with OIDC and `--provenance`; it has no long-lived npm token. To verify registry signatures and provenance with a current npm CLI:
+发布工作流使用 npm Trusted Publishing，不保存长期 `NPM_TOKEN`。来自公开 GitHub 仓库的 OIDC 发布会自动携带 npm provenance。可使用当前 npm CLI 检查 registry signature 与 provenance：
 
-发布工作流在 GitHub 托管 runner 上通过 OIDC 使用 npm Trusted Publishing，并显式启用 `--provenance`；流程不需要长期 npm token。使用较新的 npm CLI 校验 registry 签名与 provenance：
+The release workflow uses npm Trusted Publishing without a long-lived `NPM_TOKEN`. OIDC publishing from the public GitHub repository automatically includes npm provenance. Verify registry signatures and provenance with a current npm CLI:
 
 ```bash
 workdir=$(mktemp -d)
@@ -30,14 +32,10 @@ npm audit signatures
 
 ## Homebrew
 
-The main repository is a tap, so no separate tap repository or install script is trusted:
-
-主仓库本身就是 tap，无需信任额外 tap 仓库或安装脚本：
-
 ```bash
+# install / 安装
 brew tap hi-fullmoon/aicommit https://github.com/hi-fullmoon/AICommit.git
 brew install hi-fullmoon/aicommit/aicommit
-aicommit --version
 
 # upgrade / 升级
 brew update
@@ -48,57 +46,31 @@ brew uninstall aicommit
 brew untap hi-fullmoon/aicommit
 ```
 
-The formula depends on Homebrew's Node package, installs with Homebrew's standard npm arguments, and tests `--version`, `--help`, credential-free config validation, and Fish completion. Pull requests run an actual `brew install` against a locally packed tarball; the release workflow repeats the smoke test against the published registry tarball.
+Formula 依赖 Homebrew 的 Node package，使用 Homebrew 标准 npm 安装参数，并测试 `--version`、`--help` 与无凭据配置校验。每次 npm 发布完成后，release workflow 会从公开 registry 再执行一次真实安装测试。
 
-Formula 依赖 Homebrew 的 Node 包，使用 Homebrew 标准 npm 参数安装，并测试 `--version`、`--help`、无凭据配置校验和 Fish completion。Pull request 会针对本地打包 tarball 执行真实 `brew install`；发布工作流还会针对 registry 已发布 tarball 再跑一次 smoke。
+The formula depends on Homebrew's Node package, uses Homebrew's standard npm installation arguments, and tests `--version`, `--help`, and credential-free configuration validation. After every npm publish, the release workflow performs a real install from the public registry.
 
-## Signed GitHub assets / GitHub 签名资产
+## Integrity / 完整性
 
-Each release requires a GitHub-verified signed annotated tag. The release workflow builds and uploads:
+`Formula/aicommit.rb` 中的 `sha256` 必须与对应 npm tarball 一致。维护者发布前通过 `scripts/release-assets.mjs` 生成 formula，工作流发布前会再次比较生成结果与已提交文件。
 
-每个 release 都要求 GitHub 已验证签名的 annotated tag。发布工作流生成并上传：
+The `sha256` in `Formula/aicommit.rb` must match the corresponding npm tarball. Maintainers generate the formula with `scripts/release-assets.mjs`, and the release workflow compares it again before publishing.
 
-- `aicommit-X.Y.Z.tgz` — the exact tarball published to npm / 与 npm 完全相同的 tarball;
-- `aicommit.rb` — the versioned Homebrew formula / 固定版本的 Homebrew formula;
-- `aicommit-X.Y.Z.spdx.json` — SPDX SBOM;
-- `SHA256SUMS` — hashes for the tarball, formula, and SBOM;
-- `*.sigstore.json` — GitHub OIDC/Sigstore provenance and SBOM bundles.
+## Rollback / 回滚
 
-Verify checksums and the cryptographically signed provenance against the exact release workflow:
-
-校验 checksum，并把加密签名的 provenance 限定到本仓库的 release workflow：
+npm 用户可以立即固定上一可用版本：
 
 ```bash
-version=v1.5.0
-asset_dir=$(mktemp -d)
-gh release download "$version" -R hi-fullmoon/AICommit -D "$asset_dir"
-cd "$asset_dir"
-shasum -a 256 -c SHA256SUMS
-gh attestation verify "aicommit-${version#v}.tgz" \
-  -R hi-fullmoon/AICommit \
-  --signer-workflow hi-fullmoon/AICommit/.github/workflows/release.yml
+npm install --global @hifullmoon/aicommit@<last-good-version>
 ```
 
-An attestation proves origin and integrity, not that the code is vulnerability-free. Review the referenced commit/workflow and the security notes before installation.
-
-Attestation 证明来源与完整性，不代表代码不存在漏洞。安装前仍应审查其关联 commit、workflow 与安全说明。
-
-## Release and rollback / 发布与回滚
-
-Maintainers execute the complete checklist in [`RELEASING.md`](../RELEASING.md). Public tags and attestations are immutable: never move a published tag or replace a published version.
-
-维护者按 [`RELEASING.md`](../RELEASING.md) 执行完整清单。公开 tag 与 attestation 不可变：不得移动已发布 tag，也不得覆盖已发布版本。
-
-For an affected npm version, deprecate it and publish a fixed patch. Users can immediately pin the preceding version. For Homebrew, revert the formula in a new commit or download the older release's attested `aicommit.rb`, uninstall the current formula, and install that local file:
-
-若 npm 版本有问题，应 deprecate 并发布修复 patch；用户可立即固定上一版本。Homebrew 应通过新 commit 回退 formula，或下载旧 release 中已证明的 `aicommit.rb`，卸载当前版本后从本地文件安装：
+Homebrew 用户可从旧 tag 取出 formula 并本地安装：
 
 ```bash
-gh release download v1.4.0 -R hi-fullmoon/AICommit -p aicommit.rb -D /tmp/aicommit-rollback
+git clone https://github.com/hi-fullmoon/AICommit.git /tmp/aicommit-rollback
+git -C /tmp/aicommit-rollback show v1.4.0:Formula/aicommit.rb > /tmp/aicommit.rb
 brew uninstall aicommit
-brew install --formula /tmp/aicommit-rollback/aicommit.rb
+brew install --formula /tmp/aicommit.rb
 ```
 
-Provider preset rollback is independent of the core package: use `aicommit preset rollback`, then `aicommit preset show` and `aicommit doctor`. See [`provider-presets.md`](provider-presets.md).
-
-Provider preset 回滚不依赖核心包版本：执行 `aicommit preset rollback`，再运行 `aicommit preset show` 和 `aicommit doctor`。详见 [`provider-presets.md`](provider-presets.md)。
+已发布的 npm version 不应覆盖或复用。维护者应 deprecate 有问题的版本、恢复正确的 dist-tag，并发布修复 patch。完整流程见 [`RELEASING.md`](../RELEASING.md)。

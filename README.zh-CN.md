@@ -10,19 +10,19 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 
 ### 交互式配置 Provider
 
-![AICommit setup 提示选择 AI Provider](docs/assets/readme/setup-provider.png)
+![AICommit setup 提示选择 AI Provider](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/setup-provider.png)
 
 ### 检查配置与连接
 
-![AICommit doctor 检查运行环境、配置、凭据和 Provider 连接](docs/assets/readme/doctor-diagnostics.png)
+![AICommit doctor 检查运行环境、配置、凭据和 Provider 连接](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/doctor-diagnostics.png)
 
 ### 生成提交信息
 
-![AICommit 根据已暂存的变更生成提交信息](docs/assets/readme/generating-commit.png)
+![AICommit 根据已暂存的变更生成提交信息](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/generating-commit.png)
 
 ### 检查生成的提交信息
 
-![AICommit 展示生成的 Conventional Commit 并等待确认](docs/assets/readme/generate-commit.png)
+![AICommit 展示生成的 Conventional Commit 并等待确认](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/generate-commit.png)
 
 ## 安装
 
@@ -421,7 +421,7 @@ split 默认仍按文件拆分。`--split-hunks` 可选择性启用实验性的�
 
 ## 开发与发布
 
-本地开发和 Pull Request 检查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告请参阅 [SECURITY.md](SECURITY.md)，可执行的维护者发布流程请参阅 [RELEASING.md](RELEASING.md)，npm / Homebrew 安装、验证和用户回滚请参阅双语[分发指南](docs/distribution.md)。发布要求包含 GitHub 验证的签名 tag、精确 npm tarball 和 SPDX SBOM 的 Sigstore / GitHub attestations、npm Trusted Publishing provenance、SHA-256 固定的 Homebrew formula，以及发布后的冒烟测试。`npm run eval` 会运行匿名本地质量语料，覆盖单一与混合变更、rename、生成文件、长 diff、中英文输出和格式错误的弱模型候选；该命令也是 `npm run ci` 的一部分。
+本地开发和 Pull Request 检查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告请参阅 [SECURITY.md](SECURITY.md)，维护者发布流程请参阅 [RELEASING.md](RELEASING.md)，npm / Homebrew 安装和用户回滚请参阅双语[分发指南](docs/distribution.md)。发布通过 npm Trusted Publishing 生成 provenance，校验精确的 package tarball，并在发布后执行 Homebrew 冒烟测试。`npm run eval` 会运行匿名本地质量语料，覆盖单一与混合变更、rename、生成文件、长 diff、中英文输出和格式错误的弱模型候选；该命令也是 `npm run ci` 的一部分。
 
 ## 许可证
 

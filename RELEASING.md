@@ -1,125 +1,107 @@
 # Releasing AICommit
 
-Only maintainers publish releases. A release is complete when the GitHub Release, signed annotated tag, attested npm tarball/SBOM, npm provenance, Homebrew formula, and both installation verifications all refer to the same commit and version.
+AICommit 只维护两条发布渠道：npm 与 Homebrew。GitHub Release 用来触发发布工作流，不额外上传构建产物。
 
-仅维护者可以发布。只有 GitHub Release、已签名 annotated tag、带证明的 npm tarball/SBOM、npm provenance、Homebrew formula 与两条安装验证全部指向同一 commit/version，发布才算完成。
+## 发布目标
 
-## Version policy
+- npm：`@hifullmoon/aicommit`
+- Homebrew tap：`hi-fullmoon/aicommit`
+- 自动化入口：`.github/workflows/release.yml`
+- 稳定版发布到 npm `latest`，GitHub pre-release 发布到 npm `next`
 
-AICommit follows Semantic Versioning:
+## 一次性准备
 
-- **Patch** (`1.0.1`): backward-compatible fixes, security hardening, documentation, and internal maintenance.
-- **Minor** (`1.1.0`): backward-compatible CLI options, provider support, or workflow capabilities.
-- **Major** (`2.0.0`): incompatible CLI, configuration, output, default-scope, or Git-state behavior.
+当前 npm package 已存在，因此后续版本应全部通过 npm Trusted Publishing 发布，不再使用本地 `npm publish` 或长期 `NPM_TOKEN`。
 
-Pre-release versions use identifiers such as `1.1.0-rc.1` and publish under npm's `next` dist-tag. Stable releases publish under `latest`. A published name/version cannot be reused; correct a bad release with deprecation plus a new patch.
+在 npm package 的 **Settings → Trusted Publisher** 中配置：
 
-## One-time publishing setup
+- GitHub organization/user：`hi-fullmoon`
+- Repository：`AICommit`
+- Workflow filename：`release.yml`
+- Environment：留空
+- Allowed actions：`npm publish`
 
-Create the `hifullmoon` organization on npmjs.com and add the publishing maintainer. Log the local npm CLI into that account, then validate the exact initial package without changing the registry:
+工作流使用 GitHub 托管的 Ubuntu runner、Node.js 24 和 `id-token: write`。npm Trusted Publishing 要求 npm CLI 11.5.1+、Node.js 22.14.0+；Node.js 24 runner 满足该要求。确认第一次 OIDC 发布成功后，在 npm 的 **Publishing access** 中选择 **Require two-factor authentication and disallow tokens**，并撤销不再使用的发布 token。
 
-```bash
-npm login
-npm run release:npm:check
-```
+GitHub 侧还需要：
 
-The check runs the release gates, builds the scoped tarball, and performs `npm publish --dry-run`. From a clean `main` commit that exactly matches `origin/main`, bootstrap the public organization package once:
+- 保护 `main`，要求 CI 的 `Quality / Node 24` 和三项 `Compatibility` 检查通过；
+- 只允许维护者创建或发布 GitHub Release；
+- npm scope `@hifullmoon` 的维护权限；
+- Homebrew 与 Ruby 可在维护者的 macOS 环境中使用。
 
-```bash
-npm run release:npm:publish
-```
+## 每次发布
 
-The bootstrap script requires membership in `@hifullmoon`, refuses a dirty/diverged checkout or an occupied version, and refuses to publish if the package already exists. The initial local publish cannot carry GitHub OIDC provenance. All later versions must use the signed GitHub Release workflow below.
+1. 从干净且最新的 `main` 开始，按 SemVer 选择版本，并更新 `CHANGELOG.md`。
 
-After the package exists, configure a GitHub Actions Trusted Publisher in the npm package settings for `@hifullmoon/aicommit` with:
-
-- repository: `hi-fullmoon/AICommit`;
-- workflow filename: `release.yml`;
-- allowed action: `npm publish`;
-- optional environment: leave empty unless the workflow is updated to use the same protected environment.
-
-The workflow uses a GitHub-hosted Ubuntu runner, Node.js 24, npm's OIDC flow, and `id-token: write`. No long-lived npm publish token is required. The public `repository` field in `package.json` must continue to match this GitHub repository. Trusted Publishing automatically attaches npm provenance; `publishConfig.provenance` keeps the package intent explicit.
-
-Protect `main` and `v*` tags, require the CI jobs (including Homebrew smoke), and restrict who can publish GitHub Releases. Maintainer signing keys must be added to the corresponding GitHub account so the Git Data API reports the tag signature as `verified: true` and `reason: valid`.
-
-## Release checklist
-
-1. Start from a clean, up-to-date `main` after all required CI jobs pass.
-2. Choose the SemVer bump from the policy above. Move relevant `CHANGELOG.md` entries from **Unreleased** into a dated version section.
-3. Update the package and lockfile without creating a tag yet:
+2. 更新 `package.json` 与 lockfile，但暂不创建 tag：
 
    ```bash
-   npm version <patch|minor|major|x.y.z> --no-git-tag-version
+   npm version <patch|minor|major|X.Y.Z> --no-git-tag-version
    ```
 
-4. Build the exact tarball and refresh the committed Homebrew formula. `Formula/` is excluded from the npm package, so the formula checksum is not circular:
+3. 安装锁定依赖并运行 npm 发布检查：
+
+   ```bash
+   npm ci
+   npm run release:npm:check
+   npm view @hifullmoon/aicommit@X.Y.Z version
+   ```
+
+   最后一条命令在版本尚未占用时应返回 `E404`。检查会验证发布字段、lint、格式、测试、coverage、eval、安装后的 package smoke 和 `npm pack --dry-run`。
+
+4. 用将要发布的精确 npm tarball 更新 Homebrew formula：
 
    ```bash
    release_dir=$(mktemp -d)
    pack_json=$(npm pack --json --pack-destination "$release_dir")
    pack_file=$(node -e "process.stdout.write(JSON.parse(process.argv[1])[0].filename)" "$pack_json")
-   npm sbom --sbom-format=spdx > "$release_dir/aicommit-X.Y.Z.spdx.json"
    node scripts/release-assets.mjs \
      --tarball "$release_dir/$pack_file" \
-     --sbom "$release_dir/aicommit-X.Y.Z.spdx.json" \
      --output "$release_dir"
    cp "$release_dir/aicommit.rb" Formula/aicommit.rb
    ruby -c Formula/aicommit.rb
    ```
 
-5. Run the exact local release gates:
-
-   ```bash
-   npm ci
-   npm run ci
-   npm run test:package
-   npm audit --omit=dev
-   npm pack --dry-run
-   ```
-
-   On macOS, also execute the real formula install smoke (it uses a uniquely named temporary tap and removes it afterward):
+5. 在 macOS 上执行真实的 Homebrew 安装测试：
 
    ```bash
    AICOMMIT_HOMEBREW_SMOKE=1 HOMEBREW_NO_AUTO_UPDATE=1 npm run test:homebrew
    ```
 
-6. Stage the version, changelog, preset compatibility baseline, and `Formula/aicommit.rb`; create a Conventional Commit with `aicommit --yes`. Merge it through the protected branch flow.
-7. Create and locally verify a signed annotated tag for the merged commit, then push it:
+6. 提交 version、lockfile、changelog 与 `Formula/aicommit.rb`，通过受保护的 `main` 流程合并。
+
+7. 给合并后的 commit 创建 annotated tag 并推送：
 
    ```bash
-   git tag -s vX.Y.Z -m "AICommit vX.Y.Z"
-   git verify-tag vX.Y.Z
+   git tag -a vX.Y.Z -m "AICommit vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-8. Draft a GitHub Release from that tag. Generate release notes, reconcile them with the changelog, call out security/privacy or migration impacts, and mark pre-releases correctly. Confirm GitHub shows the tag signature as **Verified** before publishing.
-9. Publishing the GitHub Release triggers `.github/workflows/release.yml`. It rejects lightweight/unverified tags, verifies tag/version/commit identity, reruns quality and tarball checks, builds the exact tarball plus SPDX SBOM/formula/checksums, creates GitHub OIDC/Sigstore provenance and SBOM attestations, uploads every asset, publishes that same tarball to npm through Trusted Publishing with provenance, and runs a post-publish Homebrew install test.
-10. Verify the release:
+8. 从该 tag 创建并发布 GitHub Release。发布会触发 `release.yml`：重新校验 tag/version、生成并发布精确 tarball、通过 npm OIDC 自动附加 provenance，然后从公开 registry 执行 Homebrew 安装测试。
+
+## 发布后验证
 
 ```bash
 npm view @hifullmoon/aicommit@X.Y.Z version dist.integrity
+npm view @hifullmoon/aicommit dist-tags
 npm install --global @hifullmoon/aicommit@X.Y.Z
 aicommit --version
 aicommit --help
+
 brew update
 brew upgrade hi-fullmoon/aicommit/aicommit
 ```
 
-Confirm npm shows provenance linked to the tagged GitHub workflow and that the correct `latest` or `next` dist-tag was applied. Then download and verify the GitHub artifact:
+在 npm package 页面确认 provenance 指向 `hi-fullmoon/AICommit/.github/workflows/release.yml`，并确认稳定版使用 `latest`、预发布版使用 `next`。
+
+## 失败与回滚
+
+npm 的已发布 version 不可覆盖。如果版本有问题，应发布修复 patch，并视影响执行：
 
 ```bash
-gh release download vX.Y.Z -R hi-fullmoon/AICommit -D /tmp/aicommit-release
-cd /tmp/aicommit-release
-shasum -a 256 -c SHA256SUMS
-gh attestation verify aicommit-X.Y.Z.tgz \
-  -R hi-fullmoon/AICommit \
-  --signer-workflow hi-fullmoon/AICommit/.github/workflows/release.yml
+npm deprecate @hifullmoon/aicommit@X.Y.Z "Use X.Y.Z+1: <reason>"
+npm dist-tag add @hifullmoon/aicommit@<last-good-version> latest
 ```
 
-## Failed releases and rollback
-
-If validation fails before `npm publish`, fix the release commit, create a new version/tag if the original tag was already public, and publish corrected release notes. Do not move a public release tag or overwrite attested assets.
-
-If npm publication succeeds but the release is broken, immediately deprecate that exact version with a useful message, document the impact, restore the previous Homebrew formula in a new commit, and publish a fixed patch. Do not unpublish except when npm policy and a severe security incident require it. Git history, tags, release notes, attestations, formulas, and npm provenance must remain auditable.
-
-Users can pin npm with `npm install --global @hifullmoon/aicommit@X.Y.Z` or install the attested `aicommit.rb` downloaded from an older GitHub Release. Provider preset rollback remains independent: `aicommit preset rollback`. The bilingual executable procedures are in [`docs/distribution.md`](docs/distribution.md).
+不要移动已经公开的 tag。若只有 Homebrew formula 有问题，可在 `main` 上修复 formula 并重新执行安装测试；若 package 本身有问题，则 npm 与 Homebrew 一起发布新 patch。用户侧的固定和回滚命令见 [`docs/distribution.md`](docs/distribution.md)。

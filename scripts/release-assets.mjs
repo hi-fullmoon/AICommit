@@ -62,7 +62,6 @@ export async function renderHomebrewFormula({ version, sha256, url, formulaClass
 export async function prepareReleaseAssets({
   tarballPath,
   outputDirectory = dirname(tarballPath),
-  sbomPath = null,
   formulaUrl = null,
   formulaName = 'aicommit.rb',
   formulaClass = 'Aicommit',
@@ -94,27 +93,12 @@ export async function prepareReleaseAssets({
   });
   const formulaPath = join(output, formulaName);
   await writeFile(formulaPath, formula, 'utf8');
-
-  const assets = [packagedTarball, formulaPath];
-  if (sbomPath) {
-    const sbom = resolve(sbomPath);
-    await regularFile(sbom, 'SBOM');
-    const packagedSbom = join(output, basename(sbom));
-    if (packagedSbom !== sbom) await copyFile(sbom, packagedSbom);
-    assets.push(packagedSbom);
-  }
-  const checksums = [];
-  for (const asset of assets) checksums.push(`${await digest(asset)}  ${basename(asset)}`);
-  const checksumsPath = join(output, 'SHA256SUMS');
-  await writeFile(checksumsPath, `${checksums.sort().join('\n')}\n`, 'utf8');
   return {
     version: manifest.version,
     tarballPath: packagedTarball,
     tarballSha256,
     formulaPath,
-    checksumsPath,
     formulaUrl: formulaUrl || registryUrl,
-    assets,
   };
 }
 
@@ -128,10 +112,9 @@ function option(args, name) {
 async function main() {
   const args = process.argv.slice(2);
   const tarballPath = option(args, '--tarball');
-  if (!tarballPath) throw new Error('Usage: release-assets.mjs --tarball <path> [--sbom <path>]');
+  if (!tarballPath) throw new Error('Usage: release-assets.mjs --tarball <path> [--output <path>]');
   const result = await prepareReleaseAssets({
     tarballPath,
-    sbomPath: option(args, '--sbom'),
     outputDirectory: option(args, '--output') || dirname(resolve(tarballPath)),
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);

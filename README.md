@@ -10,19 +10,19 @@ These screenshots were captured from real interactive terminal sessions in this 
 
 ### Configure a provider interactively
 
-![AICommit setup prompting for an AI provider](docs/assets/readme/setup-provider.png)
+![AICommit setup prompting for an AI provider](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/setup-provider.png)
 
 ### Diagnose configuration and connectivity
 
-![AICommit doctor checking runtime, configuration, credentials, and provider connectivity](docs/assets/readme/doctor-diagnostics.png)
+![AICommit doctor checking runtime, configuration, credentials, and provider connectivity](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/doctor-diagnostics.png)
 
 ### Generate a commit message
 
-![AICommit generating a commit message from staged changes](docs/assets/readme/generating-commit.png)
+![AICommit generating a commit message from staged changes](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/generating-commit.png)
 
 ### Review the generated commit message
 
-![AICommit presenting a generated conventional commit message for confirmation](docs/assets/readme/generate-commit.png)
+![AICommit presenting a generated conventional commit message for confirmation](https://raw.githubusercontent.com/hi-fullmoon/AICommit/main/docs/assets/readme/generate-commit.png)
 
 ## Install
 
@@ -419,7 +419,7 @@ Split remains file-level by default. `--split-hunks` opts in to experimental sam
 
 ## Development and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, [RELEASING.md](RELEASING.md) for the executable maintainer process, and the bilingual [distribution guide](docs/distribution.md) for npm/Homebrew install, verification, and user rollback. Releases require a GitHub-verified signed tag, Sigstore/GitHub attestations for the exact npm tarball and SPDX SBOM, npm Trusted Publishing provenance, SHA-256-pinned Homebrew formula, and post-publish smoke tests. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, [RELEASING.md](RELEASING.md) for the maintainer process, and the bilingual [distribution guide](docs/distribution.md) for npm/Homebrew installation and rollback. Releases use npm Trusted Publishing with provenance, verify the exact package tarball, and run a post-publish Homebrew smoke test. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
 
 ## License
 

@@ -4,77 +4,55 @@ on:
   release:
     types: [published]
 
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
   publish-npm:
-    name: Verify and publish to npm
+    name: Publish to npm
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       id-token: write
-      attestations: write
 
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: npm ci
-      - run: node scripts/verify-release.mjs
-      - name: Verify signed annotated release tag
-        run: RELEASE_COMMIT="$(git rev-parse HEAD)" node scripts/verify-github-tag.mjs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-      - run: npm run ci
-      - run: npm run test:package
-      - run: npm audit --omit=dev
-      - name: Build release assets, SBOM, formula, and checksums
+      - name: Verify release
+        run: npm run release:npm:check
+      - name: Pack release and verify the Homebrew formula
         run: |
           VERSION=$(node -p "require('./package.json').version")
           mkdir -p dist
           PACK_FILENAME=$(npm pack --json --pack-destination dist | node -e \
             "let input=''; process.stdin.on('data', c => input += c); process.stdin.on('end', () => process.stdout.write(JSON.parse(input)[0].filename))")
-          npm sbom --sbom-format=spdx > "dist/aicommit-${VERSION}.spdx.json"
           node scripts/release-assets.mjs \
             --tarball "dist/${PACK_FILENAME}" \
-            --sbom "dist/aicommit-${VERSION}.spdx.json" \
             --output dist
           cmp dist/aicommit.rb Formula/aicommit.rb
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-      - name: Sign release assets with GitHub build provenance
-        id: provenance
-        uses: actions/attest@v4
-        with:
-          subject-checksums: dist/SHA256SUMS
-      - name: Sign the npm tarball SBOM
-        id: sbom
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/aicommit-${{ env.VERSION }}.tgz
-          sbom-path: dist/aicommit-${{ env.VERSION }}.spdx.json
-      - name: Attach signed assets to the GitHub Release
-        run: |
-          cp "${{ steps.provenance.outputs.bundle-path }}" "dist/aicommit-${VERSION}.provenance.sigstore.json"
-          cp "${{ steps.sbom.outputs.bundle-path }}" "dist/aicommit-${VERSION}.sbom.sigstore.json"
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Publish with trusted provenance
-        run: npm publish "dist/aicommit-${VERSION}.tgz" --provenance --access public --tag "$NPM_DIST_TAG"
+      - name: Publish with npm Trusted Publishing
+        run: npm publish "dist/aicommit-${VERSION}.tgz" --access public --tag "$NPM_DIST_TAG"
         env:
           NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
 
   verify-homebrew:
-    name: Verify published Homebrew formula
+    name: Verify Homebrew install
     needs: publish-npm
     runs-on: macos-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7

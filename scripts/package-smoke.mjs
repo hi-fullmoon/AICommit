@@ -131,7 +131,7 @@ async function main() {
       assert.ok(packedPaths.has(expected), `published package is missing ${expected}`);
     }
     for (const path of packedPaths) {
-      assert.doesNotMatch(path, /^(?:\.github|coverage|scripts|test)\//);
+      assert.doesNotMatch(path, /^(?:\.github|coverage|docs\/assets|scripts|test)\//);
     }
 
     const prefix = join(root, 'global');
