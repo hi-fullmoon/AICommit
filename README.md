@@ -8,19 +8,19 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 
 These screenshots were captured from real interactive terminal sessions in this repository. Provider, model, paths, and timings reflect the environment at capture time.
 
-### Stage working-tree changes interactively
+### Configure a provider interactively
 
-![AICommit offering to stage all changes or selected files](docs/assets/readme/stage-changes.png)
+![AICommit setup prompting for an AI provider](docs/assets/readme/setup-provider.png)
 
 ### Diagnose configuration and connectivity
 
 ![AICommit doctor checking runtime, configuration, credentials, and provider connectivity](docs/assets/readme/doctor-diagnostics.png)
 
-### Plan logical commits
+### Generate a commit message
 
-![AICommit planning two logical commits from the working-tree changes](docs/assets/readme/split-workflow.png)
+![AICommit generating a commit message from staged changes](docs/assets/readme/generating-commit.png)
 
-### Review a generated commit message
+### Review the generated commit message
 
 ![AICommit presenting a generated conventional commit message for confirmation](docs/assets/readme/generate-commit.png)
 

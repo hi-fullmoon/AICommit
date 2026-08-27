@@ -8,17 +8,17 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 
 以下截图来自本仓库中的真实交互式终端会话。Provider、模型、路径和耗时均为截图时的实际环境。
 
-### 交互式暂存工作区变更
+### 交互式配置 Provider
 
-![AICommit 提示暂存全部变更或选择文件](docs/assets/readme/stage-changes.png)
+![AICommit setup 提示选择 AI Provider](docs/assets/readme/setup-provider.png)
 
 ### 检查配置与连接
 
 ![AICommit doctor 检查运行环境、配置、凭据和 Provider 连接](docs/assets/readme/doctor-diagnostics.png)
 
-### 规划逻辑提交
+### 生成提交信息
 
-![AICommit 根据工作区变更规划两个逻辑提交](docs/assets/readme/split-workflow.png)
+![AICommit 根据已暂存的变更生成提交信息](docs/assets/readme/generating-commit.png)
 
 ### 检查生成的提交信息
 
