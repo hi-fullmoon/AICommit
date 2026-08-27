@@ -55,8 +55,9 @@ function closeServer(server) {
 }
 
 function writeConfig(home, port) {
+  mkdirSync(join(home, '.aicommit'), { recursive: true });
   writeFileSync(
-    join(home, '.aicommit.config.json'),
+    join(home, '.aicommit', 'config.json'),
     JSON.stringify({
       schemaVersion: 1,
       defaultProvider: 'demo',
@@ -185,7 +186,7 @@ async function runSplit(home, scenario) {
   const planPath = join(DEMO_ROOT, 'split-plan.json');
   await prepareSplitPlan(home, repo, planPath, scenario === 'split-plan');
   if (scenario === 'split-apply') {
-    unlinkSync(join(home, '.aicommit.config.json'));
+    unlinkSync(join(home, '.aicommit', 'config.json'));
     await runCli(['split', 'apply', `--file=${planPath}`, '--yes'], { cwd: repo, home });
   }
 }

@@ -5,14 +5,27 @@ import { test } from 'node:test';
 const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const readText = async (path) => (await readFile(path, 'utf8')).replaceAll('\r\n', '\n');
 
-test('CI and npm release workflows run only for version tags', async () => {
-  const ci = await readText(new URL('../.github/workflows/ci.yml', import.meta.url));
+test('the npm release workflow is the only tag-triggered workflow', async () => {
   const release = await readText(new URL('../.github/workflows/release.yml', import.meta.url));
-  assert.match(ci, /push:\n    tags:\n      - 'v\*'/);
-  assert.doesNotMatch(ci, /pull_request:|branches:/);
+  await assert.rejects(readFile(new URL('../.github/workflows/ci.yml', import.meta.url)), {
+    code: 'ENOENT',
+  });
   assert.match(release, /push:\n    tags:\n      - 'v\*'/);
-  assert.doesNotMatch(release, /workflow_dispatch:|release:\n    types:/);
+  assert.doesNotMatch(release, /pull_request:|branches:|workflow_dispatch:|release:\n    types:/);
   assert.match(release, /GITHUB_REF_NAME: \$\{\{ github\.ref_name \}\}/);
+});
+
+test('all quality and compatibility checks must pass before npm publishing', async () => {
+  const release = await readText(new URL('../.github/workflows/release.yml', import.meta.url));
+  assert.match(release, /quality:\n    name: Quality \/ Node 24/);
+  assert.match(release, /compatibility:\n    name: Compatibility \/ \$\{\{ matrix\.os \}\}/);
+  assert.match(release, /- os: ubuntu-latest\n            node: 18/);
+  assert.match(release, /- os: macos-latest\n            node: 24/);
+  assert.match(release, /- os: windows-latest\n            node: 24/);
+  assert.match(
+    release,
+    /publish-npm:\n    name: Publish to npm\n    needs: \[quality, compatibility\]/,
+  );
 });
 
 test('release workflow publishes one verified npm tarball with OIDC', async () => {

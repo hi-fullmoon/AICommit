@@ -12,7 +12,7 @@ import {
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NPM_CLI = process.env.npm_execpath;
@@ -103,26 +103,19 @@ async function main() {
       'docs/team-policy.md',
       'docs/examples/commit-msg',
       'docs/examples/aicommit-policy.yml',
-      'docs/provider-presets.md',
-      'docs/extensions.md',
       'docs/distribution.md',
       'docs/privacy.md',
       'docs/provider-compatibility.md',
       'docs/troubleshooting.md',
-      'docs/examples/extension/aicommit-extension.json',
-      'docs/examples/extension/index.mjs',
       'package.json',
       'presets/provider-presets.json',
       'schemas/aicommit-provider-presets.schema.json',
       'schemas/aicommit-output.schema.json',
-      'schemas/aicommit-extension.schema.json',
       'schemas/aicommit-team-policy.schema.json',
       'src/completion.js',
-      'src/extension-runner.mjs',
-      'src/extensions.js',
+      'src/config-paths.js',
       'src/config-command.js',
       'src/policy-command.js',
-      'src/preset-command.js',
       'src/provider-presets.js',
       'src/team-policy.js',
       'src/main.js',
@@ -155,25 +148,6 @@ async function main() {
     const manifest = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8'));
     const entry = installedCli(prefix, manifest.name);
 
-    if (Number(process.versions.node.split('.')[0]) >= 20) {
-      const installedRoot = dirname(dirname(entry));
-      const { createExtensionHost } = await import(
-        pathToFileURL(join(installedRoot, 'src', 'extensions.js'))
-      );
-      const extensionHost = await createExtensionHost({
-        manifests: [
-          join(installedRoot, 'docs', 'examples', 'extension', 'aicommit-extension.json'),
-        ],
-        timeoutMs: 3000,
-        maxContextChars: 1000,
-      });
-      const extensionContext = await extensionHost.collectContext({
-        files: [{ status: 'M', path: 'packages/app/index.js' }],
-      });
-      assert.match(extensionContext.text, /Changed top-level areas: packages/);
-      assert.equal(extensionHost.extensions[0].id, 'team-rules');
-    }
-
     assert.match(run(process.execPath, [entry, '--help']), /Usage:/);
     assert.equal(
       run(process.execPath, [entry, '--version']).trim(),
@@ -191,21 +165,7 @@ async function main() {
 
     const home = join(root, 'home');
     mkdirSync(home);
-    const presetShow = await runCli(entry, ['preset', 'show', '--output=json'], {
-      cwd: root,
-      env: {
-        ...process.env,
-        HOME: home,
-        USERPROFILE: home,
-        NO_COLOR: '1',
-        FORCE_COLOR: '0',
-      },
-    });
-    assert.equal(presetShow.code, 0, presetShow.stdout + presetShow.stderr);
-    const presetOutput = JSON.parse(presetShow.stdout);
-    assert.equal(presetOutput.exitReason, 'preset_show');
-    assert.equal(presetOutput.data.compatibility.adapterContract, 1);
-    assert.doesNotMatch(presetShow.stdout, /apiKey|credential/i);
+    mkdirSync(join(home, '.aicommit'));
     const repo = makeRepo(root);
     writeFileSync(join(repo, '.aicommit.policy.json'), policyTemplate);
     const messageFile = join(root, 'COMMIT_EDITMSG');
@@ -237,7 +197,9 @@ async function main() {
       },
     });
     assert.equal(configPaths.code, 0, configPaths.stdout + configPaths.stderr);
-    assert.equal(JSON.parse(configPaths.stdout).exitReason, 'config_path');
+    const configPathOutput = JSON.parse(configPaths.stdout);
+    assert.equal(configPathOutput.exitReason, 'config_path');
+    assert.equal(configPathOutput.data.paths.user.path, join(home, '.aicommit', 'config.json'));
     server = createServer((request, response) => {
       request.resume();
       request.on('end', () => {
@@ -252,7 +214,7 @@ async function main() {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address();
     writeFileSync(
-      join(home, '.aicommit.config.json'),
+      join(home, '.aicommit', 'config.json'),
       JSON.stringify({
         schemaVersion: 1,
         defaultProvider: 'smoke',

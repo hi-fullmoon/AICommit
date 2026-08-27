@@ -1,11 +1,11 @@
 # Releasing AICommit
 
-AICommit 仅通过 npm 发布。推送 `v*` tag 是 CI 与发布工作流的唯一自动化触发入口；GitHub Release 仅用于展示发布说明，不额外上传构建产物。
+AICommit 仅通过 npm 发布。推送 `v*` tag 是发布工作流的唯一自动化触发入口；GitHub Release 仅用于展示发布说明，不额外上传构建产物。
 
 ## 发布目标
 
 - npm：`@hifullmoon/aicommit`
-- 自动化入口：`.github/workflows/ci.yml` 与 `.github/workflows/release.yml`
+- 自动化入口：`.github/workflows/release.yml`
 - 稳定版 tag 发布到 npm `latest`，带 SemVer prerelease 后缀的 tag 发布到 npm `next`
 
 ## 一次性准备
@@ -57,7 +57,7 @@ GitHub 侧还需要：
    git push origin vX.Y.Z
    ```
 
-6. 推送 tag 会同时触发 CI 与 `release.yml`。发布工作流会重新校验 tag/version、执行完整质量检查、生成并发布精确 tarball，并通过 npm OIDC 自动附加 provenance。需要发布说明时，可在流程成功后从该 tag 创建 GitHub Release；这个动作不会再次触发 CI/CD。
+6. 推送 tag 会触发 `release.yml`。工作流先并行执行完整质量检查，以及 Linux、macOS、Windows 兼容性测试；只有所有前置任务成功后，发布任务才会校验 tag/version、生成并发布精确 tarball，并通过 npm OIDC 自动附加 provenance。需要发布说明时，可在流程成功后从该 tag 创建 GitHub Release；这个动作不会再次触发 CI/CD。
 
 ## 发布后验证
 
