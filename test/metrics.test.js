@@ -9,7 +9,6 @@ import {
   minimizeMetric,
   readMetricRecords,
   recordMetric,
-  runMetricsCommand,
   runStatsCommand,
   summarizeMetrics,
 } from '../src/metrics.js';
@@ -68,7 +67,7 @@ test('local metric writer uses mode 0600, honors retention, and never writes whe
   assert.equal(existsSync(disabledPath), false);
 });
 
-test('metrics command can disable, enable, inspect, and irreversibly clear local records', async (t) => {
+test('stats command can disable, enable, inspect, and irreversibly clear local records', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-metrics-command-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const userConfigPath = join(root, '.aicommit.config.json');
@@ -82,16 +81,16 @@ test('metrics command can disable, enable, inspect, and irreversibly clear local
     { enabled: true, path: metricsFile, maxEntries: 5 },
   );
 
-  const disabled = await runMetricsCommand('disable', { home: root, userConfigPath });
+  const disabled = await runStatsCommand('disable', { home: root, userConfigPath });
   assert.equal(disabled.enabled, false);
   assert.equal(JSON.parse(await readFile(userConfigPath, 'utf8')).metrics.enabled, false);
 
-  const enabled = await runMetricsCommand('enable', { home: root, userConfigPath });
+  const enabled = await runStatsCommand('enable', { home: root, userConfigPath });
   assert.equal(enabled.enabled, true);
-  const status = await runMetricsCommand('status', { home: root, userConfigPath });
-  assert.equal(status.count, 1);
+  const status = await runStatsCommand('show', { home: root, userConfigPath });
+  assert.equal(status.stats.runs, 1);
 
-  const cleared = await runMetricsCommand('clear', { home: root, userConfigPath });
+  const cleared = await runStatsCommand('clear', { home: root, userConfigPath });
   assert.equal(cleared.count, 1);
   assert.equal(existsSync(metricsFile), false);
 });

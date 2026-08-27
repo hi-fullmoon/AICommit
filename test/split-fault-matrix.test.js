@@ -132,7 +132,7 @@ test('fault matrix resumes SIGINT and post-commit crash windows without duplicat
       assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), scenario.commitsAfterFault);
       assert.equal(existsSync(splitCheckpointPath(repo)), true);
 
-      const resumed = await runCli(repo, home, ['split', '--resume', '--yes']);
+      const resumed = await runCli(repo, home, ['split', 'resume', '--yes']);
       assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
       assert.equal(
         git(repo, ['log', '--reverse', '--format=%s']).trim(),
@@ -167,7 +167,7 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
   rmSync(hook);
   writeFileSync(join(repo, 'b.txt'), 'concurrent b edit\n');
   git(repo, ['add', 'b.txt']);
-  const rejected = await runCli(repo, home, ['split', '--resume', '--yes']);
+  const rejected = await runCli(repo, home, ['split', 'resume', '--yes']);
   assert.equal(rejected.code, 8, rejected.stdout + rejected.stderr);
   assert.match(rejected.stderr, /content changed after interruption/);
   assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
@@ -175,7 +175,7 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
 
   writeFileSync(join(repo, 'b.txt'), 'next b\n');
   git(repo, ['add', 'b.txt']);
-  const resumed = await runCli(repo, home, ['split', '--resume', '--yes']);
+  const resumed = await runCli(repo, home, ['split', 'resume', '--yes']);
   assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
   assert.equal(
     git(repo, ['log', '--reverse', '--format=%s']).trim(),
@@ -184,7 +184,7 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
   assert.equal(git(repo, ['status', '--porcelain']), '');
 });
 
-test('split --abort clears stale recovery metadata without rewriting replacement work', async (t) => {
+test('split abort clears stale recovery metadata without rewriting replacement work', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-abort-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -206,7 +206,7 @@ test('split --abort clears stale recovery metadata without rewriting replacement
   git(repo, ['commit', '-qm', 'chore: replace interrupted split']);
   const headBefore = git(repo, ['rev-parse', 'HEAD']);
   const statusBefore = git(repo, ['status', '--porcelain']);
-  const aborted = await runCli(repo, home, ['split', '--abort', '--yes', '--output=json']);
+  const aborted = await runCli(repo, home, ['split', 'abort', '--yes', '--output=json']);
   assert.equal(aborted.code, 0, aborted.stdout + aborted.stderr);
   const output = JSON.parse(aborted.stdout);
   assert.equal(output.ok, true);

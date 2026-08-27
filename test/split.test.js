@@ -710,7 +710,7 @@ test('new split stops at an existing checkpoint and abort preserves current Git 
       repo,
       { scope: 'all', yes: true },
     ),
-    /Cannot start a new split:[\s\S]*aicommit split --resume[\s\S]*aicommit split --abort/,
+    /Cannot start a new split:[\s\S]*aicommit split resume[\s\S]*aicommit split abort/,
   );
 
   const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {

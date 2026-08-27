@@ -289,7 +289,7 @@ function renderNumber(value) {
 
 export async function runStatsCommand(action = 'show', options = {}) {
   if (['clear', 'enable', 'disable'].includes(action)) {
-    return runMetricsCommand(action, options);
+    return updateMetrics(action, options);
   }
   const home = options.home || homedir();
   const userConfigPath = options.userConfigPath || join(home, '.aicommit.config.json');
@@ -341,7 +341,7 @@ export async function runStatsCommand(action = 'show', options = {}) {
   return { action, path, enabled: settings.enabled, invalid, stats };
 }
 
-export async function runMetricsCommand(action = 'status', options = {}) {
+async function updateMetrics(action, options = {}) {
   const home = options.home || homedir();
   const userConfigPath = options.userConfigPath || join(home, '.aicommit.config.json');
   const existing = await readUserMetricsConfig(userConfigPath);
@@ -371,13 +371,5 @@ export async function runMetricsCommand(action = 'status', options = {}) {
     return { action, count: await metricCount(path), path, enabled };
   }
 
-  const count = await metricCount(path);
-  console.log('');
-  console.log('  ' + chalk.cyan.bold('Local metrics'));
-  console.log(`  Status:  ${settings.enabled ? 'enabled' : 'disabled'}`);
-  console.log(`  Records: ${count}`);
-  console.log(`  Path:    ${path}`);
-  console.log('  Upload:  disabled (no upload implementation)');
-  console.log('');
-  return { action, count, path, enabled: settings.enabled };
+  throw new Error(`Unsupported stats action: ${action}`);
 }

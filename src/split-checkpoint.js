@@ -157,8 +157,8 @@ export function assertNoSplitCheckpoint(projectRoot) {
   if (existsSync(path)) {
     throw new Error(
       `An unfinished split checkpoint already exists: ${path}\n` +
-        'Resume it with "aicommit split --resume", or discard only the checkpoint with ' +
-        '"aicommit split --abort". Discarding keeps existing commits and current changes.',
+        'Resume it with "aicommit split resume", or discard only the checkpoint with ' +
+        '"aicommit split abort". Discarding keeps existing commits and current changes.',
     );
   }
   return path;

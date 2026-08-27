@@ -53,6 +53,6 @@ Providers control their own server-side retention and training policies; AICommi
 
 Provider 自行决定服务端保留与训练策略，AICommit 无法强制控制；请查阅所选 provider 的现行条款。本地 Git commit 会保留接受的消息；split checkpoint 在完成/恢复前只保存不含代码的计划元数据；metrics 最多保留配置数量的最小记录。
 
-Use `aicommit config show`, `aicommit metrics status`, and `aicommit preset show` to inspect effective local state without revealing credentials. Use `aicommit stats clear` to permanently remove local metric history.
+Use `aicommit config show`, `aicommit stats`, and `aicommit preset show` to inspect effective local state without revealing credentials. Use `aicommit stats clear` to permanently remove local metric history.
 
-使用 `aicommit config show`、`aicommit metrics status` 和 `aicommit preset show` 可在不显示凭据的情况下检查本地状态。使用 `aicommit stats clear` 可永久删除本地指标历史。
+使用 `aicommit config show`、`aicommit stats` 和 `aicommit preset show` 可在不显示凭据的情况下检查本地状态。使用 `aicommit stats clear` 可永久删除本地指标历史。

@@ -59,7 +59,7 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 
 交付：
 
-- 合入并回归当前 split 模式的未跟踪文件脱敏、符号链接隔离和 `--split --yes` fail-closed 增强；
+- 合入并回归当前 split 模式的未跟踪文件脱敏、符号链接隔离和 `split run --scope=all --yes` fail-closed 增强；
 - 建立 Linux/macOS/Windows × Node 18/20/22/24 CI 矩阵；
 - 增加 lint、格式检查、测试覆盖率报告和最低门禁，首个行覆盖率门槛设为 70%；
 - 为 `main.js`、`setup.js`、`ui.js` 增加关键路径 smoke/integration tests；
@@ -131,10 +131,10 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 
 交付：
 
-- 支持 `--split=staged|all`，让用户明确选择是否越过当前 index 边界；
+- 支持 `split run --scope=staged|all`，让用户明确选择是否越过当前 index 边界；
 - 把计划与执行拆成两阶段：计划可导出/导入 JSON，apply 前重新校验工作区指纹；
 - 在执行前检查空组、重复路径、重命名两端、submodule、冲突状态、hooks 和 unborn branch；
-- 每完成一个 group 写入不含代码内容的本地 checkpoint，支持 `aicommit split --resume`；
+- 每完成一个 group 写入不含代码内容的本地 checkpoint，支持 `aicommit split resume`；
 - hook 或 Git 失败时准确报告已完成、待完成与工作区状态，禁止静默重排或重复提交；
 - 实验性支持同文件 hunk 拆分：使用临时 index/patch 校验，不修改工作树；默认关闭；
 - 对 crash、Ctrl+C、并发编辑、rename、删除、二进制、submodule、hook failure 建立端到端故障注入测试。

@@ -7,7 +7,7 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 ## Install
 
 ```bash
-npm install --global aicommit
+npm install --global @hi-fullmoon/aicommit
 ```
 
 Or install with Homebrew:
@@ -138,7 +138,7 @@ export KIMI_API_KEY='your-kimi-code-api-key'
 Verify the endpoint, key, and model before the first commit:
 
 ```bash
-aicommit --check -p kimi-code
+aicommit doctor -p kimi-code
 ```
 
 `kimi-for-coding` is available to all Kimi Code membership tiers and follows the service's rolling model upgrades. Kimi Code membership keys use `api.kimi.com`; Kimi Platform pay-as-you-go keys use a different endpoint and are not interchangeable.
@@ -236,7 +236,7 @@ Commit-generation requests can contain:
 - changed file paths/statuses, tracked diffs, and bounded text previews of untracked files in split mode;
 - bounded recent commit subjects, package boundaries, explicitly trusted convention excerpts, and recognized commitlint constraints when their context categories are enabled;
 - the previous generated message when asking for a lower-cost rewrite;
-- a small fixed prompt when running `aicommit --check`.
+- a small fixed prompt when `aicommit doctor` performs its live connectivity check.
 
 AICommit does not intentionally send unrelated repository files, historical commit bodies, environment variables, or its local configuration file. Every selected diff, path list, history sample, preview, and convention excerpt is placed inside an explicit JSON envelope marked as untrusted data; the authoritative system policy instructs the model never to follow embedded repository instructions. Lock files, configured `stripFiles`, oversized sections, common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments are omitted, truncated, or redacted before the default request. The interactive warning still allows explicitly sending the original diff, so review that choice carefully. Detection and prompt boundaries are guardrails, not complete secret or prompt-injection defenses.
 
@@ -244,7 +244,7 @@ Project-level configuration is treated as untrusted: it cannot change the endpoi
 
 Successful and failed commit runs write a minimal local JSONL metric by default to `~/.aicommit/metrics.jsonl`. Each record contains exactly duration, normalized token usage, a bounded result category, whether the message was edited, and the rewrite count (including automatic policy correction). It never contains the diff, reasoning, commit message, file names, provider, model, or credentials. The file retains the newest 500 records by default and is written with owner-only permissions where supported.
 
-Use `aicommit stats` to view first-pass acceptance, edit/rewrite/failure rates, P50/P95 latency, token totals, and recent-vs-previous trends. After ten successful runs it compares two chronological baseline windows and reports progress toward the roadmap's 20% relative edit/rewrite-rate improvement target. `aicommit stats clear|enable|disable` manages the same local store; clearing is permanent. The lower-level `aicommit metrics status|clear|enable|disable` commands remain available. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings, and there is no upload implementation.
+Use `aicommit stats` to view first-pass acceptance, edit/rewrite/failure rates, P50/P95 latency, token totals, and recent-vs-previous trends. After ten successful runs it compares two chronological baseline windows and reports progress toward the roadmap's 20% relative edit/rewrite-rate improvement target. `aicommit stats clear|enable|disable` manages the same local store; clearing is permanent. Set `metrics.enabled` to `false`, choose an absolute `metrics.path`, or change `metrics.maxEntries` in the user config. Project config cannot override these settings, and there is no upload implementation.
 
 ## Usage
 
@@ -255,50 +255,45 @@ aicommit config show     # show the effective config with secrets redacted
 aicommit config validate # validate config without resolving credentials
 aicommit config path     # print user and project config paths
 aicommit completion bash # generate Bash completion on stdout
-aicommit metrics status  # inspect local metrics state without uploading anything
 aicommit stats           # show local quality, latency, and token trends
 aicommit stats clear     # permanently clear local metric history
 aicommit                 # generate & commit in current directory
 aicommit /path/to/repo   # or a target directory
-aicommit --split         # choose staged/all scope, then split logical commits
-aicommit --split=staged  # split only the reviewed index snapshot
-aicommit --split=all     # split the complete working-tree snapshot
-aicommit --split=staged --split-hunks # experimental same-file hunk splitting
+aicommit split run       # choose staged/all scope, then split logical commits
+aicommit split run --scope=staged # split only the reviewed index snapshot
+aicommit split run --scope=all # split the complete working-tree snapshot
+aicommit split run --scope=staged --split-hunks # experimental same-file hunk splitting
 aicommit --dry-run       # generate and review without creating a commit
-aicommit --split --dry-run # review a split plan without creating commits
+aicommit split run --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
 aicommit --yes --dry-run # non-interactively preview all changes; restores staging
-aicommit --split=all --yes # non-interactively plan and commit all working-tree changes
+aicommit split run --scope=all --yes # non-interactively plan and commit all working-tree changes
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
-aicommit split --resume --yes # resume an interrupted split transaction
-aicommit split --abort --yes # discard a stale checkpoint; keep commits and changes
+aicommit split resume --yes # resume an interrupted split transaction
+aicommit split abort --yes # discard a stale checkpoint; keep commits and changes
 aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
 aicommit -p deepseek     # switch to the "deepseek" provider
 aicommit --yes --output=json # emit one schema-validated JSON result on stdout
-aicommit -c              # verify the configured LLM is reachable
-aicommit -c -p openrouter # verify the "openrouter" provider specifically
 aicommit -h              # help
 ```
 
-| Option             | Description                                                                                          |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `-l`, `--lang`     | Commit message language (`zh` or `en`)                                                               |
-| `-p`, `--provider` | Use the named provider from `providers`                                                              |
-| `-s`, `--split`    | Choose a scope and split changes; use `--split=staged\|all` to select it explicitly                  |
-| `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default                             |
-| `--scope`          | `staged` or `all` scope for `aicommit split plan`                                                    |
-| `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`                                  |
-| `--dry-run`        | Generate and review a message or split plan without creating commits                                 |
-| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes                               |
-| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort                              |
-| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it                            |
-| `--output`         | `text` (default) or one JSON object; commit/split JSON flows require `--yes`                         |
-| `-c`, `--check`    | Ping the provider to verify endpoint/key/model are working; failures use the stable classified exits |
-| `-v`, `--version`  | Show version                                                                                         |
-| `-h`, `--help`     | Show help                                                                                            |
+| Option             | Description                                                                  |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `-l`, `--lang`     | Commit message language (`zh` or `en`)                                       |
+| `-p`, `--provider` | Use the named provider from `providers`                                      |
+| `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default     |
+| `--scope`          | `staged` or `all` scope for `aicommit split run` and `aicommit split plan`   |
+| `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`          |
+| `--dry-run`        | Generate and review a message or split plan without creating commits         |
+| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes       |
+| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort      |
+| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it    |
+| `--output`         | `text` (default) or one JSON object; commit/split JSON flows require `--yes` |
+| `-v`, `--version`  | Show version                                                                 |
+| `-h`, `--help`     | Show help                                                                    |
 
 ### Configuration inspection
 
@@ -321,7 +316,7 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### Machine-readable output
 
-Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `--check --output=json` and `doctor --output=json` do not require `--yes`.
+Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `doctor --output=json` does not require `--yes`.
 
 ```json
 {
@@ -367,11 +362,11 @@ Stable process exits are shared by text and JSON modes:
 
 For stable error categories, Homebrew/npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
 
-Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. If some changes are staged but others are not, aicommit asks whether to include the rest in this commit.
+Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. Once anything is staged, that index snapshot is authoritative; other working-tree changes are left untouched.
 
 `--dry-run` follows the same review flow but stops before `git commit`. Any staging performed by aicommit is restored before it exits. Cancellation and failures use the same index transaction; if another process changed the index concurrently, aicommit leaves it untouched instead of overwriting that work.
 
-Before repository content is sent, aicommit detects common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments. Split mode scans the complete byte stream of each untracked regular file for these patterns while keeping the model preview bounded; the request reuses that captured preview instead of reopening the file. The default protected request omits sensitive file/private-key sections and redacts detected values; you can cancel or explicitly send the original diff. Untracked symbolic links and non-regular files are never opened for previews. In non-interactive split mode, detection fails closed before the API call because `--split --yes` would otherwise auto-stage the sensitive file. This is a safety net, not a replacement for a dedicated secret scanner.
+Before repository content is sent, aicommit detects common sensitive filenames, private-key material, cloud access-key IDs, and credential-like assignments. Split mode scans the complete byte stream of each untracked regular file for these patterns while keeping the model preview bounded; the request reuses that captured preview instead of reopening the file. The default protected request omits sensitive file/private-key sections and redacts detected values; you can cancel or explicitly send the original diff. Untracked symbolic links and non-regular files are never opened for previews. In non-interactive split mode, detection fails closed before the API call because `split run --scope=all --yes` would otherwise auto-stage the sensitive file. This is a safety net, not a replacement for a dedicated secret scanner.
 
 The staged index (or complete split-mode working tree, including untracked file bytes) is fingerprinted during generation and checked again immediately before committing. If it changed, the commit is aborted so the generated message cannot describe a different snapshot.
 
@@ -394,11 +389,11 @@ When reasoning mode is `on` (including via `--reasoning=<level>`), aicommit requ
 
 ### Split mode
 
-`--split` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--split=staged` or `--split=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
+`aicommit split run` asks whether to group the staged index snapshot or all staged, unstaged, and untracked changes into logical commits. Use `--scope=staged` or `--scope=all` when the boundary must be explicit, including every non-interactive run. You can review the plan, regenerate messages for selected groups, or edit the plan as JSON before committing. Extension validation errors are shown with the plan and must be corrected by editing or regenerating before commit. Sensitive-content detection fails closed before a non-interactive provider request or automatic staging.
 
 For an auditable two-step flow, `aicommit split plan --scope=staged|all --file=<path>` exports a versioned JSON artifact, and `aicommit split apply --file=<path>` rechecks its base commit, change set, and content fingerprint before touching the index. Keep plan files outside the worktree or under `.git` so they cannot become part of their own plan.
 
-Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split --resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If you intentionally finished or replaced the interrupted work through another Git workflow, run `aicommit split --abort`; it removes only the stale checkpoint and never rewrites HEAD, the index, or the worktree. New committing split runs detect a checkpoint before contacting the provider. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
+Execution uses temporary indexes and a code-free checkpoint under `.git/aicommit`. A hook, Git error, interruption, or crash leaves completed commits in history and preserves the pending snapshot; the failure report shows checkpointed, in-flight, pending, and current worktree/index state. Resolve the cause and run `aicommit split resume`. Resume reconciles the possible post-commit crash window before creating anything else, so a completed group is neither duplicated nor omitted. If you intentionally finished or replaced the interrupted work through another Git workflow, run `aicommit split abort`; it removes only the stale checkpoint and never rewrites HEAD, the index, or the worktree. New committing split runs detect a checkpoint before contacting the provider. If planning or preflight fails before the first group, no split commit is created and the real index remains unchanged.
 
 Split remains file-level by default. `--split-hunks` opts in to experimental same-file splitting for tracked text modifications with multiple unified-diff hunks. The JSON plan and checkpoint store only hunk IDs, line ranges, and hashes—not patch content. Before the first commit, AICommit applies every selected patch to a temporary index and requires the final tree to reproduce the captured target blobs exactly; parsing, patching, binary/mode-change, or lossless-validation failures fall back to a file-level plan. The worktree is never modified by hunk execution.
 

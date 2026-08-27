@@ -29,7 +29,7 @@ function makeRepo(root) {
   return repo;
 }
 
-function runCli(cwd, home, args, extraEnv = {}) {
+function runCli(cwd, home, args, extraEnv = {}, input = null) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
@@ -41,7 +41,7 @@ function runCli(cwd, home, args, extraEnv = {}) {
         FORCE_COLOR: '0',
         ...extraEnv,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -55,6 +55,7 @@ function runCli(cwd, home, args, extraEnv = {}) {
     });
     child.on('error', reject);
     child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+    child.stdin.end(input || '');
   });
 }
 
@@ -244,6 +245,67 @@ test('non-interactive dry run restores staging performed by aicommit', async (t)
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
 });
 
+test('interactive cancellation returns through cleanup and records a cancelled metric', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-cancel-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  git(repo, ['reset', '-q']);
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
+      apiKey: '',
+      modelId: 'offline-model',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['--no-reasoning'], {}, 'jj\n');
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Cancelled — stage files with git add/);
+  assert.equal(git(repo, ['diff', '--staged']).trim(), '');
+  assert.match(git(repo, ['diff']), /value = 2/);
+
+  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(metrics.at(-1).result, 'cancelled');
+});
+
+test('interactive split scope cancellation returns without contacting the provider', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-split-cancel-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: 'http://127.0.0.1:9/v1/chat/completions',
+      apiKey: '',
+      modelId: 'offline-model',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['split', 'run', '--no-reasoning'], {}, 'jj\n');
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Split cancelled/);
+  assert.match(git(repo, ['diff', '--staged']), /value = 2/);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
+
+  const metrics = readFileSync(join(home, '.aicommit', 'metrics.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(metrics.at(-1).result, 'cancelled');
+});
+
 test('non-interactive single-commit flow creates the reviewed staged snapshot', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-success-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -286,7 +348,50 @@ test('non-interactive single-commit flow creates the reviewed staged snapshot', 
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
-test('single-file --split=all --yes keeps split semantics and stages the worktree change', async (t) => {
+test('interactive flow treats an existing staged snapshot as final without another scope prompt', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-staged-intent-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const repo = makeRepo(root);
+  writeFileSync(join(repo, 'later.js'), 'export const later = true;\n');
+
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: 'fix: commit only the staged intent' } }],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  writeFileSync(
+    join(home, '.aicommit.config.json'),
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const result = await runCli(repo, home, ['--no-reasoning'], {}, '\n');
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.equal(
+    git(repo, ['log', '-1', '--pretty=%s']).trim(),
+    'fix: commit only the staged intent',
+  );
+  assert.equal(git(repo, ['show', '--name-only', '--pretty=', 'HEAD']).trim(), 'app.js');
+  assert.match(git(repo, ['status', '--porcelain']), /^\?\? later\.js$/m);
+});
+
+test('single-file split run --scope=all keeps split semantics and stages the worktree change', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-one-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -330,14 +435,20 @@ test('single-file --split=all --yes keeps split semantics and stages the worktre
     }),
   );
 
-  const result = await runCli(repo, home, ['--split=all', '--yes', '--no-reasoning']);
+  const result = await runCli(repo, home, [
+    'split',
+    'run',
+    '--scope=all',
+    '--yes',
+    '--no-reasoning',
+  ]);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Split plan: 1 commit/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: commit one split file');
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
-test('--split=staged commits the index snapshot and leaves newer worktree edits unstaged', async (t) => {
+test('split run --scope=staged commits the index snapshot and leaves newer edits unstaged', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-staged-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -381,7 +492,13 @@ test('--split=staged commits the index snapshot and leaves newer worktree edits 
     }),
   );
 
-  const result = await runCli(repo, home, ['--split=staged', '--yes', '--no-reasoning']);
+  const result = await runCli(repo, home, [
+    'split',
+    'run',
+    '--scope=staged',
+    '--yes',
+    '--no-reasoning',
+  ]);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /split scope: staged/);
   assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '3');
@@ -558,7 +675,7 @@ test('split plan exports JSON and split apply commits it without provider config
   assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
 });
 
-test('split --resume finishes a checkpointed apply without provider configuration', async (t) => {
+test('split resume finishes a checkpointed apply without provider configuration', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-resume-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -626,7 +743,7 @@ test('split --resume finishes a checkpointed apply without provider configuratio
   assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
 
   rmSync(hook);
-  const resumed = await runCli(repo, home, ['split', '--resume', '--yes']);
+  const resumed = await runCli(repo, home, ['split', 'resume', '--yes']);
   assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
   assert.match(resumed.stdout, /1 completed, 1 pending/);
   assert.match(resumed.stdout, /Resume complete/);
@@ -739,7 +856,7 @@ test('split plan rejects output inside the working tree before a provider reques
   assert.match(result.stderr, /outside the working tree or inside the repository Git directory/);
 });
 
-test('--split=all --yes scans complete untracked files before auto-staging', async (t) => {
+test('split run --scope=all scans complete untracked files before auto-staging', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-split-sensitive-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -771,7 +888,13 @@ test('--split=all --yes scans complete untracked files before auto-staging', asy
     }),
   );
 
-  const result = await runCli(repo, home, ['--split=all', '--yes', '--no-reasoning']);
+  const result = await runCli(repo, home, [
+    'split',
+    'run',
+    '--scope=all',
+    '--yes',
+    '--no-reasoning',
+  ]);
   assert.equal(result.code, 7, result.stdout + result.stderr);
   assert.equal(requests, 0);
   assert.match(result.stdout, /will not auto-stage sensitive files/);
@@ -975,7 +1098,9 @@ test('--output=json returns the split plan without reasoning or terminal decorat
   );
 
   const result = await runCli(repo, home, [
-    '--split=all',
+    'split',
+    'run',
+    '--scope=all',
     '--yes',
     '--dry-run',
     '--no-reasoning',

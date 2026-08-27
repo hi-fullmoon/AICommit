@@ -16,7 +16,6 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import chalk from 'chalk';
-import ora from 'ora';
 import editor from '@inquirer/editor';
 
 import { getResponseText, generateCommitMessage } from './api.js';
@@ -33,14 +32,7 @@ import {
   protectSensitiveText,
   isSensitiveFile,
 } from './git.js';
-import {
-  statusColor,
-  statusIcon,
-  highlightMessage,
-  vimSelect,
-  vimCheckbox,
-  startReasoningStream,
-} from './ui.js';
+import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
 import {
   cleanCommitMessage,
   formatMs,
@@ -77,9 +69,10 @@ import {
   validateHunkTransaction,
 } from './split-hunks.js';
 import { extensionHostFor } from './extensions.js';
+import { runModelTask } from './generation-ui.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Split mode (--split): group changes into multiple logical commits
+// Split mode: group changes into multiple logical commits
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Cap the diff sent to the grouping call — the model only needs enough
@@ -191,7 +184,7 @@ export function getAllChangedFiles(cwd) {
 
 // Index-only split scope. The first porcelain status column describes the
 // staged snapshot; working-tree-only and untracked changes are deliberately
-// excluded so --split=staged never crosses the user's index boundary.
+// excluded so --scope=staged never crosses the user's index boundary.
 export function getStagedChangedFiles(cwd) {
   const out = readGit(['status', '--porcelain', '-z', '-uno'], cwd);
   if (!out) return [];
@@ -1228,7 +1221,7 @@ function executeTransactionalSplit(
         console.log(
           chalk.dim(
             `  Checkpoint: ${transaction.path}\n` +
-              '  Resolve the issue, then run: aicommit split --resume\n',
+              '  Resolve the issue, then run: aicommit split resume\n',
           ),
         );
         return false;
@@ -1352,6 +1345,29 @@ export async function splitFlow(
   } = {},
 ) {
   const reasoningEnabled = config.reasoning.mode === 'on';
+  const warnings = [];
+  const finishCancelled = ({
+    plan = null,
+    latencyMs = null,
+    usage = null,
+    edited = false,
+    rewrites = 0,
+    notice = 'Split cancelled.',
+  } = {}) => {
+    if (notice) console.log(chalk.dim(`\n  ${notice}\n`));
+    return {
+      plan,
+      provider,
+      model: config.modelId,
+      latencyMs,
+      usage,
+      warnings,
+      exitReason: 'cancelled',
+      committed: false,
+      edited,
+      rewrites,
+    };
+  };
   if (exportPlanPath) exportPlanPath = safeExportPlanPath(projectRoot, exportPlanPath);
   if (scope === 'prompt') {
     scope = await vimSelect({
@@ -1371,8 +1387,7 @@ export async function splitFlow(
       ],
     });
     if (scope === 'cancel') {
-      console.log(chalk.dim('\n  Split cancelled.\n'));
-      process.exit(0);
+      return finishCancelled();
     }
   }
   // Dry runs and exported plans do not create a transaction, so they remain
@@ -1380,7 +1395,6 @@ export async function splitFlow(
   // API request instead of discovering the checkpoint only after planning.
   if (!dryRun) requireNoSplitCheckpoint(projectRoot);
   let allFiles = getSplitChangedFiles(projectRoot, scope);
-  const warnings = [];
 
   if (allFiles.length === 0) {
     console.log('\n  ' + chalk.yellow('✗ No changes to commit.'));
@@ -1500,7 +1514,7 @@ export async function splitFlow(
       console.log('    ' + chalk.yellow(sanitizeTerminalText(finding)));
     }
     if (yes) {
-      console.log(chalk.red('  ✗ --split --yes will not auto-stage sensitive files.'));
+      console.log(chalk.red('  ✗ Non-interactive split will not auto-stage sensitive files.'));
       console.log(
         chalk.dim(
           '  Review and stage the intended files explicitly, then use normal --yes mode.\n',
@@ -1508,7 +1522,7 @@ export async function splitFlow(
       );
       throw fail(
         ERROR_CATEGORIES.SENSITIVE_DATA,
-        '--split --yes will not auto-stage sensitive files.',
+        'Non-interactive split will not auto-stage sensitive files.',
         { reported: true },
       );
     }
@@ -1530,8 +1544,7 @@ export async function splitFlow(
       ],
     });
     if (sensitiveAction === 'cancel') {
-      console.log(chalk.dim('\n  Split cancelled.\n'));
-      process.exit(0);
+      return finishCancelled();
     }
     if (sensitiveAction === 'protect') {
       const sensitiveBasenames = sensitivePaths.map((path) =>
@@ -1548,62 +1561,38 @@ export async function splitFlow(
     }
   }
 
-  const spinner = ora({
-    text: chalk.dim(
-      `Calling ${chalk.bold(sanitizeTerminalText(config.modelId))} to plan commits ...`,
-    ),
-    color: 'cyan',
-  }).start();
-  let liveReasoning;
-  const stream =
-    reasoningEnabled && !machineOutput
-      ? {
-          onReasoningDelta(chunk) {
-            if (!liveReasoning) {
-              spinner.stop();
-              liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-              return;
-            }
-            liveReasoning.append(chunk);
-          },
-        }
-      : null;
-
   let raw, reasoningText, elapsed, usage;
-  // Same Ctrl+C contract as the single-commit flow: interrupting the model
-  // call cancels the split cleanly instead of leaving a half-drawn spinner.
-  const cancelOnSigint = () => {
-    spinner.stop();
-    console.log(chalk.dim('\n  Split cancelled.\n'));
-    process.exit(130); // 128 + SIGINT
-  };
-  process.on('SIGINT', cancelOnSigint);
   try {
     ({
       raw,
       elapsed,
       usage,
       reasoning: reasoningText,
-    } = await generateSplitPlan(
-      planningConfig,
-      allFiles,
-      planningDiff,
-      projectRoot,
-      stream,
-      untrackedSnapshot.previews,
-    ));
-    if (liveReasoning) await liveReasoning.stop();
-    let done = `Plan generated in ${chalk.bold(formatMs(elapsed))}`;
-    if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
-    spinner.succeed(done);
+    } = await runModelTask({
+      spinnerText: `Calling ${chalk.bold(sanitizeTerminalText(config.modelId))} to plan commits ...`,
+      reasoning: config.reasoning,
+      machineOutput,
+      cancelMessage: 'Split cancelled.',
+      failureMessage: 'API call failed',
+      task: (stream) =>
+        generateSplitPlan(
+          planningConfig,
+          allFiles,
+          planningDiff,
+          projectRoot,
+          stream,
+          untrackedSnapshot.previews,
+        ),
+      successMessage(result) {
+        let done = `Plan generated in ${chalk.bold(formatMs(result.elapsed))}`;
+        if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
+        return done;
+      },
+    }));
   } catch (err) {
-    if (liveReasoning) await liveReasoning.stop();
-    spinner.fail(chalk.red('API call failed'));
     console.log(`\n  ${indentError(err)}\n`);
     err.reported = true;
     throw err;
-  } finally {
-    process.removeListener('SIGINT', cancelOnSigint);
   }
 
   let groups;
@@ -1722,8 +1711,13 @@ export async function splitFlow(
         );
 
     if (action === 'cancel') {
-      console.log(chalk.dim('\n  Split cancelled.\n'));
-      process.exit(0);
+      return finishCancelled({
+        plan: groups,
+        latencyMs: elapsed,
+        usage,
+        edited: planEdited,
+        rewrites: rewriteCount,
+      });
     }
 
     if (action === 'edit') {
@@ -1771,62 +1765,43 @@ export async function splitFlow(
                 '✗ The working tree changed after split planning; message regeneration aborted.',
               ),
           );
-          console.log(chalk.dim(`  Review the changes and run aicommit --split=${scope} again.\n`));
+          console.log(
+            chalk.dim(`  Review the changes and run aicommit split run --scope=${scope} again.\n`),
+          );
           throw fail(
             ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
             'The working tree changed after split planning; message regeneration aborted.',
             { reported: true },
           );
         }
-        const rspinner = ora({
-          text: chalk.dim(`Regenerating message for group ${idx + 1} ...`),
-          color: 'cyan',
-        }).start();
-        let liveGroupReasoning;
-        const groupStream = reasoningEnabled
-          ? {
-              onReasoningDelta(chunk) {
-                if (!liveGroupReasoning) {
-                  rspinner.stop();
-                  liveGroupReasoning = startReasoningStream(
-                    config.reasoning.maxDisplayChars,
-                    chunk,
-                  );
-                  return;
-                }
-                liveGroupReasoning.append(chunk);
-              },
-            }
-          : null;
-        const cancelRegenOnSigint = () => {
-          rspinner.stop();
-          console.log(chalk.dim('\n  Split cancelled.\n'));
-          process.exit(130); // 128 + SIGINT
-        };
-        process.on('SIGINT', cancelRegenOnSigint);
         try {
           regenCounts[idx]++;
-          const { message, elapsed, usage, reasoning, corrections } = await generateCommitMessage(
-            config,
-            groupDiff,
-            regenCounts[idx],
-            groups[idx].message,
-            groupStream,
-          );
-          if (liveGroupReasoning) await liveGroupReasoning.stop();
-          let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(elapsed))}`;
-          if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
-          rspinner.succeed(done);
+          const { message, reasoning, corrections } = await runModelTask({
+            spinnerText: `Regenerating message for group ${idx + 1} ...`,
+            reasoning: config.reasoning,
+            machineOutput,
+            cancelMessage: 'Split cancelled.',
+            failureMessage: `Group ${idx + 1} regenerate failed`,
+            task: (stream) =>
+              generateCommitMessage(
+                config,
+                groupDiff,
+                regenCounts[idx],
+                groups[idx].message,
+                stream,
+              ),
+            successMessage(result) {
+              let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(result.elapsed))}`;
+              if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
+              return done;
+            },
+          });
           reasoningText = reasoning;
           groups[idx] = { ...groups[idx], message };
           rewriteCount += 1 + (corrections || 0);
         } catch (err) {
-          if (liveGroupReasoning) await liveGroupReasoning.stop();
           regenCounts[idx]--;
-          rspinner.fail(chalk.red(`Group ${idx + 1} regenerate failed`));
           console.log(`\n  ${indentError(err)}\n`);
-        } finally {
-          process.removeListener('SIGINT', cancelRegenOnSigint);
         }
       }
       continue; // show the updated plan again
@@ -1889,7 +1864,9 @@ export async function splitFlow(
       '\n  ' +
         chalk.red('✗ The working tree changed after split planning; no commits were created.'),
     );
-    console.log(chalk.dim(`  Review the changes and run aicommit --split=${scope} again.\n`));
+    console.log(
+      chalk.dim(`  Review the changes and run aicommit split run --scope=${scope} again.\n`),
+    );
     throw fail(
       ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
       'The working tree changed after split planning; no commits were created.',

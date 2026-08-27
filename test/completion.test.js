@@ -15,7 +15,6 @@ test('completion generators cover stable commands and shell-specific registratio
       'split',
       'doctor',
       'stats',
-      'metrics',
     ]) {
       assert.match(script, new RegExp(`\\b${command}\\b`), `${shell} omits ${command}`);
     }
@@ -26,9 +25,10 @@ test('completion generators cover stable commands and shell-specific registratio
     }
     const rangeOption = `${longOptionPrefix}range`;
     assert.match(script, new RegExp(rangeOption), `${shell} omits ${rangeOption}`);
-    for (const action of ['--resume', '--abort']) {
+    for (const action of ['run', 'resume', 'abort']) {
       assert.match(script, new RegExp(action), `${shell} omits ${action}`);
     }
+    assert.doesNotMatch(script, /\bmetrics\b|--check|--split=/);
     assert.doesNotMatch(script, /apiKey|credential|secret/i);
   }
   assert.match(generateCompletion('bash'), /complete -F _aicommit aicommit/);

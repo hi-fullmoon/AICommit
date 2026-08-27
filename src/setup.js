@@ -206,6 +206,7 @@ export async function runSetup(dependencies = {}) {
     message: 'Test the connection now?',
     default: true,
   });
+  let connectionVerified = false;
 
   if (runTest) {
     const spinner = spinnerFactory({
@@ -221,6 +222,7 @@ export async function runSetup(dependencies = {}) {
         timeoutMs: 120000,
       });
       spinner.succeed(`Connection OK — ${formatMs(report.elapsed)}`);
+      connectionVerified = true;
     } catch (err) {
       spinner.fail('Connection failed');
       console.log(`\n  ${indentError(err)}\n`);
@@ -251,12 +253,16 @@ export async function runSetup(dependencies = {}) {
     '  ' + chalk.dim(`  API key:  ${apiKeyEnv ? `env:${apiKeyEnv}` : maskApiKey(apiKey)}`),
   );
   console.log('');
-  console.log(
-    chalk.dim('  Run ') +
-      chalk.bold('aicommit -c') +
-      chalk.dim(' to verify the connection, or ') +
-      chalk.bold('aicommit') +
-      chalk.dim(' to start committing.'),
-  );
+  if (connectionVerified) {
+    console.log(chalk.dim('  Connection verified. Run ') + chalk.bold('aicommit') + chalk.dim('.'));
+  } else {
+    console.log(
+      chalk.dim('  Run ') +
+        chalk.bold('aicommit doctor') +
+        chalk.dim(' to verify the setup, or ') +
+        chalk.bold('aicommit') +
+        chalk.dim(' to start committing.'),
+    );
+  }
   console.log('');
 }

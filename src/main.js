@@ -2,7 +2,6 @@ import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import chalk from 'chalk';
-import ora from 'ora';
 
 import { parseArgs } from './cli.js';
 import { getProjectRoot, loadConfig } from './config.js';
@@ -23,7 +22,7 @@ import {
   createIndexTransaction,
   protectSensitiveDiff,
 } from './git.js';
-import { generateCommitMessage, checkConnection } from './api.js';
+import { generateCommitMessage } from './api.js';
 import {
   statusColor,
   statusIcon,
@@ -31,7 +30,6 @@ import {
   editMessage,
   vimSelect,
   vimCheckbox,
-  startReasoningStream,
 } from './ui.js';
 import {
   formatMs,
@@ -43,12 +41,13 @@ import {
   redactSensitiveUrl,
 } from './utils.js';
 import { abortSplit, applySplitPlan, resumeSplit, splitFlow } from './split.js';
+import { runModelTask } from './generation-ui.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
 import { configureExtensionHost } from './extensions.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { runDoctor } from './doctor.js';
-import { configureMetrics, runMetricsCommand, runStatsCommand } from './metrics.js';
+import { configureMetrics, runStatsCommand } from './metrics.js';
 import { runConfigCommand } from './config-command.js';
 import { generateCompletion } from './completion.js';
 import { runPolicyCommand } from './policy-command.js';
@@ -58,6 +57,30 @@ import {
   collectRepositoryContext,
   repositoryContextSummary,
 } from './context.js';
+
+function withUntrackedFiles(changes, untracked) {
+  return [...changes, ...untracked.map((path) => ({ status: '?', path, addPaths: [path] }))];
+}
+
+function printChangeList(changes) {
+  for (const { status, path } of changes) {
+    const code = status.charAt(0);
+    const c = statusColor[code] || chalk.dim;
+    const icon = statusIcon[code] || code;
+    console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
+  }
+}
+
+async function pickPathsToStage(unstaged, untracked, message) {
+  const picked = await vimCheckbox({
+    message,
+    choices: withUntrackedFiles(unstaged, untracked).map(({ status, path, addPaths }) => ({
+      name: `${statusIcon[status.charAt(0)] || status.charAt(0)} ${sanitizeTerminalText(path)}`,
+      value: addPaths,
+    })),
+  });
+  return picked.flat();
+}
 
 export async function main() {
   // ── CLI arguments ───────────────────────────────────────────────────
@@ -75,7 +98,6 @@ export async function main() {
     splitPlanFile,
     dryRun,
     yes,
-    check,
     setup,
     doctor,
     configAction,
@@ -86,7 +108,6 @@ export async function main() {
     presetFile,
     completionShell,
     statsAction,
-    metricsAction,
     help,
     version,
   } = parseArgs();
@@ -96,25 +117,13 @@ export async function main() {
     process.stdout.write(generateCompletion(completionShell));
     return { exitReason: 'completion' };
   }
-  if (metricsAction) {
-    await runMetricsCommand(metricsAction);
-    return { exitReason: `metrics_${metricsAction}` };
-  }
   if (statsAction) {
     await runStatsCommand(statsAction);
     return { exitReason: `stats_${statsAction}` };
   }
 
   const machineOutput = output === 'json';
-  if (
-    machineOutput &&
-    !yes &&
-    !check &&
-    !doctor &&
-    !configAction &&
-    !policyAction &&
-    !presetAction
-  ) {
+  if (machineOutput && !yes && !doctor && !configAction && !policyAction && !presetAction) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -249,78 +258,6 @@ export async function main() {
     console.log('  ' + chalk.green('✓') + chalk.dim(' Reasoning: off (via CLI)'));
   }
 
-  // ── 1.5. Connection check ───────────────────────────────────────────
-
-  if (check) {
-    console.log('');
-    const spinner = ora({
-      text: chalk.dim(`Checking ${chalk.bold(config.modelId)} ...`),
-      color: 'cyan',
-    }).start();
-    let reasoningStream;
-    const stream =
-      reasoningEnabled && !machineOutput
-        ? {
-            onReasoningDelta(chunk) {
-              if (!reasoningStream) {
-                spinner.stop();
-                reasoningStream = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-                return;
-              }
-              reasoningStream.append(chunk);
-            },
-          }
-        : null;
-
-    try {
-      const report = await checkConnection(config, stream);
-      if (reasoningStream) await reasoningStream.stop();
-      spinner.succeed('Connection OK');
-
-      console.log('');
-      console.log('  ' + chalk.dim('Provider:  ') + (providerName || chalk.dim('(flat config)')));
-      console.log('  ' + chalk.dim('Endpoint:  ') + redactSensitiveUrl(config.apiUrl));
-      console.log('  ' + chalk.dim('API key:   ') + maskApiKey(config.apiKey));
-      console.log('  ' + chalk.dim('Model:     ') + config.modelId);
-      if (report.content) {
-        console.log(
-          '  ' +
-            chalk.dim('Reply:     ') +
-            `"${sanitizeTerminalText(report.content.slice(0, 80))}"`,
-        );
-      } else {
-        console.log(
-          '  ' +
-            chalk.yellow(
-              'Reply:     (empty — endpoint is reachable but the model returned no text)',
-            ),
-        );
-      }
-      console.log('  ' + chalk.dim('Latency:   ') + formatMs(report.elapsed));
-      if (report.model)
-        console.log('  ' + chalk.dim('Echoed:    ') + sanitizeTerminalText(report.model));
-      if (report.usage) {
-        console.log('  ' + chalk.dim('Tokens:    ') + formatUsage(report.usage));
-      }
-      console.log('');
-      return {
-        message: null,
-        provider: selectedProvider,
-        model: config.modelId,
-        latencyMs: report.elapsed,
-        usage: report.usage,
-        warnings,
-        exitReason: 'connection_ok',
-        committed: false,
-      };
-    } catch (err) {
-      if (reasoningStream) await reasoningStream.stop();
-      spinner.fail('Connection failed');
-      console.log(`\n  ${indentError(err)}\n`);
-      throw err;
-    }
-  }
-
   configureMetrics(config.metrics);
 
   // An empty apiKey is valid for local, keyless endpoints (Ollama, LM Studio,
@@ -365,9 +302,7 @@ export async function main() {
   // ── 2. Diff ─────────────────────────────────────────────────────────
 
   // All git helpers swallow errors and return empty output, so without this
-  // guard a non-repo directory would be misreported as "no changes to
-  // commit". Placed here (not earlier) so -c/--check and --debug still work
-  // outside a repo.
+  // guard a non-repo directory would be misreported as "no changes to commit".
   if (!isGitRepo(projectRoot)) {
     console.log('\n  ' + chalk.red(`✗ Not a git repository: ${process.cwd()}`));
     console.log(chalk.dim('  Run aicommit inside a git working tree.\n'));
@@ -397,12 +332,41 @@ export async function main() {
   // All git commands run at the repo root (projectRoot), even when aicommit
   // is invoked from a subdirectory.
   let indexTransaction = null;
+  const finishCancelled = ({
+    notice = 'Commit cancelled.',
+    message = null,
+    latencyMs = null,
+    usage = null,
+    edited = false,
+    rewrites = 0,
+  } = {}) => {
+    const restored = indexTransaction ? indexTransaction.restore() : true;
+    indexTransaction = null;
+    if (!restored) {
+      warnings.push('The Git index changed during the run and was left untouched.');
+      console.log(
+        '  ' + chalk.yellow('⚠ The Git index changed during the run and was left untouched.'),
+      );
+    }
+    if (notice) console.log(chalk.dim(`\n  ${notice}\n`));
+    return {
+      message,
+      provider: selectedProvider,
+      model: config.modelId,
+      latencyMs,
+      usage,
+      warnings,
+      exitReason: 'cancelled',
+      committed: false,
+      edited,
+      rewrites,
+    };
+  };
   const beginIndexTransaction = () => {
     indexTransaction ||= createIndexTransaction(projectRoot);
     return indexTransaction;
   };
   let diff = getStagedDiff(projectRoot, config.diffContextLines);
-  const hadStaged = Boolean(diff);
   if (!diff) {
     // Nothing staged. But git diff --staged is also empty for unstaged work
     // and untracked files — surface what git status actually shows instead of
@@ -420,16 +384,7 @@ export async function main() {
     }
 
     console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`));
-    for (const { status, path } of unstaged) {
-      const c = statusColor[status.charAt(0)] || chalk.dim;
-      const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-      console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-    }
-    for (const path of untracked) {
-      const c = statusColor['?'];
-      const icon = statusIcon['?'];
-      console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-    }
+    printChangeList(withUntrackedFiles(unstaged, untracked));
     console.log('');
 
     if (yes && !dryRun) {
@@ -464,35 +419,21 @@ export async function main() {
         });
 
     if (stageAction === 'cancel') {
-      console.log(
-        chalk.dim('\n  Cancelled — stage files with ') +
-          chalk.bold('git add') +
-          chalk.dim(' and run aicommit again.\n'),
-      );
-      process.exit(0);
+      return finishCancelled({
+        notice: 'Cancelled — stage files with git add and run aicommit again.',
+      });
     }
 
     let toStage = null; // null → stage everything
     if (stageAction === 'pick') {
-      const choices = [
-        ...unstaged.map(({ status, path, addPaths }) => ({
-          name: `${statusIcon[status.charAt(0)] || status.charAt(0)} ${sanitizeTerminalText(path)}`,
-          value: addPaths,
-        })),
-        ...untracked.map((path) => ({
-          name: `${statusIcon['?']} ${sanitizeTerminalText(path)}`,
-          value: [path],
-        })),
-      ];
-      const picked = await vimCheckbox({
-        message: 'Select files to stage (space to select, enter to confirm)',
-        choices,
-      });
-      if (!picked.length) {
-        console.log(chalk.dim('\n  No files selected — nothing staged.\n'));
-        process.exit(0);
+      toStage = await pickPathsToStage(
+        unstaged,
+        untracked,
+        'Select files to stage (space to select, enter to confirm)',
+      );
+      if (!toStage.length) {
+        return finishCancelled({ notice: 'No files selected — nothing staged.' });
       }
-      toStage = picked.flat();
     }
 
     try {
@@ -517,106 +458,6 @@ export async function main() {
       throw fail(ERROR_CATEGORIES.GIT_STATE, 'Nothing staged; no diff to commit.', {
         reported: true,
       });
-    }
-  }
-
-  // Staged-only is the design, but when the working tree holds more changes
-  // the user may simply have forgotten to stage them — offer to fold them in
-  // instead of committing a subset silently. Skipped when staging just
-  // happened interactively above (the user already made that choice there).
-  if (hadStaged && !yes) {
-    const unstaged = getUnstagedFiles(projectRoot);
-    const untracked = getUntrackedFiles(projectRoot);
-
-    if (unstaged.length || untracked.length) {
-      // List both sides before asking — the choice is only meaningful when
-      // the user can see what is already staged and what would be added.
-      console.log('\n  ' + chalk.green('✓ Already staged:'));
-      for (const { status, path } of getChangedFiles(projectRoot)) {
-        const c = statusColor[status.charAt(0)] || chalk.dim;
-        const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-        console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-      }
-      console.log('');
-      console.log(
-        '  ' +
-          chalk.cyan(
-            `✗ ${unstaged.length + untracked.length} more file(s) with unstaged/untracked changes:`,
-          ),
-      );
-      for (const { status, path } of unstaged) {
-        const c = statusColor[status.charAt(0)] || chalk.dim;
-        const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-        console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-      }
-      for (const path of untracked) {
-        const c = statusColor['?'];
-        const icon = statusIcon['?'];
-        console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-      }
-      console.log('');
-
-      const include = await vimSelect({
-        message: 'Include them in this commit?',
-        choices: [
-          {
-            name: 'No, commit the staged changes only',
-            value: 'no',
-            description: 'Leave the rest for a later commit',
-          },
-          {
-            name: 'Yes, stage everything',
-            value: 'all',
-            description: 'Run git add -A and commit it all together',
-          },
-          {
-            name: 'Pick files to add',
-            value: 'pick',
-            description: 'Choose additional files to stage',
-          },
-        ],
-      });
-
-      let extra = null; // null → stage everything
-      if (include === 'pick') {
-        const choices = [
-          ...unstaged.map(({ status, path, addPaths }) => ({
-            name: `${statusIcon[status.charAt(0)] || status.charAt(0)} ${sanitizeTerminalText(path)}`,
-            value: addPaths,
-          })),
-          ...untracked.map((path) => ({
-            name: `${statusIcon['?']} ${sanitizeTerminalText(path)}`,
-            value: [path],
-          })),
-        ];
-        const picked = await vimCheckbox({
-          message: 'Select additional files to stage (space to select, enter to confirm)',
-          choices,
-        });
-        if (!picked.length) {
-          console.log(chalk.dim('  No files selected — committing the staged changes only.'));
-        } else {
-          extra = picked.flat();
-        }
-      }
-
-      if (include === 'all' || extra) {
-        try {
-          beginIndexTransaction();
-          runGit(extra ? ['add', '--', ...extra] : ['add', '-A'], projectRoot);
-          indexTransaction.markOwned();
-          diff = getStagedDiff(projectRoot, config.diffContextLines);
-        } catch (err) {
-          indexTransaction?.restore({ force: true });
-          indexTransaction = null;
-          console.log(
-            '  ' +
-              chalk.red(
-                `✗ Failed to stage files: ${sanitizeTerminalText(err.message)} — committing the staged changes only.`,
-              ),
-          );
-        }
-      }
     }
   }
 
@@ -646,11 +487,7 @@ export async function main() {
   if (branch) statLine += chalk.dim(`  on ${sanitizeTerminalText(branch)}`);
   console.log(statLine);
 
-  for (const { status, path } of changedFiles) {
-    const c = statusColor[status.charAt(0)] || chalk.dim;
-    const icon = statusIcon[status.charAt(0)] || status.charAt(0);
-    console.log(`  ${c('  ' + icon)} ${c(sanitizeTerminalText(path))}`);
-  }
+  printChangeList(changedFiles);
 
   const contextReport = collectRepositoryContext(
     projectRoot,
@@ -702,8 +539,7 @@ export async function main() {
           ],
         });
     if (sensitiveAction === 'cancel') {
-      console.log(chalk.dim('\n  Commit cancelled.\n'));
-      process.exit(0);
+      return finishCancelled();
     }
     if (sensitiveAction === 'protect') diffForModel = protectedInput.diff;
   }
@@ -736,35 +572,6 @@ export async function main() {
   let wasEdited = false;
 
   while (true) {
-    const spinner = ora({
-      text: chalk.dim(`Calling ${chalk.bold(sanitizeTerminalText(config.modelId))} ...`),
-      color: 'cyan',
-    }).start();
-    let liveReasoning;
-    const stream =
-      reasoningEnabled && !machineOutput
-        ? {
-            onReasoningDelta(chunk) {
-              if (!liveReasoning) {
-                spinner.stop();
-                liveReasoning = startReasoningStream(config.reasoning.maxDisplayChars, chunk);
-                return;
-              }
-              liveReasoning.append(chunk);
-            },
-          }
-        : null;
-
-    // Ctrl+C while the model call is in flight cancels the commit cleanly:
-    // stop the spinner (restoring the cursor) and exit, instead of dying
-    // mid-frame with a half-drawn spinner line.
-    const cancelOnSigint = () => {
-      spinner.stop();
-      console.log(chalk.dim('\n  Commit cancelled.\n'));
-      process.exit(130); // 128 + SIGINT
-    };
-    process.on('SIGINT', cancelOnSigint);
-
     try {
       // Pass the previous message so a regenerate can ask for a rewording
       // instead of re-sending the full diff (see generateCommitMessage).
@@ -775,19 +582,26 @@ export async function main() {
         reasoning: reasoningText,
         qualityWarnings,
         corrections,
-      } = await generateCommitMessage(config, modelDiff, regenerateCount, message, stream));
+      } = await runModelTask({
+        spinnerText: `Calling ${chalk.bold(sanitizeTerminalText(config.modelId))} ...`,
+        reasoning: config.reasoning,
+        machineOutput,
+        cancelMessage: 'Commit cancelled.',
+        failureMessage: 'API call failed',
+        task: (stream) =>
+          generateCommitMessage(config, modelDiff, regenerateCount, message, stream),
+        successMessage(result) {
+          let done = `Generated in ${chalk.bold(formatMs(result.elapsed))}`;
+          if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
+          return done;
+        },
+      }));
       automaticCorrectionCount += corrections || 0;
-      if (liveReasoning) await liveReasoning.stop();
-      let done = `Generated in ${chalk.bold(formatMs(elapsed))}`;
-      if (usage) done += chalk.dim(`  · tokens: ${formatUsage(usage)}`);
-      spinner.succeed(done);
       for (const warning of qualityWarnings || []) {
         if (!warnings.includes(warning)) warnings.push(warning);
         console.log('  ' + chalk.yellow(`⚠ Quality check: ${sanitizeTerminalText(warning)}`));
       }
     } catch (err) {
-      if (liveReasoning) await liveReasoning.stop();
-      spinner.fail(chalk.red('API call failed'));
       console.log(`\n  ${indentError(err)}\n`);
       // A transient API failure shouldn't kill the session — let the user
       // retry, fall back to the previous message (if any), or cancel.
@@ -802,10 +616,13 @@ export async function main() {
       });
       if (choice === 'keep') break; // commit with the previous good message
       if (choice === 'retry') continue;
-      console.log(chalk.dim('\n  Commit cancelled.\n'));
-      process.exit(0);
-    } finally {
-      process.removeListener('SIGINT', cancelOnSigint);
+      return finishCancelled({
+        message,
+        latencyMs: elapsed,
+        usage,
+        edited: wasEdited,
+        rewrites: regenerateCount + automaticCorrectionCount,
+      });
     }
 
     if (!message) {
@@ -841,8 +658,13 @@ export async function main() {
         break; // proceed to commit with edited message
       }
       // User cancelled during edit — exit
-      console.log(chalk.dim('\n  Commit cancelled.\n'));
-      process.exit(0);
+      return finishCancelled({
+        message,
+        latencyMs: elapsed,
+        usage,
+        edited: wasEdited,
+        rewrites: regenerateCount + automaticCorrectionCount,
+      });
     }
 
     if (action === 'regenerate') {
@@ -852,8 +674,13 @@ export async function main() {
     }
 
     // action === 'cancel'
-    console.log(chalk.dim('\n  Commit cancelled.\n'));
-    process.exit(0);
+    return finishCancelled({
+      message,
+      latencyMs: elapsed,
+      usage,
+      edited: wasEdited,
+      rewrites: regenerateCount + automaticCorrectionCount,
+    });
   }
 
   // ── 5. Commit ────────────────────────────────────────────────────────

@@ -99,12 +99,28 @@ test('runSetup saves a preset provider atomically with environment credentials',
   });
 
   const selections = ['openai', 'en'];
+  const spinnerEvents = [];
   await runSetup({
     targetPath,
     selectPrompt: async () => selections.shift(),
     inputPrompt: async () => 'gpt-test',
     passwordPrompt: async () => 'env:AICOMMIT_SETUP_TEST_KEY',
-    confirmPrompt: async () => false,
+    confirmPrompt: async () => true,
+    connectionCheck: async (config) => {
+      assert.equal(config.apiKey, 'secret-from-env');
+      return { elapsed: 42 };
+    },
+    spinnerFactory: () => ({
+      start() {
+        return this;
+      },
+      succeed(message) {
+        spinnerEvents.push(message);
+      },
+      fail() {
+        assert.fail('connection check should succeed');
+      },
+    }),
     presetLoader: bundledPresetLoader,
   });
 
@@ -122,6 +138,7 @@ test('runSetup saves a preset provider atomically with environment credentials',
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
   }
   assert.deepEqual(readdirSync(root), ['.aicommit.config.json']);
+  assert.deepEqual(spinnerEvents, ['Connection OK — 42ms']);
 });
 
 test('runSetup preserves invalid config and cancels after a failed connection test', async (t) => {

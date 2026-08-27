@@ -9,7 +9,7 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 使用 npm：
 
 ```bash
-npm install --global aicommit
+npm install --global @hi-fullmoon/aicommit
 ```
 
 或使用 Homebrew：
@@ -140,7 +140,7 @@ export KIMI_API_KEY='your-kimi-code-api-key'
 首次提交前验证端点、Key 和模型：
 
 ```bash
-aicommit --check -p kimi-code
+aicommit doctor -p kimi-code
 ```
 
 `kimi-for-coding` 对所有 Kimi Code 会员档位开放，并随服务滚动升级模型。Kimi Code 会员 Key 使用 `api.kimi.com`；Kimi 开放平台按量付费 Key 使用不同端点，两者不能混用。
@@ -238,7 +238,7 @@ AICommit 没有托管后端，也没有指标上传实现。运行时只会向�
 - split 模式中的变更文件路径 / 状态、tracked diff，以及未跟踪文件的受限文本预览；
 - 启用对应上下文分类时，受限的近期提交主题、包边界、显式信任的约定摘录和可识别的 commitlint 约束；
 - 请求低成本重写时的上一条生成信息；
-- 运行 `aicommit --check` 时的一条固定小型 prompt。
+- `aicommit doctor` 执行实时连接检查时的一条固定小型 prompt。
 
 AICommit 不会主动发送无关的仓库文件、历史提交正文、环境变量或本地配置文件。每个选中的 diff、路径列表、历史样本、预览和约定摘录都会放入标记为“不可信数据”的显式 JSON 信封；权威 system policy 会要求模型绝不执行仓库内容中嵌入的指令。lock 文件、配置的 `stripFiles`、超大段落、常见敏感文件名、私钥材料、云访问 Key ID 和疑似凭据赋值，会在默认请求前被省略、截断或脱敏。交互警告仍允许你明确发送原始 diff，请谨慎确认。检测规则和 prompt 边界属于安全护栏，不能完全替代秘密扫描或 prompt injection 防护。
 
@@ -246,7 +246,7 @@ AICommit 不会主动发送无关的仓库文件、历史提交正文、环境�
 
 默认情况下，成功和失败的提交运行会向 `~/.aicommit/metrics.jsonl` 写入最小化的本地 JSONL 指标。每条记录只包含耗时、标准化 token 用量、受限结果分类、消息是否被编辑，以及重写次数（包括自动策略修正）。它绝不包含 diff、推理、提交信息、文件名、Provider、模型或凭据。默认只保留最新 500 条记录，并在系统支持时使用仅所有者权限写入。
 
-使用 `aicommit stats` 查看首次接受率、编辑 / 重写 / 失败率、P50 / P95 延迟、token 总量，以及近期窗口和前一窗口的趋势。成功运行达到 10 次后，它会比较两个按时间排序的基线窗口，并报告相对于路线图“编辑 / 重写率降低 20%”目标的进度。`aicommit stats clear|enable|disable` 管理同一本地数据；清除操作不可恢复。底层的 `aicommit metrics status|clear|enable|disable` 命令仍然可用。可以在用户配置中将 `metrics.enabled` 设为 `false`、指定绝对 `metrics.path`，或修改 `metrics.maxEntries`。项目配置不能覆盖这些设置，也不存在上传实现。
+使用 `aicommit stats` 查看首次接受率、编辑 / 重写 / 失败率、P50 / P95 延迟、token 总量，以及近期窗口和前一窗口的趋势。成功运行达到 10 次后，它会比较两个按时间排序的基线窗口，并报告相对于路线图“编辑 / 重写率降低 20%”目标的进度。`aicommit stats clear|enable|disable` 管理同一本地数据；清除操作不可恢复。可以在用户配置中将 `metrics.enabled` 设为 `false`、指定绝对 `metrics.path`，或修改 `metrics.maxEntries`。项目配置不能覆盖这些设置，也不存在上传实现。
 
 ## 使用方法
 
@@ -257,50 +257,45 @@ aicommit config show     # 显示脱敏后的有效配置
 aicommit config validate # 校验配置，但不解析凭据
 aicommit config path     # 显示用户配置和项目配置路径
 aicommit completion bash # 向 stdout 生成 Bash 补全脚本
-aicommit metrics status  # 检查仅本地的指标状态，不上传任何内容
 aicommit stats           # 显示本地质量、延迟和 token 趋势
 aicommit stats clear     # 永久清除本地指标历史
 aicommit                 # 在当前目录生成提交信息并提交
 aicommit /path/to/repo   # 或指定目标目录
-aicommit --split         # 选择 staged / all 范围并拆分逻辑提交
-aicommit --split=staged  # 只拆分已审阅的 index 快照
-aicommit --split=all     # 拆分完整工作区快照
-aicommit --split=staged --split-hunks # 实验性同文件 hunk 拆分
+aicommit split run       # 选择 staged / all 范围并拆分逻辑提交
+aicommit split run --scope=staged # 只拆分已审阅的 index 快照
+aicommit split run --scope=all # 拆分完整工作区快照
+aicommit split run --scope=staged --split-hunks # 实验性同文件 hunk 拆分
 aicommit --dry-run       # 生成并审阅，但不创建提交
-aicommit --split --dry-run # 审阅拆分计划，但不创建提交
+aicommit split run --dry-run # 审阅拆分计划，但不创建提交
 aicommit --yes           # 非交互提交已明确暂存的变更
 aicommit --yes --dry-run # 非交互预览所有变更；退出时恢复暂存状态
-aicommit --split=all --yes # 非交互规划并提交所有工作区变更
+aicommit split run --scope=all --yes # 非交互规划并提交所有工作区变更
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
-aicommit split --resume --yes # 恢复中断的拆分事务
-aicommit split --abort --yes # 丢弃过期 checkpoint；保留提交和变更
+aicommit split resume --yes # 恢复中断的拆分事务
+aicommit split abort --yes # 丢弃过期 checkpoint；保留提交和变更
 aicommit --reasoning=low # 流式显示低强度推理；Ctrl+O 展开或收起
 aicommit --no-reasoning # Provider / 模型支持时显式关闭推理
 aicommit -l zh           # 提交信息语言
 aicommit -p deepseek     # 切换到名为 "deepseek" 的 Provider
 aicommit --yes --output=json # 向 stdout 输出一个通过 schema 校验的 JSON 结果
-aicommit -c              # 检查已配置 LLM 是否可访问
-aicommit -c -p openrouter # 单独检查 "openrouter" Provider
 aicommit -h              # 帮助
 ```
 
-| 选项               | 说明                                                                |
-| ------------------ | ------------------------------------------------------------------- |
-| `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                          |
-| `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                  |
-| `-s`, `--split`    | 选择范围并拆分变更；使用 `--split=staged\|all` 显式选择范围         |
-| `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                            |
-| `--scope`          | `aicommit split plan` 的范围：`staged` 或 `all`                     |
-| `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
-| `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                              |
-| `-y`, `--yes`      | 不提示直接接受；普通模式要求变更已明确暂存                          |
-| `--reasoning`      | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`       |
-| `--no-reasoning`   | 所选 Provider / 模型支持时显式关闭推理                              |
-| `--output`         | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes` |
-| `-c`, `--check`    | Ping Provider，验证端点 / Key / 模型；失败时使用稳定的分类退出码    |
-| `-v`, `--version`  | 显示版本                                                            |
-| `-h`, `--help`     | 显示帮助                                                            |
+| 选项               | 说明                                                                    |
+| ------------------ | ----------------------------------------------------------------------- |
+| `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                              |
+| `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                      |
+| `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                                |
+| `--scope`          | `aicommit split run` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
+| `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径        |
+| `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                                  |
+| `-y`, `--yes`      | 不提示直接接受；普通模式要求变更已明确暂存                              |
+| `--reasoning`      | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`           |
+| `--no-reasoning`   | 所选 Provider / 模型支持时显式关闭推理                                  |
+| `--output`         | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes`     |
+| `-v`, `--version`  | 显示版本                                                                |
+| `-h`, `--help`     | 显示帮助                                                                |
 
 ### 配置检查
 
@@ -323,7 +318,7 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### 机器可读输出
 
-脚本和 CI 请使用 `--output=json`。提交和 split 流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`--check --output=json` 与 `doctor --output=json` 不要求 `--yes`。
+脚本和 CI 请使用 `--output=json`。提交和 split 流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`doctor --output=json` 不要求 `--yes`。
 
 ```json
 {
@@ -369,11 +364,11 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 稳定错误分类、Homebrew / npm 校验失败、split 恢复、预设兼容和扩展隔离错误，请参阅双语[故障排查矩阵](docs/troubleshooting.md)。
 
-基本流程：读取暂存 diff，发送给 AI，然后让你选择**接受**（Enter）、**编辑**（`e`）或**取消**（`n`）。如果没有暂存内容，但工作区存在未暂存或未跟踪变更，AICommit 会先询问是否为你暂存——可以一次性执行 `git add -A`，也可以逐文件选择——然后继续。如果一部分变更已经暂存、另一部分尚未暂存，AICommit 会询问是否将其余变更纳入本次提交。
+基本流程：读取暂存 diff，发送给 AI，然后让你选择**接受**（Enter）、**编辑**（`e`）或**取消**（`n`）。如果没有暂存内容，但工作区存在未暂存或未跟踪变更，AICommit 会先询问是否为你暂存——可以一次性执行 `git add -A`，也可以逐文件选择——然后继续。一旦存在暂存内容，就以该 index 快照为准，其余工作区变更保持不动。
 
 `--dry-run` 使用相同审阅流程，但会在 `git commit` 前停止。AICommit 在执行期间做出的任何暂存操作都会在退出前恢复。取消和失败也使用同一 index 事务；如果另一个进程并发修改了 index，AICommit 会保持其现状，不会覆盖对方的工作。
 
-发送仓库内容前，AICommit 会检测常见敏感文件名、私钥材料、云访问 Key ID 和疑似凭据赋值。split 模式会扫描每个未跟踪普通文件的完整字节流，同时保持模型预览受限；请求复用已捕获的预览，而不会再次打开文件。默认保护请求会省略敏感文件 / 私钥段落并脱敏检测到的值；你可以取消，也可以明确发送原始 diff。未跟踪的符号链接和非普通文件绝不会被打开预览。在非交互 split 模式中，检测会在 API 调用前以 fail closed 方式停止，因为 `--split --yes` 否则可能自动暂存敏感文件。这是一层安全网，不能替代专用的秘密扫描器。
+发送仓库内容前，AICommit 会检测常见敏感文件名、私钥材料、云访问 Key ID 和疑似凭据赋值。split 模式会扫描每个未跟踪普通文件的完整字节流，同时保持模型预览受限；请求复用已捕获的预览，而不会再次打开文件。默认保护请求会省略敏感文件 / 私钥段落并脱敏检测到的值；你可以取消，也可以明确发送原始 diff。未跟踪的符号链接和非普通文件绝不会被打开预览。在非交互 split 模式中，检测会在 API 调用前以 fail closed 方式停止，因为 `split run --scope=all --yes` 否则可能自动暂存敏感文件。这是一层安全网，不能替代专用的秘密扫描器。
 
 生成期间会为暂存 index（或完整 split 工作区，包括未跟踪文件字节）计算指纹，并在提交前立即再次校验。如果状态发生变化，提交会被中止，避免生成的消息描述另一份快照。
 
@@ -396,11 +391,11 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### 拆分提交模式
 
-`--split` 会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更分组。边界必须明确时请使用 `--split=staged` 或 `--split=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。扩展校验错误会随计划显示，必须通过编辑或重新生成修复后才能提交。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
+`aicommit split run` 会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。扩展校验错误会随计划显示，必须通过编辑或重新生成修复后才能提交。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
 
 如需可审计的两步流程，使用 `aicommit split plan --scope=staged|all --file=<path>` 导出版本化 JSON 工件，再用 `aicommit split apply --file=<path>` 在接触 index 前重新校验 base commit、变更集和内容指纹。计划文件应保存在工作区之外或 `.git` 下，避免被纳入自身计划。
 
-执行过程使用临时 index，并在 `.git/aicommit` 下保存不含代码内容的 checkpoint。hook、Git 错误、中断或崩溃发生后，已完成提交仍保留在历史中，待处理快照也会保留；失败报告会显示已 checkpoint、执行中、待处理，以及当前工作区 / index 状态。解决问题后运行 `aicommit split --resume`。恢复流程会先协调“提交完成后崩溃”的可能窗口，再创建任何新提交，因此不会重复或遗漏已完成分组。如果你通过其他 Git 流程有意完成或替换了中断工作，请运行 `aicommit split --abort`；它只删除过期 checkpoint，绝不会改写 HEAD、index 或工作区。新的 split 提交流程会在联系 Provider 前检测现有 checkpoint。如果规划或预检在第一组之前失败，不会创建任何 split 提交，真实 index 也保持不变。
+执行过程使用临时 index，并在 `.git/aicommit` 下保存不含代码内容的 checkpoint。hook、Git 错误、中断或崩溃发生后，已完成提交仍保留在历史中，待处理快照也会保留；失败报告会显示已 checkpoint、执行中、待处理，以及当前工作区 / index 状态。解决问题后运行 `aicommit split resume`。恢复流程会先协调“提交完成后崩溃”的可能窗口，再创建任何新提交，因此不会重复或遗漏已完成分组。如果你通过其他 Git 流程有意完成或替换了中断工作，请运行 `aicommit split abort`；它只删除过期 checkpoint，绝不会改写 HEAD、index 或工作区。新的 split 提交流程会在联系 Provider 前检测现有 checkpoint。如果规划或预检在第一组之前失败，不会创建任何 split 提交，真实 index 也保持不变。
 
 split 默认仍按文件拆分。`--split-hunks` 可选择性启用实验性的同文件拆分，适用于包含多个 unified-diff hunk 的 tracked 文本修改。JSON 计划和 checkpoint 只保存 hunk ID、行范围和哈希，不保存 patch 内容。第一次提交前，AICommit 会把每个选中 patch 应用到临时 index，并要求最终 tree 精确还原捕获的目标 blob；解析、patch、二进制 / mode-change 或无损校验失败时会退回文件级计划。hunk 执行绝不会修改工作区。
 
