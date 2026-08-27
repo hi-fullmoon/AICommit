@@ -4,6 +4,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the Homebrew distribution channel; install and upgrade AICommit through npm.
+
 ## [1.5.1] - 2026-08-27
 
 ### Fixed

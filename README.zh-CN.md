@@ -32,16 +32,9 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 npm install --global @hifullmoon/aicommit
 ```
 
-或使用 Homebrew：
-
-```bash
-brew tap hi-fullmoon/aicommit https://github.com/hi-fullmoon/AICommit.git
-brew install hi-fullmoon/aicommit/aicommit
-```
-
 需要 Node.js >= 18。
 
-安装、升级、签名校验与回滚请参阅双语[分发指南](docs/distribution.md)。npm 和 Homebrew 两条安装路径都有自动化安装冒烟测试。
+安装、升级、签名校验与回滚请参阅双语[分发指南](docs/distribution.md)。npm package 带有自动化安装冒烟测试。
 
 如需直接安装源码检出版本，请在仓库根目录运行 `npm install --global .`。
 
@@ -53,7 +46,7 @@ brew install hi-fullmoon/aicommit/aicommit
 aicommit setup
 ```
 
-向导会引导你从当前生效的版本化预设清单中选择 Provider（内置预设包括 OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和模型、选择提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit.config.json`；如果已有文件格式错误，替换前会先备份。
+向导会引导你从当前生效的版本化预设清单中选择 Provider（内置预设包括 OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和一个或多个模型、选择默认模型和提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit.config.json`；如果已有文件格式错误或属于旧格式，替换前会先备份。
 
 如需手动配置，请从 [.aicommit.config.example.json](.aicommit.config.example.json) 开始。AICommit 先加载用户配置，再将 `./.aicommit.config.json` 中白名单内的生成偏好深度合并到用户配置之上。项目配置可以设置 `language`、`commitPolicy`、`stripFiles`、`temperature`，也可以降低 diff、token、timeout 或仓库上下文上限。项目拥有的 `prompt` 默认会被忽略，除非用户配置明确设置 `allowProjectPrompt: true`。连接或 Provider 字段（包括 `apiKeyEnv`）、推理请求控制、未知字段，以及任何试图提高上限的配置，都会被忽略并给出警告。这样可以防止克隆的仓库重定向已鉴权请求，或在不知情的情况下扩大成本和数据范围。
 
@@ -61,77 +54,80 @@ aicommit setup
 
 AICommit 也可以读取操作系统上已经配置的 Git credential helper。启用 `credentialHelper.enabled`，通过常规 Git/系统凭据流程保存 Provider 凭据，AICommit 就会在不弹出输入提示的情况下调用 `git credential fill`。查询用户名默认为 `aicommit`，可通过 `credentialHelper.username` 修改。凭据解析顺序为：环境变量 → Git credential helper → 用户配置中的明文凭据 → 无密钥 localhost。项目配置不能启用 credential helper，也不能选择凭据来源。
 
-可以定义多个 Provider，并在运行时通过 `-p` / `--provider` 切换：
+每个 Provider 可以拥有多个命名模型配置。通过 `-p` / `--provider` 切换 Provider，通过 `-m` / `--model` 选择该 Provider 下的模型：
 
 ```json
 {
+  "schemaVersion": 1,
   "defaultProvider": "minimax",
-
   "providers": {
     "minimax": {
       "providerType": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKeyEnv": "MINIMAX_API_KEY",
-      "modelId": "MiniMax-M3",
-      "extraBody": {
-        "thinking": { "type": "disabled" },
-        "reasoning_split": true
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "label": "MiniMax M3",
+          "modelId": "MiniMax-M3",
+          "extraBody": {
+            "thinking": { "type": "disabled" },
+            "reasoning_split": true
+          }
+        }
       }
     },
     "deepseek": {
       "providerType": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "modelId": "deepseek-v4-flash"
-    },
-    "openrouter": {
-      "providerType": "openrouter",
-      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "apiKeyEnv": "OPENROUTER_API_KEY",
-      "modelId": "openai/gpt-4o-mini"
-    },
-    "kimi-code": {
-      "providerType": "custom",
-      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "chat",
+      "models": {
+        "chat": { "modelId": "deepseek-v4-flash" },
+        "reasoner": { "modelId": "deepseek-v4-pro" }
+      }
     }
   }
 }
 ```
 
-选中 Provider 的配置会深度合并到顶层字段之上，因此共享设置（`language`、`commitPolicy`、`temperature`、`maxTokens` 等）只需配置一次。未指定 `-p` 时使用 `defaultProvider`；如果没有 `defaultProvider`，则使用 `providers` 中的第一项。旧版的扁平单模型配置（顶层 `apiUrl` / `apiKey` / `modelId`，且没有 `providers`）仍然兼容。
+`schemaVersion`、`defaultProvider`、`providers`，以及每个 Provider 的 `providerType`、`apiUrl`、`defaultModel` 和非空 `models` 都是必填项。未指定 `-p` 时选择 `defaultProvider`；未指定 `-m` 时选择该 Provider 的 `defaultModel`。模型配置会继承全局生成设置和 Provider 连接设置，并可覆盖 `temperature`、`maxTokens`、`timeoutMs`、`reasoning` 与 `extraBody`。Provider 名和模型名是稳定的本地别名，`modelId` 才是发送给 API 的模型标识。
 
-| 配置项               | 说明                                                                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `providers`          | 命名 Provider 配置（`apiUrl` / `apiKey` / `modelId` / ...）                                                                             |
-| `defaultProvider`    | 未指定 `-p` 时使用的 Provider（原字段名为 `default`）                                                                                   |
-| `apiUrl`             | OpenAI 兼容的 Chat Completions 端点                                                                                                     |
-| `apiKey`             | API Key；本地模型允许使用空字符串                                                                                                       |
-| `apiKeyEnv`          | 保存 API Key 的环境变量名，优先于 `apiKey`（默认：空）                                                                                  |
-| `modelId`            | 模型标识符                                                                                                                              |
-| `providerType`       | 可选的适配器覆盖：`openai`、`openrouter`、`deepseek`、`minimax`、`ollama`、`custom` 或用户安装的 `extension:<id>`；未设置时根据端点推断 |
-| `commitPolicy`       | 版本化提交规则：type、scope、主题长度、正文、破坏性变更和语言                                                                           |
-| `prompt`             | 用户批准的可选指导，追加到权威结构化策略之后（默认：空）                                                                                |
-| `allowProjectPrompt` | 是否接受项目配置中的 `prompt`，只能由用户配置启用（默认：`false`）                                                                      |
-| `repositoryContext`  | 近期提交、包边界、可信约定和 commitlint 检测的总预算与分类预算                                                                          |
-| `language`           | 提交信息语言：`zh` 或 `en`（默认：`zh`）                                                                                                |
-| `temperature`        | 采样温度（默认：`0.3`）                                                                                                                 |
-| `maxTokens`          | 最大响应 token 数（默认：`1024`）                                                                                                       |
-| `timeoutMs`          | 单次请求超时，单位为毫秒（默认：`120000`）                                                                                              |
-| `retry`              | 瞬时错误重试限制：`maxAttempts`、`baseDelayMs`、`maxDelayMs`（默认：`3`、`500`、`5000`）                                                |
-| `credentialHelper`   | 通过 `enabled` 和 `username` 选择性启用 `git credential fill`（默认：`false`、`aicommit`）                                              |
-| `metrics`            | 仅本地指标控制：`enabled`、绝对路径 `path`（空表示默认路径）、`maxEntries`（默认：`true`、空、`500`）                                   |
-| `extensions`         | 用户拥有的绝对扩展清单路径，以及执行超时和上下文上限；项目配置不能启用或重定向扩展                                                      |
-| `maxDiffChars`       | 单次发送给模型的 diff 字符数；超限后改为 `--stat` 摘要和截断的 hunk（默认：`30000`）                                                    |
-| `maxFileDiffChars`   | 单文件 diff 上限；超限文件只保留前部 hunk，避免一个大文件挤占全部上下文（默认：`3000`）                                                 |
-| `splitMaxDiffChars`  | 拆分规划请求的 diff 字符数；规划阶段需要的 hunk 细节少于最终信息生成（默认：`16000`）                                                   |
-| `splitMaxPlanFiles`  | 交给拆分规划器的最大变更文件数；超出部分归入兜底提交（默认：`100`）                                                                     |
-| `diffContextLines`   | 每个 diff hunk 周围的上下文行数（`git diff --unified=<n>`）；越小越节省 token（默认：`1`）                                              |
-| `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖）   |
-| `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                   |
-| `extraBody`          | 合并到请求体的 Provider 专用 JSON 字段，但不允许覆盖 `model` / `messages`（默认：`{}`）；除非显式配置，标准请求不会发送厂商扩展字段     |
-| `reasoning`          | 推理控制：`mode`、`effort`、`maxTokens` 和 `maxDisplayChars`；默认为 `mode: "on"`，并自动流式展示推理                                   |
+这是唯一支持的用户配置格式。旧版扁平配置或 Provider 级 `modelId` 会被直接拒绝；请运行 `aicommit setup` 或显式迁移。
+
+| 配置项               | 说明                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaVersion`      | 必填的用户配置 schema 版本，当前为 `1`                                                                                                |
+| `providers`          | 命名 Provider 配置；每项包含连接设置、`defaultModel` 和非空 `models`                                                                  |
+| `defaultProvider`    | 必填；未指定 `-p` 时使用的 Provider 别名                                                                                              |
+| `apiUrl`             | OpenAI 兼容的 Chat Completions 端点                                                                                                   |
+| `apiKey`             | API Key；本地模型允许使用空字符串                                                                                                     |
+| `apiKeyEnv`          | 保存 API Key 的环境变量名，优先于 `apiKey`（默认：空）                                                                                |
+| `providerType`       | 必填适配器：`openai`、`openrouter`、`deepseek`、`minimax`、`ollama`、`custom` 或用户安装的 `extension:<id>`                           |
+| `defaultModel`       | 必填；未指定 `-m` 时使用的模型别名                                                                                                    |
+| `models`             | 一个 Provider 下的命名模型配置                                                                                                        |
+| `modelId`            | 每个模型配置中必填的 API 模型标识                                                                                                     |
+| `commitPolicy`       | 版本化提交规则：type、scope、主题长度、正文、破坏性变更和语言                                                                         |
+| `prompt`             | 用户批准的可选指导，追加到权威结构化策略之后（默认：空）                                                                              |
+| `allowProjectPrompt` | 是否接受项目配置中的 `prompt`，只能由用户配置启用（默认：`false`）                                                                    |
+| `repositoryContext`  | 近期提交、包边界、可信约定和 commitlint 检测的总预算与分类预算                                                                        |
+| `language`           | 提交信息语言：`zh` 或 `en`（默认：`zh`）                                                                                              |
+| `temperature`        | 采样温度（默认：`0.3`）                                                                                                               |
+| `maxTokens`          | 最大响应 token 数（默认：`1024`）                                                                                                     |
+| `timeoutMs`          | 单次请求超时，单位为毫秒（默认：`120000`）                                                                                            |
+| `retry`              | 瞬时错误重试限制：`maxAttempts`、`baseDelayMs`、`maxDelayMs`（默认：`3`、`500`、`5000`）                                              |
+| `credentialHelper`   | 通过 `enabled` 和 `username` 选择性启用 `git credential fill`（默认：`false`、`aicommit`）                                            |
+| `metrics`            | 仅本地指标控制：`enabled`、绝对路径 `path`（空表示默认路径）、`maxEntries`（默认：`true`、空、`500`）                                 |
+| `extensions`         | 用户拥有的绝对扩展清单路径，以及执行超时和上下文上限；项目配置不能启用或重定向扩展                                                    |
+| `maxDiffChars`       | 单次发送给模型的 diff 字符数；超限后改为 `--stat` 摘要和截断的 hunk（默认：`30000`）                                                  |
+| `maxFileDiffChars`   | 单文件 diff 上限；超限文件只保留前部 hunk，避免一个大文件挤占全部上下文（默认：`3000`）                                               |
+| `splitMaxDiffChars`  | 拆分规划请求的 diff 字符数；规划阶段需要的 hunk 细节少于最终信息生成（默认：`16000`）                                                 |
+| `splitMaxPlanFiles`  | 交给拆分规划器的最大变更文件数；超出部分归入兜底提交（默认：`100`）                                                                   |
+| `diffContextLines`   | 每个 diff hunk 周围的上下文行数（`git diff --unified=<n>`）；越小越节省 token（默认：`1`）                                            |
+| `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖） |
+| `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                 |
+| `extraBody`          | 模型配置中合并到请求体的 JSON 字段，但不允许覆盖 `model` / `messages`（默认：`{}`）                                                   |
+| `reasoning`          | 全局或模型级推理控制：`mode`、`effort`、`maxTokens` 和 `maxDisplayChars`；默认为 `mode: "on"`，并自动流式展示推理                     |
 
 AICommit 支持 OpenAI、DeepSeek、[OpenRouter](https://openrouter.ai)、MiniMax、[Kimi Code](https://www.kimi.com/code/docs/)、Ollama（原生 `/api/chat` 或 OpenAI 兼容 `/v1/chat/completions`）、LiteLLM，以及其他兼容端点。远程端点必须使用 HTTPS；明文 HTTP 只允许 localhost / loopback。
 
@@ -145,13 +141,17 @@ export KIMI_API_KEY='your-kimi-code-api-key'
 
 ```json
 {
+  "schemaVersion": 1,
   "defaultProvider": "kimi-code",
   "providers": {
     "kimi-code": {
       "providerType": "custom",
       "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
       "apiKeyEnv": "KIMI_API_KEY",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "default",
+      "models": {
+        "default": { "modelId": "kimi-for-coding" }
+      }
     }
   }
 }
@@ -298,6 +298,7 @@ aicommit --reasoning=low # 流式显示低强度推理；Ctrl+O 展开或收起
 aicommit --no-reasoning # Provider / 模型支持时显式关闭推理
 aicommit -l zh           # 提交信息语言
 aicommit -p deepseek     # 切换到名为 "deepseek" 的 Provider
+aicommit -p deepseek -m reasoner # 使用其中名为 "reasoner" 的模型配置
 aicommit --yes --output=json # 向 stdout 输出一个通过 schema 校验的 JSON 结果
 aicommit -h              # 帮助
 ```
@@ -306,6 +307,7 @@ aicommit -h              # 帮助
 | ------------------ | ------------------------------------------------------------------- |
 | `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                          |
 | `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                  |
+| `-m`, `--model`    | 使用所选 Provider 下的命名模型配置                                  |
 | `--split-hunks`    | 启用实验性同文件文本 hunk 规划；默认关闭                            |
 | `--scope`          | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
 | `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
@@ -319,7 +321,7 @@ aicommit -h              # 帮助
 
 ### 配置检查
 
-`aicommit config show|validate|path` 可以在仓库外运行，并接受可选目标目录。`show` 使用与提交生成相同的用户 / 项目 / 团队策略信任过滤和 Provider 选择，但会递归遮蔽秘密。`validate` 在不读取环境凭据、不调用 Git credential helper 的情况下解析、合并并校验配置，因此 `aicommit config validate --output=json` 可安全用于 CI。即使配置文件格式错误，`path` 仍会报告用户配置、项目配置和团队策略路径。`show` 与 `validate` 都接受 `--provider=<name>`。
+`aicommit config show|validate|path` 可以在仓库外运行，并接受可选目标目录。`show` 使用与提交生成相同的用户 / 项目 / 团队策略信任过滤和 Provider / 模型选择，但会递归遮蔽秘密。`validate` 在不读取环境凭据、不调用 Git credential helper 的情况下解析、合并并校验配置，因此 `aicommit config validate --output=json` 可安全用于 CI。即使配置文件格式错误，`path` 仍会报告用户配置、项目配置和团队策略路径。`show` 与 `validate` 都接受 `--provider=<name>` 和 `--model=<name>`。
 
 ### Shell 补全
 
@@ -380,11 +382,11 @@ aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 
 ### 诊断
 
-`aicommit doctor` 会检查当前 Node.js 与 Git 版本、已加载的配置来源、端点安全、所选适配器能力、脱敏后的凭据来源，以及实时 Provider 连接。它会显示 `env:OPENAI_API_KEY`、`git credential helper`、`keyless localhost` 等来源标签，但绝不会显示凭据值。端点 userinfo、疑似凭据的查询参数和 URL fragment 也会从正常输出及凭据解析错误中脱敏。使用 `aicommit doctor -p <name>` 选择已配置 Provider，或在自动化中使用 `aicommit doctor --output=json`。
+`aicommit doctor` 会检查当前 Node.js 与 Git 版本、已加载的配置来源、端点安全、所选适配器能力、脱敏后的凭据来源，以及实时 Provider 连接。它会显示 `env:OPENAI_API_KEY`、`git credential helper`、`keyless localhost` 等来源标签，但绝不会显示凭据值。端点 userinfo、疑似凭据的查询参数和 URL fragment 也会从正常输出及凭据解析错误中脱敏。使用 `aicommit doctor -p <provider> -m <model>` 选择已配置的 Provider / 模型组合，或在自动化中使用 `aicommit doctor --output=json`。
 
-稳定错误分类、Homebrew / npm 校验失败、split 恢复、预设兼容和扩展隔离错误，请参阅双语[故障排查矩阵](docs/troubleshooting.md)。
+稳定错误分类、npm 校验失败、split 恢复、预设兼容和扩展隔离错误，请参阅双语[故障排查矩阵](docs/troubleshooting.md)。
 
-基本流程：读取暂存 diff，发送给 AI，然后让你选择**接受**（Enter）、**编辑**（`e`）或**取消**（`n`）。如果没有暂存内容，但工作区存在未暂存或未跟踪变更，AICommit 会先询问是否为你暂存——可以一次性执行 `git add -A`，也可以逐文件选择——然后继续。一旦存在暂存内容，就以该 index 快照为准，其余工作区变更保持不动。
+基本流程：读取暂存 diff，发送给 AI，然后让你选择**接受**（Enter）、**编辑**（`e`）或**取消**（`n`）。在交互式选择提示中，按 `q` 会立即退出。如果没有暂存内容，但工作区存在未暂存或未跟踪变更，AICommit 会先询问是否为你暂存——可以一次性执行 `git add -A`，也可以逐文件选择——然后继续。一旦存在暂存内容，就以该 index 快照为准，其余工作区变更保持不动。
 
 `--dry-run` 使用相同审阅流程，但会在 `git commit` 前停止。AICommit 在执行期间做出的任何暂存操作都会在退出前恢复。取消和失败也使用同一 index 事务；如果另一个进程并发修改了 index，AICommit 会保持其现状，不会覆盖对方的工作。
 
@@ -421,7 +423,7 @@ split 默认仍按文件拆分。`--split-hunks` 可选择性启用实验性的�
 
 ## 开发与发布
 
-本地开发和 Pull Request 检查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告请参阅 [SECURITY.md](SECURITY.md)，维护者发布流程请参阅 [RELEASING.md](RELEASING.md)，npm / Homebrew 安装和用户回滚请参阅双语[分发指南](docs/distribution.md)。发布通过 npm Trusted Publishing 生成 provenance，校验精确的 package tarball，并在发布后执行 Homebrew 冒烟测试。`npm run eval` 会运行匿名本地质量语料，覆盖单一与混合变更、rename、生成文件、长 diff、中英文输出和格式错误的弱模型候选；该命令也是 `npm run ci` 的一部分。
+本地开发和 Pull Request 检查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)，私密漏洞报告请参阅 [SECURITY.md](SECURITY.md)，维护者发布流程请参阅 [RELEASING.md](RELEASING.md)，npm 安装和用户回滚请参阅双语[分发指南](docs/distribution.md)。发布通过 npm Trusted Publishing 生成 provenance，并发布经过校验的精确 package tarball。`npm run eval` 会运行匿名本地质量语料，覆盖单一与混合变更、rename、生成文件、长 diff、中英文输出和格式错误的弱模型候选；该命令也是 `npm run ci` 的一部分。
 
 ## 许可证
 

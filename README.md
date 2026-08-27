@@ -30,16 +30,9 @@ These screenshots were captured from real interactive terminal sessions in this 
 npm install --global @hifullmoon/aicommit
 ```
 
-Or install with Homebrew:
-
-```bash
-brew tap hi-fullmoon/aicommit https://github.com/hi-fullmoon/AICommit.git
-brew install hi-fullmoon/aicommit/aicommit
-```
-
 Requires Node.js >= 18.
 
-See the bilingual [installation, upgrade, signature-verification, and rollback guide](docs/distribution.md). Both npm and Homebrew paths have automated install smoke tests.
+See the bilingual [installation, upgrade, signature-verification, and rollback guide](docs/distribution.md). The npm package has an automated installation smoke test.
 
 To install a source checkout instead, run `npm install --global .` from the repository root.
 
@@ -51,7 +44,7 @@ The fastest way is the interactive wizard:
 aicommit setup
 ```
 
-It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key/model, choosing the commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed existing file is backed up before replacement.
+It walks you through picking a provider from the active versioned preset manifest (bundled presets include OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key and one or more models, choosing a default model and commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit.config.json`); a malformed or old-format existing file is backed up before replacement.
 
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
@@ -59,56 +52,59 @@ To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and lea
 
 AICommit can also read from the Git credential helper already configured on your OS. Enable `credentialHelper.enabled`, store the provider credential through your normal Git/OS credential workflow, and AICommit will call `git credential fill` without prompting. The lookup username defaults to `aicommit` and can be changed with `credentialHelper.username`. Credential resolution order is environment variable → Git credential helper → plaintext user config → keyless localhost. A project config cannot enable a helper or select a credential source.
 
-Multiple providers can be defined and switched at runtime with `-p` / `--provider`:
+Each provider owns one or more named model profiles. Switch providers with `-p` / `--provider` and models within that provider with `-m` / `--model`:
 
 ```json
 {
+  "schemaVersion": 1,
   "defaultProvider": "minimax",
-
   "providers": {
     "minimax": {
       "providerType": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKeyEnv": "MINIMAX_API_KEY",
-      "modelId": "MiniMax-M3",
-      "extraBody": {
-        "thinking": { "type": "disabled" },
-        "reasoning_split": true
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "label": "MiniMax M3",
+          "modelId": "MiniMax-M3",
+          "extraBody": {
+            "thinking": { "type": "disabled" },
+            "reasoning_split": true
+          }
+        }
       }
     },
     "deepseek": {
       "providerType": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "modelId": "deepseek-v4-flash"
-    },
-    "openrouter": {
-      "providerType": "openrouter",
-      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "apiKeyEnv": "OPENROUTER_API_KEY",
-      "modelId": "openai/gpt-4o-mini"
-    },
-    "kimi-code": {
-      "providerType": "custom",
-      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "chat",
+      "models": {
+        "chat": { "modelId": "deepseek-v4-flash" },
+        "reasoner": { "modelId": "deepseek-v4-pro" }
+      }
     }
   }
 }
 ```
 
-The selected provider's values are deep-merged over the top-level keys, so shared settings (`language`, `commitPolicy`, `temperature`, `maxTokens`, ...) only need to be set once. Without `-p`, the `defaultProvider` is used (or the first entry in `providers` if `defaultProvider` is omitted). A flat single-model config (top-level `apiUrl`/`apiKey`/`modelId`, no `providers`) still works as before.
+`schemaVersion`, `defaultProvider`, `providers`, and every provider's `providerType`, `apiUrl`, `defaultModel`, and non-empty `models` map are required. Without `-p`, AICommit selects `defaultProvider`; without `-m`, it selects that provider's `defaultModel`. Model profiles inherit global generation settings and provider connection settings, then may override `temperature`, `maxTokens`, `timeoutMs`, `reasoning`, and `extraBody`. Provider and model names are stable local aliases; `modelId` is the identifier sent to the API.
+
+This is the only supported user-config shape. Earlier flat or provider-level `modelId` configurations are rejected; run `aicommit setup` or migrate them explicitly.
 
 | Key                  | Description                                                                                                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `providers`          | Named provider configs (`apiUrl`/`apiKey`/`modelId`/...)                                                                                                                                                                     |
-| `defaultProvider`    | Provider used when `-p` is not given (renamed from `default`)                                                                                                                                                                |
+| `schemaVersion`      | Required user-config schema version; currently `1`                                                                                                                                                                           |
+| `providers`          | Named provider configs; each contains connection settings, `defaultModel`, and a non-empty `models` map                                                                                                                      |
+| `defaultProvider`    | Required provider alias used when `-p` is not given                                                                                                                                                                          |
 | `apiUrl`             | OpenAI-compatible chat completions endpoint                                                                                                                                                                                  |
 | `apiKey`             | API key (empty string allowed for local models)                                                                                                                                                                              |
 | `apiKeyEnv`          | Environment variable containing the API key; takes precedence over `apiKey` (default: empty)                                                                                                                                 |
-| `modelId`            | Model identifier                                                                                                                                                                                                             |
-| `providerType`       | Optional adapter override: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, `custom`, or a user-installed `extension:<id>`; otherwise inferred from the endpoint                                                     |
+| `providerType`       | Required adapter: `openai`, `openrouter`, `deepseek`, `minimax`, `ollama`, `custom`, or a user-installed `extension:<id>`                                                                                                    |
+| `defaultModel`       | Required model alias used when `-m` is not given                                                                                                                                                                             |
+| `models`             | Named model profiles under one provider                                                                                                                                                                                      |
+| `modelId`            | Required API model identifier inside each model profile                                                                                                                                                                      |
 | `commitPolicy`       | Versioned commit rules for types, scope, subject length, body, breaking changes, and language                                                                                                                                |
 | `prompt`             | Optional user-approved guidance appended to the authoritative structured policy (default: empty)                                                                                                                             |
 | `allowProjectPrompt` | User-owned opt-in for accepting `prompt` from project config (default: `false`)                                                                                                                                              |
@@ -128,8 +124,8 @@ The selected provider's values are deep-merged over the top-level keys, so share
 | `diffContextLines`   | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `1`)                                                                                                                |
 | `stripFiles`         | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper                                                       |
-| `extraBody`          | Extra provider-specific JSON fields merged into the request body, except `model`/`messages` (default: `{}`); standard requests send no vendor extensions unless explicitly configured                                        |
-| `reasoning`          | Reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically                                                                                       |
+| `extraBody`          | Model-profile JSON fields merged into the request body, except `model`/`messages` (default: `{}`)                                                                                                                            |
+| `reasoning`          | Global or model-profile reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically                                                               |
 
 Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, [Kimi Code](https://www.kimi.com/code/docs/), Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
 
@@ -143,13 +139,17 @@ export KIMI_API_KEY='your-kimi-code-api-key'
 
 ```json
 {
+  "schemaVersion": 1,
   "defaultProvider": "kimi-code",
   "providers": {
     "kimi-code": {
       "providerType": "custom",
       "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
       "apiKeyEnv": "KIMI_API_KEY",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "default",
+      "models": {
+        "default": { "modelId": "kimi-for-coding" }
+      }
     }
   }
 }
@@ -296,6 +296,7 @@ aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses
 aicommit --no-reasoning # explicitly disable reasoning when supported
 aicommit -l zh           # commit message language
 aicommit -p deepseek     # switch to the "deepseek" provider
+aicommit -p deepseek -m reasoner # use its "reasoner" model profile
 aicommit --yes --output=json # emit one schema-validated JSON result on stdout
 aicommit -h              # help
 ```
@@ -304,6 +305,7 @@ aicommit -h              # help
 | ------------------ | ---------------------------------------------------------------------------- |
 | `-l`, `--lang`     | Commit message language (`zh` or `en`)                                       |
 | `-p`, `--provider` | Use the named provider from `providers`                                      |
+| `-m`, `--model`    | Use a named model profile from the selected provider                         |
 | `--split-hunks`    | Opt in to experimental same-file text-hunk planning; disabled by default     |
 | `--scope`          | `staged` or `all` scope for `aicommit split` and `aicommit split plan`       |
 | `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`          |
@@ -317,7 +319,7 @@ aicommit -h              # help
 
 ### Configuration inspection
 
-`aicommit config show|validate|path` can run outside a repository and accepts an optional target directory. `show` applies the same user/project/team-policy trust filtering and provider selection as commit generation, but recursively masks secrets. `validate` parses, merges, and validates configuration without reading environment credentials or invoking Git credential helpers, making `aicommit config validate --output=json` safe for CI. `path` reports user config, project config, and team-policy locations even when a config file is malformed. `show` and `validate` accept `--provider=<name>`.
+`aicommit config show|validate|path` can run outside a repository and accepts an optional target directory. `show` applies the same user/project/team-policy trust filtering and provider/model selection as commit generation, but recursively masks secrets. `validate` parses, merges, and validates configuration without reading environment credentials or invoking Git credential helpers, making `aicommit config validate --output=json` safe for CI. `path` reports user config, project config, and team-policy locations even when a config file is malformed. `show` and `validate` accept `--provider=<name>` and `--model=<name>`.
 
 ### Shell completion
 
@@ -378,11 +380,11 @@ Stable process exits are shared by text and JSON modes:
 
 ### Diagnostics
 
-`aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Endpoint userinfo, credential-like query parameters, and fragments are also redacted from normal output and credential-resolution errors. Use `aicommit doctor -p <name>` to select a configured provider or `aicommit doctor --output=json` in automation.
+`aicommit doctor` checks the running Node.js and Git versions, loaded config sources, endpoint security, selected adapter capabilities, redacted credential source, and a live provider connection. It prints source labels such as `env:OPENAI_API_KEY`, `git credential helper`, or `keyless localhost`, never the credential value. Endpoint userinfo, credential-like query parameters, and fragments are also redacted from normal output and credential-resolution errors. Use `aicommit doctor -p <provider> -m <model>` to select a configured provider/model pair or `aicommit doctor --output=json` in automation.
 
-For stable error categories, Homebrew/npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
+For stable error categories, npm verification failures, split recovery, preset compatibility, and extension isolation failures, use the bilingual [troubleshooting matrix](docs/troubleshooting.md).
 
-Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. Once anything is staged, that index snapshot is authoritative; other working-tree changes are left untouched.
+Flow: reads the staged diff, sends it to the AI, then lets you **accept** (Enter), **edit** (`e`), or **cancel** (`n`). In interactive selection prompts, `q` exits immediately. If nothing is staged but the working tree has unstaged or untracked changes, aicommit offers to stage them for you — all at once (`git add -A`) or file by file — before continuing. Once anything is staged, that index snapshot is authoritative; other working-tree changes are left untouched.
 
 `--dry-run` follows the same review flow but stops before `git commit`. Any staging performed by aicommit is restored before it exits. Cancellation and failures use the same index transaction; if another process changed the index concurrently, aicommit leaves it untouched instead of overwriting that work.
 
@@ -419,7 +421,7 @@ Split remains file-level by default. `--split-hunks` opts in to experimental sam
 
 ## Development and releases
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, [RELEASING.md](RELEASING.md) for the maintainer process, and the bilingual [distribution guide](docs/distribution.md) for npm/Homebrew installation and rollback. Releases use npm Trusted Publishing with provenance, verify the exact package tarball, and run a post-publish Homebrew smoke test. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request checks, [SECURITY.md](SECURITY.md) for private vulnerability reporting, [RELEASING.md](RELEASING.md) for the maintainer process, and the bilingual [distribution guide](docs/distribution.md) for npm installation and rollback. Releases use npm Trusted Publishing with provenance and publish the exact verified package tarball. `npm run eval` runs the anonymous local quality corpus covering single and mixed changes, renames, generated files, long diffs, Chinese/English output, and malformed weak-model candidates; it is also part of `npm run ci`.
 
 ## License
 

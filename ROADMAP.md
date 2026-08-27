@@ -43,13 +43,13 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 
 实施进度（2026-08-24）：
 
-| 版本   | 状态      | 结果摘要                                                                                          |
-| ------ | --------- | ------------------------------------------------------------------------------------------------- |
-| v1.0.x | ✅ 已完成 | 发布文件、跨平台 CI、质量门禁、打包 smoke、安全补丁与发布文档已落地                               |
-| v1.1   | ✅ 已完成 | Provider 契约、重试、机器输出、稳定退出码、doctor、凭据助手与最小化本地指标已分阶段落地           |
-| v1.2   | ✅ 已完成 | 版本化策略、受控仓库上下文、不可信数据边界、本地 eval 与质量趋势统计已分阶段落地                  |
-| v1.3   | ✅ 已完成 | 显式 split 边界、计划工件、严格预检、checkpoint/resume、hunk 实验模式与故障矩阵已落地             |
-| v1.4   | ✅ 已完成 | 配置与 completion、团队 policy、独立 preset、隔离扩展、签名/npm/Homebrew 分发及双语采用文档已落地 |
+| 版本   | 状态      | 结果摘要                                                                                |
+| ------ | --------- | --------------------------------------------------------------------------------------- |
+| v1.0.x | ✅ 已完成 | 发布文件、跨平台 CI、质量门禁、打包 smoke、安全补丁与发布文档已落地                     |
+| v1.1   | ✅ 已完成 | Provider 契约、重试、机器输出、稳定退出码、doctor、凭据助手与最小化本地指标已分阶段落地 |
+| v1.2   | ✅ 已完成 | 版本化策略、受控仓库上下文、不可信数据边界、本地 eval 与质量趋势统计已分阶段落地        |
+| v1.3   | ✅ 已完成 | 显式 split 边界、计划工件、严格预检、checkpoint/resume、hunk 实验模式与故障矩阵已落地   |
+| v1.4   | ✅ 已完成 | 配置与 completion、团队 policy、独立 preset、隔离扩展、npm 分发及双语采用文档已落地     |
 
 ### v1.0.x：可发布基线（2026-08-24 ～ 2026-09-13）
 
@@ -148,13 +148,13 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 
 ### v1.4：分发、团队采用与轻量扩展（2027-01-18 ～ 2027-02-28）
 
-状态：✅ 已于 2026-08-24 提前完成；npm 与 Homebrew 安装均有自动 smoke，签名 tag/构建证明/npm provenance 形成同一发布链路，团队 policy 本地/CI 结果一致，preset 与三类无凭据扩展接口具备兼容和回滚边界。
+状态：✅ 已于 2026-08-24 提前完成；npm 安装带有自动 smoke，版本 tag 与 npm provenance 形成发布链路，团队 policy 本地/CI 结果一致，preset 与三类无凭据扩展接口具备兼容和回滚边界。
 
 目标：降低安装和团队推广成本，在不膨胀核心的前提下开放扩展点。
 
 交付：
 
-- 提供签名 GitHub Release、npm provenance、Homebrew 安装与升级说明；
+- 提供版本化 GitHub Release、npm provenance、npm 安装与升级说明；
 - 增加 Bash/Zsh/Fish completion 和 `aicommit config show|validate|path`；
 - 提供可提交到仓库的安全 policy 模板，以及团队迁移/示例文档；
 - 将 provider preset 与核心请求逻辑解耦，preset 可独立更新并带版本与兼容性声明；
@@ -163,7 +163,7 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 
 退出门槛：
 
-- npm、Homebrew 两条安装路径都有自动 smoke test；
+- npm 安装路径有自动 smoke test；
 - 新增 provider 不需要修改核心 Git/交互流程；
 - 团队 policy 在本地和 CI 产生一致的校验结果；
 - 发布、回滚和 preset 兼容性流程都有可执行文档。
@@ -178,7 +178,7 @@ AICommit 的下一阶段目标不是扩展成通用 Git 助手，而是成为一
 | P1     | commitPolicy、受控仓库上下文、prompt-injection 防护 | JSON schema 与指标基线 |
 | P1     | split 计划/apply 分离、checkpoint 与 resume         | Git 故障注入测试       |
 | P1     | OS keychain/credential helper                       | 稳定配置与凭据抽象     |
-| P2     | shell completion、Homebrew                          | 稳定配置与发布流程     |
+| P2     | shell completion、npm 分发文档                      | 稳定配置与发布流程     |
 | P2     | 实验性 hunk 拆分、第三方扩展接口                    | split 事务与权限模型   |
 
 关键依赖链：

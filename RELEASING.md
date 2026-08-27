@@ -1,13 +1,12 @@
 # Releasing AICommit
 
-AICommit 只维护两条发布渠道：npm 与 Homebrew。GitHub Release 用来触发发布工作流，不额外上传构建产物。
+AICommit 仅通过 npm 发布。推送 `v*` tag 是 CI 与发布工作流的唯一自动化触发入口；GitHub Release 仅用于展示发布说明，不额外上传构建产物。
 
 ## 发布目标
 
 - npm：`@hifullmoon/aicommit`
-- Homebrew tap：`hi-fullmoon/aicommit`
-- 自动化入口：`.github/workflows/release.yml`
-- 稳定版发布到 npm `latest`，GitHub pre-release 发布到 npm `next`
+- 自动化入口：`.github/workflows/ci.yml` 与 `.github/workflows/release.yml`
+- 稳定版 tag 发布到 npm `latest`，带 SemVer prerelease 后缀的 tag 发布到 npm `next`
 
 ## 一次性准备
 
@@ -25,22 +24,21 @@ AICommit 只维护两条发布渠道：npm 与 Homebrew。GitHub Release 用来�
 
 GitHub 侧还需要：
 
-- 保护 `main`，要求 CI 的 `Quality / Node 24` 和三项 `Compatibility` 检查通过；
-- 只允许维护者创建或发布 GitHub Release；
-- npm scope `@hifullmoon` 的维护权限；
-- Homebrew 与 Ruby 可在维护者的 macOS 环境中使用。
+- 保护 `main`，要求通过代码审查后才能合并；
+- 只允许维护者创建并推送 `v*` tag；
+- npm scope `@hifullmoon` 的维护权限。
 
 ## 每次发布
 
-1. 从干净且最新的 `main` 开始，按 SemVer 选择版本，并更新 `CHANGELOG.md`。
+1. 从最新的 `main` 开始，把本次用户可见变更写入 `CHANGELOG.md` 的 `[Unreleased]`。
 
-2. 更新 `package.json` 与 lockfile，但暂不创建 tag：
+2. 运行版本更新脚本。它接受 `patch`、`minor`、`major` 或完整 SemVer，同步更新 package、lockfile、changelog 与分发文档，但不会创建 commit 或 tag：
 
    ```bash
-   npm version <patch|minor|major|X.Y.Z> --no-git-tag-version
+   npm run release:version -- <patch|minor|major|X.Y.Z>
    ```
 
-3. 安装锁定依赖并运行 npm 发布检查：
+3. 检查脚本生成的 diff，然后安装锁定依赖并运行 npm 发布检查：
 
    ```bash
    npm ci
@@ -50,35 +48,16 @@ GitHub 侧还需要：
 
    最后一条命令在版本尚未占用时应返回 `E404`。检查会验证发布字段、lint、格式、测试、coverage、eval、安装后的 package smoke 和 `npm pack --dry-run`。
 
-4. 用将要发布的精确 npm tarball 更新 Homebrew formula：
+4. 提交版本脚本生成的文件，通过受保护的 `main` 流程合并。日常 branch push 与 pull request 不会自动触发 GitHub Actions，因此合并前必须完成上面的本地检查。
 
-   ```bash
-   release_dir=$(mktemp -d)
-   pack_json=$(npm pack --json --pack-destination "$release_dir")
-   pack_file=$(node -e "process.stdout.write(JSON.parse(process.argv[1])[0].filename)" "$pack_json")
-   node scripts/release-assets.mjs \
-     --tarball "$release_dir/$pack_file" \
-     --output "$release_dir"
-   cp "$release_dir/aicommit.rb" Formula/aicommit.rb
-   ruby -c Formula/aicommit.rb
-   ```
-
-5. 在 macOS 上执行真实的 Homebrew 安装测试：
-
-   ```bash
-   AICOMMIT_HOMEBREW_SMOKE=1 HOMEBREW_NO_AUTO_UPDATE=1 npm run test:homebrew
-   ```
-
-6. 提交 version、lockfile、changelog 与 `Formula/aicommit.rb`，通过受保护的 `main` 流程合并。
-
-7. 给合并后的 commit 创建 annotated tag 并推送：
+5. 给合并后的 commit 创建 annotated tag 并推送：
 
    ```bash
    git tag -a vX.Y.Z -m "AICommit vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-8. 从该 tag 创建并发布 GitHub Release。发布会触发 `release.yml`：重新校验 tag/version、生成并发布精确 tarball、通过 npm OIDC 自动附加 provenance，然后从公开 registry 执行 Homebrew 安装测试。
+6. 推送 tag 会同时触发 CI 与 `release.yml`。发布工作流会重新校验 tag/version、执行完整质量检查、生成并发布精确 tarball，并通过 npm OIDC 自动附加 provenance。需要发布说明时，可在流程成功后从该 tag 创建 GitHub Release；这个动作不会再次触发 CI/CD。
 
 ## 发布后验证
 
@@ -88,9 +67,6 @@ npm view @hifullmoon/aicommit dist-tags
 npm install --global @hifullmoon/aicommit@X.Y.Z
 aicommit --version
 aicommit --help
-
-brew update
-brew upgrade hi-fullmoon/aicommit/aicommit
 ```
 
 在 npm package 页面确认 provenance 指向 `hi-fullmoon/AICommit/.github/workflows/release.yml`，并确认稳定版使用 `latest`、预发布版使用 `next`。
@@ -104,4 +80,4 @@ npm deprecate @hifullmoon/aicommit@X.Y.Z "Use X.Y.Z+1: <reason>"
 npm dist-tag add @hifullmoon/aicommit@<last-good-version> latest
 ```
 
-不要移动已经公开的 tag。若只有 Homebrew formula 有问题，可在 `main` 上修复 formula 并重新执行安装测试；若 package 本身有问题，则 npm 与 Homebrew 一起发布新 patch。用户侧的固定和回滚命令见 [`docs/distribution.md`](docs/distribution.md)。
+不要移动已经公开的 tag。若 package 本身有问题，应发布新的修复 patch。用户侧的固定和回滚命令见 [`docs/distribution.md`](docs/distribution.md)。
