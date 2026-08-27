@@ -4,6 +4,17 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-27
+
+### Added
+
+- Added named model profiles per provider, with model selection available in setup and through `--model`.
+
+### Changed
+
+- **Breaking:** user configuration now requires `schemaVersion: 1`, an explicit `defaultProvider`, and provider-level `defaultModel`/`models` maps; legacy flat and provider-level `modelId` configurations must be migrated with `aicommit setup`.
+- Provider preset manifests now use schema version 2 with named model maps and explicit default models.
+
 ### Removed
 
 - Removed the Homebrew distribution channel; install and upgrade AICommit through npm.
@@ -115,6 +126,7 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.0
 [1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
 [1.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.0

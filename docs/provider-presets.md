@@ -17,7 +17,7 @@ Every manifest declares:
   "version": "2.0.0",
   "compatibility": {
     "coreMinimum": "1.5.1",
-    "coreMaximumExclusive": "2.0.0",
+    "coreMaximumExclusive": "3.0.0",
     "adapterContract": 1
   }
 }

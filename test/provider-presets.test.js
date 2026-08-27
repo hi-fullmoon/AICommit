@@ -53,7 +53,8 @@ test('bundled provider presets are strict, versioned, and core-compatible', asyn
     () => assertProviderPresetCompatibility(raw, '1.5.2-beta.01'),
     /must be a semantic version/,
   );
-  assert.throws(() => assertProviderPresetCompatibility(raw, '2.0.0'), /requires aicommit/);
+  assert.equal(assertProviderPresetCompatibility(raw, '2.0.0'), raw);
+  assert.throws(() => assertProviderPresetCompatibility(raw, '3.0.0'), /requires aicommit/);
 });
 
 test('preset validation rejects credentials, unsafe endpoints, dialect overrides, and bad contracts', async () => {
