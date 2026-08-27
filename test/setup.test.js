@@ -20,28 +20,34 @@ import {
 } from '../src/provider-presets.js';
 
 const bundledPresetLoader = () =>
-  loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.4.0' });
+  loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.5.1' });
 
 const entry = {
+  providerType: 'deepseek',
   apiUrl: 'https://api.deepseek.com/v1/chat/completions',
   apiKey: 'sk-test',
-  modelId: 'deepseek-chat',
+  defaultModel: 'chat',
+  models: { chat: { modelId: 'deepseek-chat' } },
 };
 
 test('mergeSetupConfig creates a fresh config from an empty file', () => {
   const r = mergeSetupConfig({}, { providerName: 'deepseek', entry, language: 'zh' });
   assert.deepEqual(r.providers, { deepseek: entry });
+  assert.equal(r.schemaVersion, 1);
   assert.equal(r.defaultProvider, 'deepseek');
   assert.equal(r.language, 'zh');
 });
 
 test('mergeSetupConfig preserves existing providers and unrelated settings', () => {
   const existing = {
+    schemaVersion: 1,
     providers: {
       openai: {
+        providerType: 'openai',
         apiUrl: 'https://api.openai.com/v1/chat/completions',
         apiKey: 'sk-old',
-        modelId: 'gpt-4o',
+        defaultModel: 'default',
+        models: { default: { modelId: 'gpt-4o' } },
       },
     },
     defaultProvider: 'openai',
@@ -58,33 +64,45 @@ test('mergeSetupConfig preserves existing providers and unrelated settings', () 
 });
 
 test('mergeSetupConfig overwrites a same-named provider', () => {
-  const existing = { providers: { deepseek: { apiUrl: 'old', apiKey: 'old', modelId: 'old' } } };
+  const existing = {
+    schemaVersion: 1,
+    providers: {
+      deepseek: {
+        providerType: 'deepseek',
+        apiUrl: 'https://old.example.test/v1',
+        defaultModel: 'old',
+        models: { old: { modelId: 'old' } },
+      },
+    },
+  };
   const r = mergeSetupConfig(existing, { providerName: 'deepseek', entry, language: 'zh' });
   assert.deepEqual(r.providers.deepseek, entry);
 });
 
-test('mergeSetupConfig drops flat legacy connection keys', () => {
-  const existing = {
-    apiUrl: 'https://legacy.example.com/v1/chat/completions',
-    apiKey: 'sk-legacy',
-    apiKeyEnv: 'LEGACY_API_KEY',
-    modelId: 'legacy-model',
-    temperature: 0.5,
-  };
+test('mergeSetupConfig writes the canonical schema and keeps global settings', () => {
+  const existing = { schemaVersion: 1, providers: {}, temperature: 0.5 };
   const r = mergeSetupConfig(existing, { providerName: 'deepseek', entry, language: 'zh' });
-  assert.equal(r.apiUrl, undefined);
-  assert.equal(r.apiKey, undefined);
-  assert.equal(r.apiKeyEnv, undefined);
-  assert.equal(r.modelId, undefined);
-  // Non-connection top-level settings stay as shared defaults.
+  assert.equal(r.schemaVersion, 1);
   assert.equal(r.temperature, 0.5);
   assert.deepEqual(r.providers, { deepseek: entry });
 });
 
 test('mergeSetupConfig does not mutate the input', () => {
-  const existing = { providers: { openai: { apiKey: 'sk-old' } }, apiKey: 'sk-flat' };
+  const existing = {
+    schemaVersion: 1,
+    providers: {
+      openai: {
+        providerType: 'openai',
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        apiKey: 'sk-old',
+        defaultModel: 'default',
+        models: { default: { modelId: 'gpt-4o' } },
+      },
+    },
+  };
   mergeSetupConfig(existing, { providerName: 'deepseek', entry, language: 'zh' });
-  assert.deepEqual(existing, { providers: { openai: { apiKey: 'sk-old' } }, apiKey: 'sk-flat' });
+  assert.equal(existing.providers.openai.apiKey, 'sk-old');
+  assert.deepEqual(Object.keys(existing.providers), ['openai']);
 });
 
 test('runSetup saves a preset provider atomically with environment credentials', async (t) => {
@@ -98,16 +116,22 @@ test('runSetup saves a preset provider atomically with environment credentials',
     else process.env.AICOMMIT_SETUP_TEST_KEY = previousKey;
   });
 
-  const selections = ['openai', 'en'];
+  const selections = ['openai', 'quality', 'en'];
+  const modelInputs = ['gpt-4o', 'gpt-test', 'quality', 'gpt-quality'];
+  let addAnotherCount = 0;
   const spinnerEvents = [];
   await runSetup({
     targetPath,
     selectPrompt: async () => selections.shift(),
-    inputPrompt: async () => 'gpt-test',
+    inputPrompt: async () => modelInputs.shift(),
     passwordPrompt: async () => 'env:AICOMMIT_SETUP_TEST_KEY',
-    confirmPrompt: async () => true,
+    confirmPrompt: async (question) => {
+      if (question.message === 'Add another model?') return addAnotherCount++ === 0;
+      return true;
+    },
     connectionCheck: async (config) => {
       assert.equal(config.apiKey, 'secret-from-env');
+      assert.equal(config.modelId, 'gpt-quality');
       return { elapsed: 42 };
     },
     spinnerFactory: () => ({
@@ -128,11 +152,15 @@ test('runSetup saves a preset provider atomically with environment credentials',
   assert.equal(saved.defaultProvider, 'openai');
   assert.equal(saved.language, 'en');
   assert.deepEqual(saved.providers.openai, {
+    providerType: 'openai',
     apiUrl: 'https://api.openai.com/v1/chat/completions',
     apiKey: '',
     apiKeyEnv: 'AICOMMIT_SETUP_TEST_KEY',
-    modelId: 'gpt-test',
-    providerType: 'openai',
+    defaultModel: 'quality',
+    models: {
+      'gpt-4o': { label: 'GPT-4o', modelId: 'gpt-test' },
+      quality: { modelId: 'gpt-quality' },
+    },
   });
   if (process.platform !== 'win32') {
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
@@ -149,14 +177,18 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   chmodSync(targetPath, 0o600);
 
   const selections = ['deepseek', 'zh'];
-  const confirmations = [true, false];
+  const modelInputs = ['chat', 'deepseek-test'];
   const spinnerEvents = [];
   await runSetup({
     targetPath,
     selectPrompt: async () => selections.shift(),
-    inputPrompt: async () => 'deepseek-test',
+    inputPrompt: async () => modelInputs.shift(),
     passwordPrompt: async () => '',
-    confirmPrompt: async () => confirmations.shift(),
+    confirmPrompt: async (question) => {
+      if (question.message === 'Add another model?') return false;
+      if (question.message === 'Test the connection now?') return true;
+      return false;
+    },
     connectionCheck: async () => {
       throw new Error('offline test provider');
     },
@@ -187,18 +219,20 @@ test('setup discovers a new compatible provider only from preset data', async (t
   const targetPath = join(root, '.aicommit.config.json');
   const base = (await bundledPresetLoader()).manifest;
   const manifest = JSON.parse(JSON.stringify(base));
-  manifest.version = '1.1.0';
+  manifest.version = '2.1.0';
   manifest.providers = [
     {
       id: 'acme',
       label: 'Acme Compatible',
       adapter: 'custom',
       apiUrl: 'https://api.acme.example/v1/chat/completions',
-      modelId: 'acme-default',
+      defaultModel: 'default',
+      models: { default: { modelId: 'acme-default' } },
     },
   ];
   validateProviderPresetManifest(manifest);
   const selections = ['acme', 'en'];
+  const modelInputs = ['default', 'acme-v2'];
   let providerChoices;
   await runSetup({
     targetPath,
@@ -207,7 +241,7 @@ test('setup discovers a new compatible provider only from preset data', async (t
       if (question.message === 'Choose a provider') providerChoices = question.choices;
       return selections.shift();
     },
-    inputPrompt: async () => 'acme-v2',
+    inputPrompt: async () => modelInputs.shift(),
     passwordPrompt: async () => '',
     confirmPrompt: async () => false,
   });
@@ -215,10 +249,11 @@ test('setup discovers a new compatible provider only from preset data', async (t
   assert.ok(providerChoices.some((choice) => choice.value === 'acme'));
   const saved = JSON.parse(readFileSync(targetPath, 'utf8'));
   assert.deepEqual(saved.providers.acme, {
+    providerType: 'custom',
     apiUrl: 'https://api.acme.example/v1/chat/completions',
     apiKey: '',
     apiKeyEnv: '',
-    modelId: 'acme-v2',
-    providerType: 'custom',
+    defaultModel: 'default',
+    models: { default: { modelId: 'acme-v2' } },
   });
 });

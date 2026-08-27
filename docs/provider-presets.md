@@ -1,8 +1,8 @@
 # Provider presets / Provider 预设
 
-Provider presets are versioned setup data, not request code. The stable adapters in `src/providers.js` own request/response behavior; `presets/provider-presets.json` only supplies a provider ID, display label, adapter ID, secure endpoint, default model, and optional bounded `extraBody` defaults. Adding another OpenAI-compatible service with the `custom` adapter does not change Git, interaction, or request orchestration code.
+Provider presets are versioned setup data, not request code. The stable adapters in `src/providers.js` own request/response behavior; `presets/provider-presets.json` supplies a provider ID, display label, adapter ID, secure endpoint, a named model map, and the default model name. Each model supplies its API `modelId` and may include a label or bounded `extraBody` defaults. Adding another OpenAI-compatible service with the `custom` adapter does not change Git, interaction, or request orchestration code.
 
-Provider preset 是带版本的 setup 数据，不是请求代码。`src/providers.js` 中的稳定 adapter 负责请求/响应行为；`presets/provider-presets.json` 只提供 provider ID、显示名称、adapter ID、安全 endpoint、默认模型以及可选且有界的 `extraBody` 默认值。使用 `custom` adapter 新增另一个 OpenAI-compatible 服务时，不需要修改 Git、交互或请求编排代码。
+Provider preset 是带版本的 setup 数据，不是请求代码。`src/providers.js` 中的稳定 adapter 负责请求/响应行为；`presets/provider-presets.json` 提供 provider ID、显示名称、adapter ID、安全 endpoint、命名模型表和默认模型名。每个模型提供 API `modelId`，也可提供显示名称或有界的 `extraBody` 默认值。使用 `custom` adapter 新增另一个 OpenAI-compatible 服务时，不需要修改 Git、交互或请求编排代码。
 
 ## Compatibility contract / 兼容契约
 
@@ -13,10 +13,10 @@ Every manifest declares:
 ```json
 {
   "kind": "aicommit-provider-presets",
-  "schemaVersion": 1,
-  "version": "1.0.0",
+  "schemaVersion": 2,
+  "version": "2.0.0",
   "compatibility": {
-    "coreMinimum": "1.4.0",
+    "coreMinimum": "1.5.1",
     "coreMaximumExclusive": "2.0.0",
     "adapterContract": 1
   }
@@ -27,13 +27,15 @@ Every manifest declares:
 - The core range is inclusive at `coreMinimum` and exclusive at `coreMaximumExclusive`.
 - Core prerelease versions and build metadata follow SemVer; build metadata is ignored for precedence.
 - `adapterContract` declares the request-adapter interface expected by every entry.
-- The runtime rejects unknown fields, duplicate/reserved IDs, unsupported adapters, remote HTTP, credentials, top-level `model`/`messages` overrides, oversized data, incompatible versions, and symlinked files.
+- Every provider declares a non-empty `models` map and a `defaultModel` that references one entry. Model names are setup aliases; `modelId` is sent to the API.
+- The runtime rejects unknown fields, duplicate/reserved IDs, unsupported adapters, remote HTTP, credentials, model-level `model`/`messages` overrides, oversized data, incompatible versions, and symlinked files.
 
 - `version` 标识可独立替换的 preset 数据版本。
 - core 范围包含 `coreMinimum`，不包含 `coreMaximumExclusive`。
 - Core 的预发布版本与构建元数据遵循 SemVer；构建元数据不参与优先级比较。
 - `adapterContract` 声明每个条目所依赖的请求 adapter 接口。
-- 运行时拒绝未知字段、重复/保留 ID、不支持的 adapter、远程 HTTP、凭据、顶层 `model`/`messages` 覆盖、超限数据、不兼容版本和符号链接文件。
+- 每个 Provider 都声明非空 `models`，并通过 `defaultModel` 引用其中一项。模型名是 setup 使用的别名，`modelId` 才会发送给 API。
+- 运行时拒绝未知字段、重复/保留 ID、不支持的 adapter、远程 HTTP、凭据、模型级 `model`/`messages` 覆盖、超限数据、不兼容版本和符号链接文件。
 
 The published JSON Schema is [`schemas/aicommit-provider-presets.schema.json`](../schemas/aicommit-provider-presets.schema.json). Runtime validation is authoritative and adds semantic/security checks that JSON Schema alone cannot express.
 
@@ -91,7 +93,18 @@ Add one entry to a copied manifest, bump `version`, validate, and install it:
   "label": "Acme Compatible",
   "adapter": "custom",
   "apiUrl": "https://api.acme.example/v1/chat/completions",
-  "modelId": "acme-chat"
+  "defaultModel": "fast",
+  "models": {
+    "fast": {
+      "label": "Acme Chat",
+      "modelId": "acme-chat"
+    },
+    "quality": {
+      "label": "Acme Reasoner",
+      "modelId": "acme-reasoner",
+      "extraBody": { "reasoning": true }
+    }
+  }
 }
 ```
 

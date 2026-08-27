@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { version: CORE_VERSION } = require('../package.json');
 
 export const PROVIDER_PRESET_KIND = 'aicommit-provider-presets';
-export const PROVIDER_PRESET_SCHEMA_VERSION = 1;
+export const PROVIDER_PRESET_SCHEMA_VERSION = 2;
 export const PROVIDER_ADAPTER_CONTRACT_VERSION = 1;
 export const PROVIDER_PRESET_FILENAME = 'provider-presets.json';
 export const PROVIDER_PRESET_BACKUP_FILENAME = 'provider-presets.previous.json';
@@ -179,12 +179,8 @@ export function validateProviderPresetManifest(value) {
   const ids = new Set();
   for (const [index, provider] of value.providers.entries()) {
     const path = `Provider preset providers[${index}]`;
-    const required = ['id', 'label', 'adapter', 'apiUrl', 'modelId'];
-    assertExactKeys(
-      provider,
-      Object.hasOwn(provider || {}, 'extraBody') ? [...required, 'extraBody'] : required,
-      path,
-    );
+    const required = ['id', 'label', 'adapter', 'apiUrl', 'defaultModel', 'models'];
+    assertExactKeys(provider, required, path);
     if (
       !ID_RE.test(provider.id) ||
       provider.id.toLowerCase() === 'custom' ||
@@ -215,17 +211,49 @@ export function validateProviderPresetManifest(value) {
         `${path}.apiUrl must be credential-free HTTPS, or HTTP only for localhost/loopback, without query or fragment.`,
       );
     }
-    if (
-      typeof provider.modelId !== 'string' ||
-      !provider.modelId.trim() ||
-      provider.modelId.length > 256 ||
-      /[\0-\x1f\x7f]/.test(provider.modelId)
-    ) {
-      throw new Error(`${path}.modelId must be a non-empty string of at most 256 characters.`);
+    if (!ID_RE.test(provider.defaultModel)) {
+      throw new Error(`${path}.defaultModel must be a valid model name.`);
     }
-    if (Object.hasOwn(provider, 'extraBody')) {
-      if (!object(provider.extraBody)) throw new Error(`${path}.extraBody must be an object.`);
-      assertExtraBody(provider.extraBody, `${path}.extraBody`);
+    if (
+      !object(provider.models) ||
+      !Object.keys(provider.models).length ||
+      Object.keys(provider.models).length > 100
+    ) {
+      throw new Error(`${path}.models must contain 1-100 named models.`);
+    }
+    if (!Object.hasOwn(provider.models, provider.defaultModel)) {
+      throw new Error(`${path}.defaultModel must reference a model in ${path}.models.`);
+    }
+    for (const [modelName, model] of Object.entries(provider.models)) {
+      const modelPath = `${path}.models.${modelName}`;
+      if (!ID_RE.test(modelName)) throw new Error(`${modelPath} has an invalid model name.`);
+      const modelKeys = ['modelId'];
+      if (Object.hasOwn(model || {}, 'label')) modelKeys.push('label');
+      if (Object.hasOwn(model || {}, 'extraBody')) modelKeys.push('extraBody');
+      assertExactKeys(model, modelKeys, modelPath);
+      if (
+        typeof model.modelId !== 'string' ||
+        !model.modelId.trim() ||
+        model.modelId.length > 256 ||
+        /[\0-\x1f\x7f]/.test(model.modelId)
+      ) {
+        throw new Error(
+          `${modelPath}.modelId must be a non-empty string of at most 256 characters.`,
+        );
+      }
+      if (
+        Object.hasOwn(model, 'label') &&
+        (typeof model.label !== 'string' ||
+          !model.label.trim() ||
+          model.label.length > 80 ||
+          /[\0-\x1f\x7f]/.test(model.label))
+      ) {
+        throw new Error(`${modelPath}.label must be a non-empty string of at most 80 characters.`);
+      }
+      if (Object.hasOwn(model, 'extraBody')) {
+        if (!object(model.extraBody)) throw new Error(`${modelPath}.extraBody must be an object.`);
+        assertExtraBody(model.extraBody, `${modelPath}.extraBody`);
+      }
     }
   }
   return value;

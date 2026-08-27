@@ -7,7 +7,7 @@
   "required": ["kind", "schemaVersion", "version", "compatibility", "providers"],
   "properties": {
     "kind": { "const": "aicommit-provider-presets" },
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "version": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
@@ -35,7 +35,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "label", "adapter", "apiUrl", "modelId"],
+        "required": ["id", "label", "adapter", "apiUrl", "defaultModel", "models"],
         "properties": {
           "id": {
             "type": "string",
@@ -47,8 +47,28 @@
             "enum": ["openai", "openrouter", "deepseek", "minimax", "ollama", "custom"]
           },
           "apiUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
-          "modelId": { "type": "string", "minLength": 1, "maxLength": 256 },
-          "extraBody": { "type": "object" }
+          "defaultModel": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "models": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 100,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["modelId"],
+              "properties": {
+                "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "modelId": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "extraBody": { "type": "object" }
+              }
+            }
+          }
         }
       }
     }

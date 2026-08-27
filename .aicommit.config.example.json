@@ -1,40 +1,60 @@
 {
+  "schemaVersion": 1,
   "defaultProvider": "minimax",
   "providers": {
     "minimax": {
       "providerType": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
       "apiKeyEnv": "MINIMAX_API_KEY",
-      "modelId": "MiniMax-M3",
-      "extraBody": {
-        "thinking": {
-          "type": "disabled"
-        },
-        "reasoning_split": true
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "modelId": "MiniMax-M3",
+          "extraBody": {
+            "thinking": {
+              "type": "disabled"
+            },
+            "reasoning_split": true
+          }
+        }
       }
     },
     "deepseek": {
       "providerType": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
       "apiKeyEnv": "DEEPSEEK_API_KEY",
-      "modelId": "deepseek-v4-flash"
+      "defaultModel": "chat",
+      "models": {
+        "chat": { "modelId": "deepseek-v4-flash" }
+      }
     },
     "openrouter": {
       "providerType": "openrouter",
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
       "apiKeyEnv": "OPENROUTER_API_KEY",
-      "modelId": "openai/gpt-4o-mini"
+      "defaultModel": "fast",
+      "models": {
+        "fast": { "modelId": "openai/gpt-4o-mini" },
+        "quality": { "modelId": "openai/gpt-4o" }
+      }
     },
     "kimi-code": {
       "providerType": "custom",
       "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
       "apiKeyEnv": "KIMI_API_KEY",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "default",
+      "models": {
+        "default": { "modelId": "kimi-for-coding" }
+      }
     },
     "ollama": {
       "providerType": "ollama",
       "apiUrl": "http://127.0.0.1:11434/api/chat",
-      "modelId": "qwen3:8b"
+      "defaultModel": "qwen",
+      "models": {
+        "qwen": { "modelId": "qwen3:8b" },
+        "deepseek": { "modelId": "deepseek-r1:14b" }
+      }
     }
   },
   "language": "en",

@@ -1,9 +1,9 @@
 {
   "kind": "aicommit-provider-presets",
-  "schemaVersion": 1,
-  "version": "1.1.0",
+  "schemaVersion": 2,
+  "version": "2.0.0",
   "compatibility": {
-    "coreMinimum": "1.4.0",
+    "coreMinimum": "1.5.1",
     "coreMaximumExclusive": "2.0.0",
     "adapterContract": 1
   },
@@ -13,33 +13,55 @@
       "label": "OpenAI",
       "adapter": "openai",
       "apiUrl": "https://api.openai.com/v1/chat/completions",
-      "modelId": "gpt-4o"
+      "defaultModel": "gpt-4o",
+      "models": {
+        "gpt-4o": {
+          "label": "GPT-4o",
+          "modelId": "gpt-4o"
+        }
+      }
     },
     {
       "id": "deepseek",
       "label": "DeepSeek",
       "adapter": "deepseek",
       "apiUrl": "https://api.deepseek.com/v1/chat/completions",
-      "modelId": "deepseek-v4-flash"
+      "defaultModel": "chat",
+      "models": {
+        "chat": {
+          "label": "DeepSeek Chat",
+          "modelId": "deepseek-v4-flash"
+        }
+      }
     },
     {
       "id": "openrouter",
       "label": "OpenRouter",
       "adapter": "openrouter",
       "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
-      "modelId": "openai/gpt-4o-mini"
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "modelId": "openai/gpt-4o-mini"
+        }
+      }
     },
     {
       "id": "minimax",
       "label": "MiniMax",
       "adapter": "minimax",
       "apiUrl": "https://api.minimaxi.com/v1/chat/completions",
-      "modelId": "MiniMax-M3",
-      "extraBody": {
-        "thinking": {
-          "type": "disabled"
-        },
-        "reasoning_split": true
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "modelId": "MiniMax-M3",
+          "extraBody": {
+            "thinking": {
+              "type": "disabled"
+            },
+            "reasoning_split": true
+          }
+        }
       }
     },
     {
@@ -47,14 +69,25 @@
       "label": "Kimi Code",
       "adapter": "custom",
       "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
-      "modelId": "kimi-for-coding"
+      "defaultModel": "default",
+      "models": {
+        "default": {
+          "modelId": "kimi-for-coding"
+        }
+      }
     },
     {
       "id": "ollama",
       "label": "Ollama (local)",
       "adapter": "ollama",
       "apiUrl": "http://127.0.0.1:11434/api/chat",
-      "modelId": "qwen3:8b"
+      "defaultModel": "qwen",
+      "models": {
+        "qwen": {
+          "label": "Qwen 3 8B",
+          "modelId": "qwen3:8b"
+        }
+      }
     }
   ]
 }

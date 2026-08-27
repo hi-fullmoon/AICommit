@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_CONFIG, validateConfig, filterProjectConfig } from '../src/config.js';
+import {
+  DEFAULT_CONFIG,
+  validateConfig,
+  validateUserConfig,
+  filterProjectConfig,
+} from '../src/config.js';
 
 const cfg = (extra = {}) => ({
   ...DEFAULT_CONFIG,
@@ -11,6 +16,58 @@ const cfg = (extra = {}) => ({
 
 test('validateConfig accepts the default config', () => {
   assert.equal(validateConfig(cfg()).modelId, DEFAULT_CONFIG.modelId);
+});
+
+test('validateUserConfig requires the canonical provider and named-model schema', () => {
+  const value = {
+    schemaVersion: 1,
+    defaultProvider: 'openai',
+    providers: {
+      openai: {
+        providerType: 'openai',
+        apiUrl: 'https://api.openai.com/v1/chat/completions',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        defaultModel: 'fast',
+        models: {
+          fast: { modelId: 'gpt-fast', maxTokens: 512 },
+          quality: {
+            label: 'Quality',
+            modelId: 'gpt-quality',
+            reasoning: { mode: 'on', effort: 'high' },
+          },
+        },
+      },
+    },
+  };
+
+  assert.equal(validateUserConfig(value), value);
+  assert.throws(
+    () => validateUserConfig({ apiUrl: 'https://api.example.test', modelId: 'legacy' }),
+    /schemaVersion.*expected 1/,
+  );
+  assert.throws(
+    () =>
+      validateUserConfig({
+        ...value,
+        providers: {
+          openai: { ...value.providers.openai, defaultModel: 'missing' },
+        },
+      }),
+    /unknown model/,
+  );
+  assert.throws(
+    () =>
+      validateUserConfig({
+        ...value,
+        providers: {
+          openai: {
+            ...value.providers.openai,
+            models: { fast: { modelId: 'gpt-fast', apiKey: 'forbidden' } },
+          },
+        },
+      }),
+    /unknown properties: apiKey/,
+  );
 });
 
 test('validateConfig rejects invalid scalar config values early', () => {
@@ -32,6 +89,8 @@ test('project config cannot override connection/provider settings or raise cost 
     apiKey: 'stolen-by-inheritance',
     apiKeyEnv: 'STOLEN_KEY',
     modelId: 'attacker-model',
+    models: { attacker: { modelId: 'attacker-model' } },
+    defaultModel: 'attacker',
     providerType: 'custom',
     providers: { evil: {} },
     defaultProvider: 'evil',
@@ -54,12 +113,14 @@ test('project config cannot override connection/provider settings or raise cost 
     'apiKeyEnv',
     'apiUrl',
     'credentialHelper',
+    'defaultModel',
     'defaultProvider',
     'extensions',
     'extraBody',
     'maxTokens',
     'metrics',
     'modelId',
+    'models',
     'providerType',
     'providers',
     'reasoning',

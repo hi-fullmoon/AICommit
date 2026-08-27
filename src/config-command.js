@@ -28,7 +28,10 @@ function printPaths(paths) {
   );
 }
 
-export async function runConfigCommand(action, { provider = null, machineOutput = false } = {}) {
+export async function runConfigCommand(
+  action,
+  { provider = null, model = null, machineOutput = false } = {},
+) {
   const projectRoot = getProjectRoot();
   const paths = await inspectConfigPaths(projectRoot);
   if (action === 'path') {
@@ -36,18 +39,17 @@ export async function runConfigCommand(action, { provider = null, machineOutput 
     return { exitReason: 'config_path', data: { projectRoot, paths } };
   }
 
-  const loaded = await loadConfig(provider, { resolveCredentials: false });
+  const loaded = await loadConfig(provider, { model, resolveCredentials: false });
   const data = {
     projectRoot: loaded.projectRoot,
     sources: loaded.loaded,
     provider: loaded.providerName,
+    model: loaded.modelName,
     paths,
   };
   if (action === 'validate') {
     if (!machineOutput) {
-      console.log(
-        `Configuration valid${loaded.providerName ? ` for provider "${loaded.providerName}"` : ''}.`,
-      );
+      console.log(`Configuration valid for ${loaded.providerName}/${loaded.modelName}.`);
       printPaths(paths);
     }
     return { exitReason: 'config_valid', data };

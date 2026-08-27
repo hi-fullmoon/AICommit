@@ -9,28 +9,17 @@ import password from '@inquirer/password';
 import confirm from '@inquirer/confirm';
 
 import { checkConnection } from './api.js';
-import { isSecureApiUrl } from './config.js';
+import { CONFIG_SCHEMA_VERSION, isSecureApiUrl, validateUserConfig } from './config.js';
 import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 import { loadProviderPresetManifest } from './provider-presets.js';
 
-// Top-level connection keys from a legacy flat config. When the wizard writes
-// a providers map these are dropped from the top level, so the old flat
-// values can't silently shadow or conflict with the provider entries.
-const FLAT_CONNECTION_KEYS = ['apiUrl', 'apiKey', 'apiKeyEnv', 'modelId'];
-
-// Merge the wizard's answers into an existing config object (or an empty
-// one). Existing providers and unrelated settings are preserved; the new
-// provider becomes the default. Pure — exported for tests.
+// Merge the wizard's answers into the one supported Provider/Model schema.
+// Existing providers and unrelated global settings are preserved; the
+// configured provider becomes the default. Pure — exported for tests.
 export function mergeSetupConfig(existing, { providerName, entry, language }) {
   const result = { ...existing };
-
-  // Legacy flat config: remove the top-level connection keys now that the
-  // connection lives under providers[providerName].
-  if (!result.providers) {
-    for (const key of FLAT_CONNECTION_KEYS) delete result[key];
-  }
-
+  result.schemaVersion = CONFIG_SCHEMA_VERSION;
   result.providers = { ...existing.providers, [providerName]: entry };
   result.defaultProvider = providerName;
   result.language = language;
@@ -41,10 +30,7 @@ async function readExistingConfig(path) {
   if (!(await fileExists(path))) return {};
   try {
     const parsed = JSON.parse(await readFile(path, 'utf-8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('expected a JSON object');
-    }
-    return parsed;
+    return validateUserConfig(parsed);
   } catch (err) {
     const backup = `${path}.invalid-${Date.now()}.bak`;
     await copyFile(path, backup);
@@ -105,13 +91,15 @@ export async function runSetup(dependencies = {}) {
       ...providerPresets.map((p) => ({
         name: p.label,
         value: p.id,
-        description: `${p.apiUrl} — default model: ${p.modelId}`,
+        description:
+          `${p.apiUrl} — default model: ` +
+          `${p.models[p.defaultModel].label || p.models[p.defaultModel].modelId}`,
       })),
       { name: 'custom', value: 'custom', description: 'Any OpenAI-compatible endpoint' },
     ],
   });
 
-  let providerName, apiUrl, defaultModel, presetAdapter, presetExtraBody;
+  let providerName, apiUrl, presetAdapter, presetModels, presetDefaultModel;
   if (presetName === 'custom') {
     providerName = await inputPrompt({
       message: 'Provider name (used with aicommit -p <name>)',
@@ -123,15 +111,16 @@ export async function runSetup(dependencies = {}) {
       validate: (v) => isSecureApiUrl(v.trim()) || 'Use HTTPS, or HTTP only for localhost/loopback',
     });
     apiUrl = apiUrl.trim();
-    defaultModel = '';
+    presetModels = {};
+    presetDefaultModel = 'default';
   } else {
     const preset = providerPresets.find((p) => p.id === presetName);
     if (!preset) throw new Error(`Provider preset not found: ${presetName}`);
     providerName = preset.id;
     apiUrl = preset.apiUrl;
-    defaultModel = preset.modelId;
     presetAdapter = preset.adapter;
-    presetExtraBody = preset.extraBody;
+    presetModels = preset.models;
+    presetDefaultModel = preset.defaultModel;
   }
 
   const existingProvider = existing.providers?.[providerName] || {};
@@ -172,12 +161,45 @@ export async function runSetup(dependencies = {}) {
 
   // ── 4. Model ────────────────────────────────────────────────────────
 
-  const modelInput = await inputPrompt({
-    message: 'Model ID',
-    default: existingProvider.modelId || defaultModel || undefined,
-    validate: (v) => (v.trim() ? true : 'Model ID is required'),
-  });
-  const modelId = modelInput.trim();
+  const models = { ...presetModels, ...existingProvider.models };
+  let suggestedModel = existingProvider.defaultModel || presetDefaultModel;
+  while (true) {
+    const modelNameInput = await inputPrompt({
+      message: 'Model name (used with aicommit -m <name>)',
+      default: suggestedModel,
+      validate: (v) =>
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v.trim()) ||
+        'Use 1-64 letters, digits, dots, dashes, or underscores',
+    });
+    const modelName = modelNameInput.trim();
+    const currentModel = models[modelName] || {};
+    const modelIdInput = await inputPrompt({
+      message: `Model ID for ${modelName}`,
+      default: currentModel.modelId || undefined,
+      validate: (v) => (v.trim() ? true : 'Model ID is required'),
+    });
+    models[modelName] = { ...currentModel, modelId: modelIdInput.trim() };
+    const addAnother = await confirmPrompt({
+      message: 'Add another model?',
+      default: false,
+    });
+    if (!addAnother) break;
+    suggestedModel = undefined;
+  }
+
+  const modelNames = Object.keys(models);
+  const defaultModel =
+    modelNames.length === 1
+      ? modelNames[0]
+      : await selectPrompt({
+          message: 'Choose the default model',
+          default: existingProvider.defaultModel || presetDefaultModel,
+          choices: modelNames.map((name) => ({
+            name: `${name} (${models[name].modelId})`,
+            value: name,
+          })),
+        });
+  const selectedModel = models[defaultModel];
 
   // ── 5. Commit message language ──────────────────────────────────────
 
@@ -191,13 +213,16 @@ export async function runSetup(dependencies = {}) {
   });
 
   const entry = {
-    ...existingProvider,
     apiUrl,
     apiKey,
     apiKeyEnv,
-    modelId,
-    ...(presetAdapter ? { providerType: presetAdapter } : {}),
-    ...(presetExtraBody && !existingProvider.extraBody ? { extraBody: presetExtraBody } : {}),
+    providerType: presetAdapter || existingProvider.providerType || 'custom',
+    defaultModel,
+    models,
+    ...(existingProvider.retry ? { retry: existingProvider.retry } : {}),
+    ...(existingProvider.credentialHelper
+      ? { credentialHelper: existingProvider.credentialHelper }
+      : {}),
   };
 
   // ── 6. Connection test ──────────────────────────────────────────────
@@ -210,13 +235,14 @@ export async function runSetup(dependencies = {}) {
 
   if (runTest) {
     const spinner = spinnerFactory({
-      text: chalk.dim(`Checking ${chalk.bold(modelId)} ...`),
+      text: chalk.dim(`Checking ${chalk.bold(selectedModel.modelId)} ...`),
       color: 'cyan',
     }).start();
 
     try {
       const report = await connectionCheck({
         ...entry,
+        ...selectedModel,
         apiKey: apiKeyEnv ? process.env[apiKeyEnv] : apiKey,
         maxTokens: 64,
         timeoutMs: 120000,
@@ -240,6 +266,7 @@ export async function runSetup(dependencies = {}) {
   // ── 7. Write config ─────────────────────────────────────────────────
 
   const merged = mergeSetupConfig(existing, { providerName, entry, language });
+  validateUserConfig(merged);
   // Write through a same-directory temporary file so interruption cannot
   // leave a partially written config. Permissions are tightened before the
   // atomic replacement as well as after it (best effort on Windows).
@@ -248,7 +275,9 @@ export async function runSetup(dependencies = {}) {
   console.log('');
   console.log('  ' + chalk.green.bold('✓ Config saved'));
   console.log('  ' + chalk.dim(`  Path:     ${targetPath}`));
-  console.log('  ' + chalk.dim(`  Provider: ${providerName} (${modelId})`));
+  console.log(
+    '  ' + chalk.dim(`  Provider: ${providerName}/${defaultModel} (${selectedModel.modelId})`),
+  );
   console.log(
     '  ' + chalk.dim(`  API key:  ${apiKeyEnv ? `env:${apiKeyEnv}` : maskApiKey(apiKey)}`),
   );

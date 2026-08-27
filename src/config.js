@@ -25,10 +25,13 @@ import { isExtensionProviderType, validateExtensionsConfig } from './extensions.
 // global config. Project config may tune generation/display behaviour, but all
 // connection and provider selection fields remain user-owned.
 export const PROJECT_CONNECTION_KEYS = new Set([
+  'schemaVersion',
   'apiUrl',
   'apiKey',
   'apiKeyEnv',
   'modelId',
+  'models',
+  'defaultModel',
   'providerType',
   'providers',
   'defaultProvider',
@@ -193,6 +196,59 @@ export const DEFAULT_CONFIG = {
   prompt: '',
 };
 
+export const CONFIG_SCHEMA_VERSION = 1;
+
+const CONFIG_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const TOP_LEVEL_CONNECTION_KEYS = new Set([
+  'apiUrl',
+  'apiKey',
+  'apiKeyEnv',
+  'modelId',
+  'providerType',
+  'defaultModel',
+  'models',
+  'extraBody',
+]);
+const USER_CONFIG_KEYS = new Set([
+  'schemaVersion',
+  'defaultProvider',
+  'providers',
+  ...Object.keys(DEFAULT_CONFIG).filter((key) => !TOP_LEVEL_CONNECTION_KEYS.has(key)),
+]);
+const PROVIDER_CONFIG_KEYS = new Set([
+  'providerType',
+  'apiUrl',
+  'apiKey',
+  'apiKeyEnv',
+  'credentialHelper',
+  'retry',
+  'defaultModel',
+  'models',
+]);
+const MODEL_CONFIG_KEYS = new Set([
+  'label',
+  'modelId',
+  'temperature',
+  'maxTokens',
+  'timeoutMs',
+  'reasoning',
+  'extraBody',
+]);
+
+const DEFAULT_PROVIDER_CATALOG = Object.freeze({
+  defaultProvider: 'openai',
+  providers: {
+    openai: {
+      providerType: 'openai',
+      apiUrl: DEFAULT_CONFIG.apiUrl,
+      defaultModel: 'default',
+      models: {
+        default: { modelId: DEFAULT_CONFIG.modelId },
+      },
+    },
+  },
+});
+
 function mergeConfig(base, override) {
   const merged = deepMerge(base, override);
   if (Object.hasOwn(override, 'commitPolicy')) {
@@ -207,39 +263,139 @@ function mergeConfig(base, override) {
   return merged;
 }
 
-// Resolve the final flat config from a merged config that may contain a
-// "providers" map: pick `cliProvider` → config.defaultProvider → first
-// provider key, deep-merge that entry over the top-level values, then drop
-// the providers/defaultProvider keys so downstream code sees a plain flat
-// config.
-function resolveProvider(config, cliProvider) {
-  const providers = config.providers;
+function object(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
 
-  if (cliProvider && !providers) {
-    throw fail(
-      ERROR_CATEGORIES.CONFIG,
-      `-p/--provider given ("${cliProvider}") but no "providers" defined in config. ` +
-        'Define a "providers" map in ~/.aicommit.config.json.',
+function assertKnownKeys(value, allowed, path) {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length) {
+    throw new Error(`Invalid config "${path}": unknown properties: ${unknown.join(', ')}.`);
+  }
+}
+
+function assertConfigId(value, path) {
+  if (typeof value !== 'string' || !CONFIG_ID_RE.test(value)) {
+    throw new Error(
+      `Invalid config "${path}": expected 1-64 letters, digits, dots, dashes, or underscores.`,
+    );
+  }
+}
+
+function providerRuntimeConfig(provider) {
+  const { defaultModel: _defaultModel, models: _models, ...runtime } = provider;
+  return runtime;
+}
+
+function modelRuntimeConfig(model) {
+  const { label: _label, ...runtime } = model;
+  return runtime;
+}
+
+export function validateUserConfig(value) {
+  if (!object(value)) throw new Error('Invalid user config: expected a JSON object.');
+  if (value.schemaVersion !== CONFIG_SCHEMA_VERSION) {
+    throw new Error(
+      `Invalid config "schemaVersion": expected ${CONFIG_SCHEMA_VERSION}. ` +
+        'Run "aicommit setup" to create the current Provider/Model format.',
+    );
+  }
+  assertKnownKeys(value, USER_CONFIG_KEYS, 'root');
+  assertConfigId(value.defaultProvider, 'defaultProvider');
+  if (!object(value.providers) || Object.keys(value.providers).length === 0) {
+    throw new Error('Invalid config "providers": expected a non-empty object.');
+  }
+  if (!Object.hasOwn(value.providers, value.defaultProvider)) {
+    throw new Error(
+      `Invalid config "defaultProvider": unknown provider "${value.defaultProvider}".`,
     );
   }
 
-  if (!providers || typeof providers !== 'object' || Object.keys(providers).length === 0) {
-    return { config, providerName: null };
+  const globalConfig = { ...value };
+  delete globalConfig.schemaVersion;
+  delete globalConfig.defaultProvider;
+  delete globalConfig.providers;
+  const baseConfig = mergeConfig(DEFAULT_CONFIG, globalConfig);
+
+  for (const [providerName, provider] of Object.entries(value.providers)) {
+    assertConfigId(providerName, `providers.${providerName}`);
+    if (!object(provider)) {
+      throw new Error(`Invalid config "providers.${providerName}": expected an object.`);
+    }
+    assertKnownKeys(provider, PROVIDER_CONFIG_KEYS, `providers.${providerName}`);
+    for (const required of ['providerType', 'apiUrl', 'defaultModel', 'models']) {
+      if (!Object.hasOwn(provider, required)) {
+        throw new Error(`Invalid config "providers.${providerName}": missing ${required}.`);
+      }
+    }
+    assertConfigId(provider.defaultModel, `providers.${providerName}.defaultModel`);
+    if (!object(provider.models) || Object.keys(provider.models).length === 0) {
+      throw new Error(`Invalid config "providers.${providerName}.models": expected models.`);
+    }
+    if (!Object.hasOwn(provider.models, provider.defaultModel)) {
+      throw new Error(
+        `Invalid config "providers.${providerName}.defaultModel": unknown model ` +
+          `"${provider.defaultModel}".`,
+      );
+    }
+
+    const providerConfig = mergeConfig(baseConfig, providerRuntimeConfig(provider));
+    for (const [modelName, model] of Object.entries(provider.models)) {
+      assertConfigId(modelName, `providers.${providerName}.models.${modelName}`);
+      if (!object(model)) {
+        throw new Error(
+          `Invalid config "providers.${providerName}.models.${modelName}": expected an object.`,
+        );
+      }
+      assertKnownKeys(model, MODEL_CONFIG_KEYS, `providers.${providerName}.models.${modelName}`);
+      if (!Object.hasOwn(model, 'modelId')) {
+        throw new Error(
+          `Invalid config "providers.${providerName}.models.${modelName}": missing modelId.`,
+        );
+      }
+      if (
+        Object.hasOwn(model, 'label') &&
+        (typeof model.label !== 'string' || !model.label.trim() || model.label.length > 80)
+      ) {
+        throw new Error(
+          `Invalid config "providers.${providerName}.models.${modelName}.label": ` +
+            'expected a non-empty string of at most 80 characters.',
+        );
+      }
+      validateConfig(mergeConfig(providerConfig, modelRuntimeConfig(model)));
+    }
   }
 
-  const name = cliProvider || config.defaultProvider || Object.keys(providers)[0];
+  return value;
+}
 
-  if (!providers[name]) {
+// Select a Provider and one of its named Model profiles, then flatten both
+// layers so request, split, and extension code keep consuming one runtime
+// config with a concrete modelId.
+function resolveSelection(config, catalog, cliProvider, cliModel) {
+  const providers = catalog.providers;
+  const providerName = cliProvider || catalog.defaultProvider;
+  const provider = providers[providerName];
+
+  if (!provider) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
-      `Unknown provider: "${name}". Available providers: ${Object.keys(providers).join(', ')}`,
+      `Unknown provider: "${providerName}". Available providers: ${Object.keys(providers).join(', ')}`,
+    );
+  }
+  const modelName = cliModel || provider.defaultModel;
+  const model = provider.models[modelName];
+  if (!model) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `Unknown model: "${modelName}" for provider "${providerName}". ` +
+        `Available models: ${Object.keys(provider.models).join(', ')}`,
     );
   }
 
-  const resolved = mergeConfig(config, providers[name]);
-  delete resolved.providers;
-  delete resolved.defaultProvider;
-  return { config: resolved, providerName: name };
+  const providerConfig = mergeConfig(config, providerRuntimeConfig(provider));
+  const resolvedConfig = mergeConfig(providerConfig, modelRuntimeConfig(model));
+  return { config: resolvedConfig, providerName, modelName };
 }
 
 function assertString(config, key) {
@@ -440,9 +596,13 @@ export function getProjectRoot() {
   }
 }
 
-export async function loadConfig(cliProvider = null, { resolveCredentials = true } = {}) {
+export async function loadConfig(
+  cliProvider = null,
+  { model: cliModel = null, resolveCredentials = true } = {},
+) {
   const projectRoot = getProjectRoot();
   let config = { ...DEFAULT_CONFIG };
+  let catalog = DEFAULT_PROVIDER_CATALOG;
   const loaded = [];
 
   const userPath = join(homedir(), '.aicommit.config.json');
@@ -456,12 +616,24 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error(`Failed to parse user config ${userPath}: expected a JSON object.`);
     }
-    config = mergeConfig(config, parsed);
+    validateUserConfig(parsed);
+    catalog = parsed;
+    const globalConfig = { ...parsed };
+    delete globalConfig.schemaVersion;
+    delete globalConfig.defaultProvider;
+    delete globalConfig.providers;
+    config = mergeConfig(config, globalConfig);
     loaded.push('user');
     // Tighten loose permissions on config files that actually hold a key
     // (a hand-created or older 0644 file would otherwise expose it).
     if (configHasApiKey(parsed)) await chmod(userPath, 0o600).catch(() => {});
   }
+
+  let {
+    config: resolvedConfig,
+    providerName,
+    modelName,
+  } = resolveSelection(config, catalog, cliProvider, cliModel);
 
   const projectPath = join(projectRoot, '.aicommit.config.json');
   if (projectPath !== userPath && (await fileExists(projectPath))) {
@@ -471,8 +643,8 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
     } catch (err) {
       throw new Error(`Failed to parse project config ${projectPath}: ${err.message}`);
     }
-    const { safe, ignored } = filterProjectConfig(parsed, config);
-    config = mergeConfig(config, safe);
+    const { safe, ignored } = filterProjectConfig(parsed, resolvedConfig);
+    resolvedConfig = mergeConfig(resolvedConfig, safe);
     loaded.push('project');
     if (ignored.length) {
       console.error(
@@ -487,7 +659,6 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
   }
 
   const teamPolicy = await readTeamPolicy(projectRoot);
-  let { config: resolvedConfig, providerName } = resolveProvider(config, cliProvider);
 
   // A repository-owned team policy is a strict, credential-free document.
   // Apply it after selecting the personal provider so provider-scoped user
@@ -516,6 +687,7 @@ export async function loadConfig(cliProvider = null, { resolveCredentials = true
     projectRoot,
     loaded,
     providerName,
+    modelName,
     credentialSource: credential.source,
     credentialSourceLabel: credential.sourceLabel,
     credentialWarning: credential.warning || null,

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { userConfig } from '../test-support/config-fixture.js';
 
 const CLI = fileURLToPath(new URL('../bin/aicommit.js', import.meta.url));
 
@@ -51,15 +52,17 @@ test('config show/validate/path are redacted, credential-free, and automation-sa
   const projectPath = join(repo, '.aicommit.config.json');
   writeFileSync(
     userPath,
-    JSON.stringify({
-      apiUrl:
-        'https://url-user:url-password@api.example.test/v1/chat/completions?api-version=1&api_key=url-query-secret#url-fragment-secret',
-      apiKey: '',
-      apiKeyEnv: 'AICOMMIT_CONFIG_COMMAND_KEY',
-      modelId: 'test-model',
-      language: 'zh',
-      credentialHelper: { enabled: true, username: 'aicommit' },
-    }),
+    JSON.stringify(
+      userConfig({
+        apiUrl:
+          'https://url-user:url-password@api.example.test/v1/chat/completions?api-version=1&api_key=url-query-secret#url-fragment-secret',
+        apiKey: '',
+        apiKeyEnv: 'AICOMMIT_CONFIG_COMMAND_KEY',
+        modelId: 'test-model',
+        language: 'zh',
+        credentialHelper: { enabled: true, username: 'aicommit' },
+      }),
+    ),
   );
   writeFileSync(
     projectPath,
