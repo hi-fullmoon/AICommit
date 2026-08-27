@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Publish the CLI as the public npm organization package `@hi-fullmoon/aicommit`, with guarded bootstrap and Trusted Publishing release paths.
 - Repository team policies now reject `-l`/`--lang` overrides, inherited policy languages are enforced during candidate validation, and split extension violations remain reviewable before commit.
 - Provider preset compatibility now accepts valid core prerelease/build versions and compares prereleases using SemVer precedence.
 - New committing split runs now detect unfinished checkpoints before provider access, report actionable resume/abort commands, and `aicommit split --abort` safely discards stale recovery metadata without changing commits, the index, or the worktree.

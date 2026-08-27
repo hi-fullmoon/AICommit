@@ -16,7 +16,22 @@ Pre-release versions use identifiers such as `1.1.0-rc.1` and publish under npm'
 
 ## One-time publishing setup
 
-In the npm package settings for `aicommit`, configure a GitHub Actions Trusted Publisher with:
+Create the `hi-fullmoon` organization on npmjs.com and add the publishing maintainer. Log the local npm CLI into that account, then validate the exact initial package without changing the registry:
+
+```bash
+npm login
+npm run release:npm:check
+```
+
+The check runs the release gates, builds the scoped tarball, and performs `npm publish --dry-run`. From a clean `main` commit that exactly matches `origin/main`, bootstrap the public organization package once:
+
+```bash
+npm run release:npm:publish
+```
+
+The bootstrap script requires membership in `@hi-fullmoon`, refuses a dirty/diverged checkout or an occupied version, and refuses to publish if the package already exists. The initial local publish cannot carry GitHub OIDC provenance. All later versions must use the signed GitHub Release workflow below.
+
+After the package exists, configure a GitHub Actions Trusted Publisher in the npm package settings for `@hi-fullmoon/aicommit` with:
 
 - repository: `hi-fullmoon/AICommit`;
 - workflow filename: `release.yml`;
@@ -41,10 +56,11 @@ Protect `main` and `v*` tags, require the CI jobs (including Homebrew smoke), an
 
    ```bash
    release_dir=$(mktemp -d)
-   npm pack --pack-destination "$release_dir"
+   pack_json=$(npm pack --json --pack-destination "$release_dir")
+   pack_file=$(node -e "process.stdout.write(JSON.parse(process.argv[1])[0].filename)" "$pack_json")
    npm sbom --sbom-format=spdx > "$release_dir/aicommit-X.Y.Z.spdx.json"
    node scripts/release-assets.mjs \
-     --tarball "$release_dir/aicommit-X.Y.Z.tgz" \
+     --tarball "$release_dir/$pack_file" \
      --sbom "$release_dir/aicommit-X.Y.Z.spdx.json" \
      --output "$release_dir"
    cp "$release_dir/aicommit.rb" Formula/aicommit.rb
@@ -81,8 +97,8 @@ Protect `main` and `v*` tags, require the CI jobs (including Homebrew smoke), an
 10. Verify the release:
 
 ```bash
-npm view aicommit@X.Y.Z version dist.integrity
-npm install --global aicommit@X.Y.Z
+npm view @hi-fullmoon/aicommit@X.Y.Z version dist.integrity
+npm install --global @hi-fullmoon/aicommit@X.Y.Z
 aicommit --version
 aicommit --help
 brew update
@@ -106,4 +122,4 @@ If validation fails before `npm publish`, fix the release commit, create a new v
 
 If npm publication succeeds but the release is broken, immediately deprecate that exact version with a useful message, document the impact, restore the previous Homebrew formula in a new commit, and publish a fixed patch. Do not unpublish except when npm policy and a severe security incident require it. Git history, tags, release notes, attestations, formulas, and npm provenance must remain auditable.
 
-Users can pin npm with `npm install --global aicommit@X.Y.Z` or install the attested `aicommit.rb` downloaded from an older GitHub Release. Provider preset rollback remains independent: `aicommit preset rollback`. The bilingual executable procedures are in [`docs/distribution.md`](docs/distribution.md).
+Users can pin npm with `npm install --global @hi-fullmoon/aicommit@X.Y.Z` or install the attested `aicommit.rb` downloaded from an older GitHub Release. Provider preset rollback remains independent: `aicommit preset rollback`. The bilingual executable procedures are in [`docs/distribution.md`](docs/distribution.md).

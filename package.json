@@ -1,5 +1,5 @@
 {
-  "name": "aicommit",
+  "name": "@hi-fullmoon/aicommit",
   "version": "1.4.0",
   "description": "Safe, local-first AI commit message generator for Git workflows",
   "type": "module",
@@ -30,6 +30,8 @@
     "test:package": "node scripts/package-smoke.mjs",
     "test:homebrew": "node scripts/homebrew-smoke.mjs",
     "release:assets": "node scripts/release-assets.mjs",
+    "release:npm:check": "node scripts/publish-npm-org.mjs",
+    "release:npm:publish": "node scripts/publish-npm-org.mjs --publish",
     "ci": "npm run lint && npm run format:check && npm run eval && npm run coverage"
   },
   "c8": {

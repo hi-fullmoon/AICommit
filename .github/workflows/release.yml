@@ -39,10 +39,11 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           mkdir -p dist
-          npm pack --pack-destination dist
+          PACK_FILENAME=$(npm pack --json --pack-destination dist | node -e \
+            "let input=''; process.stdin.on('data', c => input += c); process.stdin.on('end', () => process.stdout.write(JSON.parse(input)[0].filename))")
           npm sbom --sbom-format=spdx > "dist/aicommit-${VERSION}.spdx.json"
           node scripts/release-assets.mjs \
-            --tarball "dist/aicommit-${VERSION}.tgz" \
+            --tarball "dist/${PACK_FILENAME}" \
             --sbom "dist/aicommit-${VERSION}.spdx.json" \
             --output dist
           cmp dist/aicommit.rb Formula/aicommit.rb

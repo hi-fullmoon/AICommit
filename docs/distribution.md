@@ -7,14 +7,14 @@ AICommit 通过 npm、仓库内 Homebrew tap 和带签名证明的 GitHub Releas
 ## npm
 
 ```bash
-npm install --global aicommit
+npm install --global @hi-fullmoon/aicommit
 aicommit --version
 
 # upgrade / 升级
-npm install --global aicommit@latest
+npm install --global @hi-fullmoon/aicommit@latest
 
 # pin or roll back / 固定或回滚
-npm install --global aicommit@1.4.0
+npm install --global @hi-fullmoon/aicommit@1.4.0
 ```
 
 The release workflow uses npm Trusted Publishing on a GitHub-hosted runner with OIDC and `--provenance`; it has no long-lived npm token. To verify registry signatures and provenance with a current npm CLI:
@@ -24,7 +24,7 @@ The release workflow uses npm Trusted Publishing on a GitHub-hosted runner with 
 ```bash
 workdir=$(mktemp -d)
 cd "$workdir"
-npm install --package-lock-only aicommit@1.4.0
+npm install --package-lock-only @hi-fullmoon/aicommit@1.4.0
 npm audit signatures
 ```
 
