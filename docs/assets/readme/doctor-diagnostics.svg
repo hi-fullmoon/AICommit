@@ -1,58 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" xml:space="preserve">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" xml:space="preserve">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#101b31"/>
-      <stop offset="0.48" stop-color="#0a1021"/>
-      <stop offset="1" stop-color="#161333"/>
+      <stop offset="0" stop-color="#151936"/>
+      <stop offset="0.52" stop-color="#0b1022"/>
+      <stop offset="1" stop-color="#102031"/>
     </linearGradient>
     <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#151d33"/>
-      <stop offset="1" stop-color="#18152f"/>
+      <stop offset="0" stop-color="#181d37"/>
+      <stop offset="1" stop-color="#12182d"/>
     </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#02040d" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#02040d" flood-opacity="0.55"/>
     </filter>
-    <style>
-      .mono { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }
-      .title { font-size: 20px; font-weight: 700; fill: #d9e2ff; }
-      .line { font-size: 21px; fill: #c9d3ee; }
-      .dim { fill: #74809f; }
-      .green { fill: #69e6a6; }
-      .cyan { fill: #61dafb; }
-      .purple { fill: #b8a2ff; }
-      .white { fill: #f4f7ff; }
-    </style>
+    <style>.mono { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }</style>
   </defs>
-  <rect width="1400" height="780" rx="30" fill="url(#bg)"/>
-  <circle cx="1280" cy="675" r="220" fill="#7259ff" opacity="0.07"/>
-  <circle cx="82" cy="86" r="150" fill="#27d7b0" opacity="0.06"/>
+  <rect width="1600" height="700" rx="28" fill="url(#bg)"/>
   <g filter="url(#shadow)">
-    <rect x="36" y="34" width="1328" height="712" rx="24" fill="#090e1e" stroke="#2b3554" stroke-width="2"/>
-    <path d="M60 34h1280a24 24 0 0 1 24 24v54H36V58a24 24 0 0 1 24-24z" fill="url(#bar)"/>
-    <line x1="36" y1="112" x2="1364" y2="112" stroke="#29324d" stroke-width="2"/>
+    <rect x="32" y="32" width="1536" height="636" rx="22" fill="#090e1e" stroke="#2b3554" stroke-width="2"/>
+    <path d="M54 32h1492a22 22 0 0 1 22 22v58H32V54a22 22 0 0 1 22-22z" fill="url(#bar)"/>
+    <line x1="32" y1="112" x2="1568" y2="112" stroke="#29324d" stroke-width="2"/>
   </g>
-  <circle cx="74" cy="73" r="8" fill="#ff6b78"/>
-  <circle cx="100" cy="73" r="8" fill="#ffd166"/>
-  <circle cx="126" cy="73" r="8" fill="#5be7a9"/>
-  <text x="700" y="80" class="mono title" text-anchor="middle">Credential-safe environment diagnostics</text>
-  <rect x="1110" y="54" width="216" height="38" rx="19" fill="#1d2742"/>
-  <text x="1218" y="79" class="mono" font-size="15" fill="#8fa1c8" text-anchor="middle">secrets redacted</text>
-
-  <text x="74" y="158" class="mono line"><tspan class="purple">~/projects/dashboard</tspan></text>
-  <text x="74" y="200" class="mono line"><tspan class="green">❯</tspan><tspan class="white"> aicommit doctor -p deepseek</tspan></text>
-
-  <text x="74" y="258" class="mono" font-size="24" font-weight="700" fill="#61dafb">Doctor diagnostics</text>
-  <line x1="74" y1="277" x2="557" y2="277" stroke="#33405f" stroke-width="2"/>
-
-  <text x="74" y="322" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Node.js: </tspan><tspan class="dim">v24.8.0 (supported)</tspan></text>
-  <text x="74" y="358" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Git: </tspan><tspan class="dim">git version 2.51.0</tspan></text>
-  <text x="74" y="394" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Config: </tspan><tspan class="dim">~/.aicommit.config.json</tspan></text>
-  <text x="74" y="430" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Endpoint security: </tspan><tspan class="cyan">https://api.deepseek.com/v1/chat/completions</tspan></text>
-  <text x="74" y="466" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Provider capabilities: </tspan><tspan class="dim">deepseek; stream=true, reasoning=true</tspan></text>
-  <text x="102" y="500" class="mono line dim">tokens=max_tokens, usage=true, finishReason=true</text>
-  <text x="74" y="536" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Credentials: </tspan><tspan class="purple">env:DEEPSEEK_API_KEY</tspan></text>
-  <text x="74" y="572" class="mono line"><tspan class="green">✓</tspan><tspan class="white"> Connectivity: </tspan><tspan class="dim">386ms; model=deepseek-v4-flash; tokens=1.0k</tspan></text>
-
-  <rect x="70" y="618" width="1260" height="78" rx="14" fill="#0d211f" stroke="#256b55"/>
-  <text x="98" y="666" class="mono" font-size="24" font-weight="700"><tspan class="green">✓ Doctor passed</tspan><tspan class="dim"> (7 checks)</tspan></text>
+  <circle cx="70" cy="72" r="8" fill="#ff6b78"/><circle cx="96" cy="72" r="8" fill="#ffd166"/><circle cx="122" cy="72" r="8" fill="#5be7a9"/>
+  <text x="800" y="79" class="mono" font-size="20" font-weight="700" fill="#d9e2ff" text-anchor="middle">Actual CLI transcript · doctor</text>
+  <rect x="1258" y="53" width="260" height="38" rx="19" fill="#1d2742"/>
+  <text x="1388" y="78" class="mono" font-size="14" fill="#93a4c8" text-anchor="middle">credential-free local check</text>
+<text x="72" y="150" class="mono" font-size="17" font-weight="700" fill="#f4f7ff">$ aicommit doctor</text>
+<text x="72" y="177" class="mono" font-size="17" font-weight="700" fill="#61dafb">⚡ aicommit AI-powered commit message generator</text>
+<text x="72" y="204" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  ─────────────────────────────────────────────</text>
+<text x="72" y="231" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  Working directory: ~/aicommit-demo/doctor-repo</text>
+<text x="72" y="258" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="285" class="mono" font-size="17" font-weight="700" fill="#61dafb">  Doctor diagnostics</text>
+<text x="72" y="312" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  ─────────────────────────────────────────────</text>
+<text x="72" y="339" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Node.js: v24.15.0 (supported)</text>
+<text x="72" y="366" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Git: git version 2.50.1 (Apple Git-155)</text>
+<text x="72" y="393" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Config: user</text>
+<text x="72" y="420" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Endpoint security: http://127.0.0.1:64894/v1/chat/completions</text>
+<text x="72" y="447" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Provider capabilities: custom; stream=true, reasoning=configurable, tokens=max_tokens, usage=true, finishReason=true</text>
+<text x="72" y="474" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Credentials: keyless localhost</text>
+<text x="72" y="501" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Connectivity: 17ms; model=readme-demo-model; tokens=0k in + 0k out (total 0k)</text>
+<text x="72" y="528" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="555" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Doctor passed (7 checks)</text>
 </svg>

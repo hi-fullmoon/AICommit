@@ -6,6 +6,8 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 
 ## Usage preview
 
+These screenshots are captured from real interactive terminal sessions in temporary Git repositories against a credential-free local mock provider.
+
 ### Generate a conventional commit
 
 ![AICommit generating and creating a conventional commit](docs/assets/readme/generate-commit.png)

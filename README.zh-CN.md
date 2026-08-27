@@ -6,6 +6,8 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 
 ## 使用预览
 
+以下截图来自临时 Git 仓库中的真实交互式终端会话。Provider 使用无需凭据的本地 mock。
+
 ### 生成 Conventional Commit
 
 ![AICommit 生成并创建 Conventional Commit](docs/assets/readme/generate-commit.png)

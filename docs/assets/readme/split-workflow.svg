@@ -1,66 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" xml:space="preserve">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1677" viewBox="0 0 1600 1677" xml:space="preserve">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#171536"/>
-      <stop offset="0.5" stop-color="#0a1021"/>
-      <stop offset="1" stop-color="#0e2030"/>
+      <stop offset="0" stop-color="#151936"/>
+      <stop offset="0.52" stop-color="#0b1022"/>
+      <stop offset="1" stop-color="#102031"/>
     </linearGradient>
     <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#1b1838"/>
-      <stop offset="1" stop-color="#111d30"/>
+      <stop offset="0" stop-color="#181d37"/>
+      <stop offset="1" stop-color="#12182d"/>
     </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#02040d" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#02040d" flood-opacity="0.55"/>
     </filter>
-    <style>
-      .mono { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }
-      .title { font-size: 20px; font-weight: 700; fill: #d9e2ff; }
-      .line { font-size: 20px; fill: #c9d3ee; }
-      .dim { fill: #74809f; }
-      .green { fill: #69e6a6; }
-      .cyan { fill: #61dafb; }
-      .purple { fill: #b8a2ff; }
-      .yellow { fill: #ffd580; }
-      .pink { fill: #ff8fb3; }
-      .white { fill: #f4f7ff; }
-    </style>
+    <style>.mono { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }</style>
   </defs>
-  <rect width="1400" height="860" rx="30" fill="url(#bg)"/>
-  <circle cx="1230" cy="100" r="200" fill="#7259ff" opacity="0.08"/>
-  <circle cx="140" cy="790" r="210" fill="#27d7b0" opacity="0.06"/>
+  <rect width="1600" height="1677" rx="28" fill="url(#bg)"/>
   <g filter="url(#shadow)">
-    <rect x="36" y="34" width="1328" height="792" rx="24" fill="#090e1e" stroke="#2b3554" stroke-width="2"/>
-    <path d="M60 34h1280a24 24 0 0 1 24 24v54H36V58a24 24 0 0 1 24-24z" fill="url(#bar)"/>
-    <line x1="36" y1="112" x2="1364" y2="112" stroke="#29324d" stroke-width="2"/>
+    <rect x="32" y="32" width="1536" height="1613" rx="22" fill="#090e1e" stroke="#2b3554" stroke-width="2"/>
+    <path d="M54 32h1492a22 22 0 0 1 22 22v58H32V54a22 22 0 0 1 22-22z" fill="url(#bar)"/>
+    <line x1="32" y1="112" x2="1568" y2="112" stroke="#29324d" stroke-width="2"/>
   </g>
-  <circle cx="74" cy="73" r="8" fill="#ff6b78"/>
-  <circle cx="100" cy="73" r="8" fill="#ffd166"/>
-  <circle cx="126" cy="73" r="8" fill="#5be7a9"/>
-  <text x="700" y="80" class="mono title" text-anchor="middle">Plan and apply logical commits</text>
-  <rect x="1080" y="54" width="246" height="38" rx="19" fill="#1d2742"/>
-  <text x="1203" y="79" class="mono" font-size="15" fill="#8fa1c8" text-anchor="middle">fingerprinted · auditable</text>
-
-  <text x="74" y="154" class="mono line"><tspan class="green">❯</tspan><tspan class="white"> aicommit split plan --scope=staged --file=.git/aicommit-plan.json --yes</tspan></text>
-  <text x="74" y="204" class="mono" font-size="23" font-weight="700" fill="#61dafb">Split plan: 3 commits</text>
-
-  <text x="74" y="248" class="mono line"><tspan class="white">1.</tspan><tspan class="cyan"> feat</tspan><tspan class="white">(cli): add scoped npm publishing workflow</tspan></text>
-  <text x="112" y="280" class="mono line"><tspan class="yellow">~</tspan><tspan class="dim"> src/cli.js</tspan></text>
-  <text x="112" y="310" class="mono line"><tspan class="yellow">~</tspan><tspan class="dim"> src/completion.js</tspan></text>
-
-  <text x="74" y="352" class="mono line"><tspan class="white">2.</tspan><tspan class="purple"> test</tspan><tspan class="white">(cli): cover scoped publish commands</tspan></text>
-  <text x="112" y="384" class="mono line"><tspan class="yellow">~</tspan><tspan class="dim"> test/cli.test.js</tspan></text>
-
-  <text x="74" y="426" class="mono line"><tspan class="white">3.</tspan><tspan class="green"> docs</tspan><tspan class="white">: document npm organization install</tspan></text>
-  <text x="112" y="458" class="mono line"><tspan class="yellow">~</tspan><tspan class="dim"> README.md</tspan></text>
-
-  <text x="74" y="504" class="mono line"><tspan class="green">✓</tspan><tspan class="dim"> Split plan written: </tspan><tspan class="purple">.git/aicommit-plan.json</tspan></text>
-  <line x1="74" y1="536" x2="1326" y2="536" stroke="#27314c" stroke-width="2"/>
-
-  <text x="74" y="580" class="mono line"><tspan class="green">❯</tspan><tspan class="white"> aicommit split apply --file=.git/aicommit-plan.json --yes</tspan></text>
-  <text x="74" y="624" class="mono line"><tspan class="green">✓</tspan><tspan class="dim"> Loaded split plan · fingerprint and base HEAD verified</tspan></text>
-  <text x="74" y="660" class="mono line dim">Preflight: scope staged, 3 group(s), HEAD ready, hooks: none</text>
-  <text x="74" y="702" class="mono line"><tspan class="purple">[1/3]</tspan><tspan class="dim"> feat(cli): add scoped npm publishing workflow</tspan></text>
-  <text x="74" y="736" class="mono line"><tspan class="purple">[2/3]</tspan><tspan class="dim"> test(cli): cover scoped publish commands</tspan></text>
-  <text x="74" y="770" class="mono line"><tspan class="purple">[3/3]</tspan><tspan class="dim"> docs: document npm organization install</tspan></text>
-  <text x="74" y="810" class="mono line"><tspan class="green">✓ Done! Created 3 commits.</tspan></text>
+  <circle cx="70" cy="72" r="8" fill="#ff6b78"/><circle cx="96" cy="72" r="8" fill="#ffd166"/><circle cx="122" cy="72" r="8" fill="#5be7a9"/>
+  <text x="800" y="79" class="mono" font-size="20" font-weight="700" fill="#d9e2ff" text-anchor="middle">Actual CLI transcript · split plan and apply</text>
+  <rect x="1258" y="53" width="260" height="38" rx="19" fill="#1d2742"/>
+  <text x="1388" y="78" class="mono" font-size="14" fill="#93a4c8" text-anchor="middle">fingerprinted · auditable</text>
+<text x="72" y="150" class="mono" font-size="17" font-weight="700" fill="#f4f7ff">$ aicommit split plan --scope=staged --file=~/aicommit-demo/split-plan.json --yes --no-reasoning</text>
+<text x="72" y="177" class="mono" font-size="17" font-weight="700" fill="#61dafb">⚡ aicommit AI-powered commit message generator</text>
+<text x="72" y="204" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  ─────────────────────────────────────────────</text>
+<text x="72" y="231" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  Working directory: ~/aicommit-demo/split-repo</text>
+<text x="72" y="258" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="285" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Config loaded from: user</text>
+<text x="72" y="312" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Model: readme-demo-model</text>
+<text x="72" y="339" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Endpoint: http://127.0.0.1:64900/v1/chat/completions</text>
+<text x="72" y="366" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Language: English</text>
+<text x="72" y="393" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Reasoning: off (via CLI)</text>
+<text x="72" y="420" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="447" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ 2 files changed  on main  (split scope: staged)</text>
+<text x="72" y="474" class="mono" font-size="17" font-weight="400" fill="#ffd580">    ~ app.js</text>
+<text x="72" y="501" class="mono" font-size="17" font-weight="400" fill="#ffd580">    + extra.js</text>
+<text x="72" y="528" class="mono" font-size="17" font-weight="400" fill="#8792af">  Context: recent commits:1, package boundaries:1; 249/4000 chars</text>
+<text x="72" y="555" class="mono" font-size="17" font-weight="400" fill="#8792af">- Calling readme-demo-model to plan commits ...</text>
+<text x="72" y="582" class="mono" font-size="17" font-weight="400" fill="#69e6a6">✔ Plan generated in 16ms  · tokens: 0.3k in + 0.04k out (total 0.3k)</text>
+<text x="72" y="609" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="636" class="mono" font-size="17" font-weight="700" fill="#61dafb">  Split plan: 2 commits</text>
+<text x="72" y="663" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="690" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  1. fix: update application value</text>
+<text x="72" y="717" class="mono" font-size="17" font-weight="400" fill="#ffd580">     ~ app.js</text>
+<text x="72" y="744" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="771" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  2. feat: add extra module</text>
+<text x="72" y="798" class="mono" font-size="17" font-weight="400" fill="#ffd580">     + extra.js</text>
+<text x="72" y="825" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="852" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Split plan written: ~/aicommit-demo/split-plan.json</text>
+<text x="72" y="879" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="906" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Dry run complete — no commits were created.</text>
+<text x="72" y="933" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="960" class="mono" font-size="17" font-weight="700" fill="#f4f7ff">$ aicommit split apply --file=~/aicommit-demo/split-plan.json --yes</text>
+<text x="72" y="987" class="mono" font-size="17" font-weight="700" fill="#61dafb">⚡ aicommit AI-powered commit message generator</text>
+<text x="72" y="1014" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  ─────────────────────────────────────────────</text>
+<text x="72" y="1041" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  Working directory: ~/aicommit-demo/split-repo</text>
+<text x="72" y="1068" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1095" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Loaded split plan: ~/aicommit-demo/split-plan.json (scope: staged)</text>
+<text x="72" y="1122" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1149" class="mono" font-size="17" font-weight="700" fill="#61dafb">  Split plan: 2 commits</text>
+<text x="72" y="1176" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1203" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  1. fix: update application value</text>
+<text x="72" y="1230" class="mono" font-size="17" font-weight="400" fill="#ffd580">     ~ app.js</text>
+<text x="72" y="1257" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1284" class="mono" font-size="17" font-weight="400" fill="#cdd6f4">  2. feat: add extra module</text>
+<text x="72" y="1311" class="mono" font-size="17" font-weight="400" fill="#ffd580">     + extra.js</text>
+<text x="72" y="1338" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1365" class="mono" font-size="17" font-weight="400" fill="#8792af">  Preflight: scope staged, 2 group(s), HEAD ready, hooks: none</text>
+<text x="72" y="1392" class="mono" font-size="17" font-weight="400" fill="#b8a2ff">  [1/2] fix: update application value</text>
+<text x="72" y="1419" class="mono" font-size="17" font-weight="400" fill="#b8a2ff">[main 0c99ca2] fix: update application value</text>
+<text x="72" y="1446" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> 1 file changed, 1 insertion(+), 1 deletion(-)</text>
+<text x="72" y="1473" class="mono" font-size="17" font-weight="400" fill="#b8a2ff">  [2/2] feat: add extra module</text>
+<text x="72" y="1500" class="mono" font-size="17" font-weight="400" fill="#b8a2ff">[main 6f2eddc] feat: add extra module</text>
+<text x="72" y="1527" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> 1 file changed, 1 insertion(+)</text>
+<text x="72" y="1554" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> create mode 100644 extra.js</text>
+<text x="72" y="1581" class="mono" font-size="17" font-weight="400" fill="#cdd6f4"> </text>
+<text x="72" y="1608" class="mono" font-size="17" font-weight="400" fill="#69e6a6">  ✓ Done! Created 2 commits.</text>
 </svg>
