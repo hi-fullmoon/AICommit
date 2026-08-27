@@ -1,5 +1,7 @@
 # AICommit
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 AI-powered git commit message generator: reads your diff, asks an AI model for a conventional commit message, and commits after your confirmation.
 
 ## Install
