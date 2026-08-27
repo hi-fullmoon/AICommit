@@ -45,7 +45,9 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: Verify release
-        run: npm run release:npm:check
+        run: GITHUB_REF_NAME="$RELEASE_TAG" npm run release:npm:check
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
       - name: Pack release and verify the Homebrew formula
         run: |
           VERSION=$(node -p "require('./package.json').version")
