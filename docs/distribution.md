@@ -24,7 +24,7 @@ The release workflow uses npm Trusted Publishing on a GitHub-hosted runner with 
 ```bash
 workdir=$(mktemp -d)
 cd "$workdir"
-npm install --package-lock-only @hifullmoon/aicommit@1.4.0
+npm install --package-lock-only @hifullmoon/aicommit@1.5.0
 npm audit signatures
 ```
 
@@ -69,7 +69,7 @@ Verify checksums and the cryptographically signed provenance against the exact r
 校验 checksum，并把加密签名的 provenance 限定到本仓库的 release workflow：
 
 ```bash
-version=v1.4.0
+version=v1.5.0
 asset_dir=$(mktemp -d)
 gh release download "$version" -R hi-fullmoon/AICommit -D "$asset_dir"
 cd "$asset_dir"

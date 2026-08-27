@@ -136,7 +136,7 @@ test('release and CI workflows preserve signed npm and Homebrew distribution gat
   assert.match(release, /PACK_FILENAME=\$\(npm pack --json/);
   assert.match(release, /gh release upload/);
   assert.match(release, /cmp dist\/aicommit\.rb Formula\/aicommit\.rb/);
-  assert.match(release, /brew install --formula Formula\/aicommit\.rb/);
+  assert.match(release, /brew install --formula aicommit-ci\/release\/aicommit/);
   assert.match(ci, /homebrew-smoke:/);
   assert.match(ci, /AICOMMIT_HOMEBREW_SMOKE: '1'/);
   assert.equal(manifest.publishConfig.provenance, true);

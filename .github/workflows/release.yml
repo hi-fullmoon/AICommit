@@ -80,12 +80,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
-      - name: Install and test the published formula
+      - name: Install the published formula from a temporary tap
         run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install --formula Formula/aicommit.rb
+          HOMEBREW_NO_AUTO_UPDATE=1 brew tap-new --no-git aicommit-ci/release
+          cp Formula/aicommit.rb "$(brew --repository aicommit-ci/release)/Formula/aicommit.rb"
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install --formula aicommit-ci/release/aicommit
           aicommit --version
           aicommit --help >/dev/null
           HOME="$RUNNER_TEMP/aicommit-home" aicommit config validate --output=json
       - name: Uninstall smoke formula
         if: always()
-        run: brew uninstall --force aicommit || true
+        run: |
+          brew uninstall --force aicommit-ci/release/aicommit || true
+          brew untap --force aicommit-ci/release || true

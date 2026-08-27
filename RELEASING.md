@@ -77,7 +77,7 @@ Protect `main` and `v*` tags, require the CI jobs (including Homebrew smoke), an
    npm pack --dry-run
    ```
 
-   On macOS, also execute the real formula install smoke (it uses a uniquely named temporary formula and removes it afterward):
+   On macOS, also execute the real formula install smoke (it uses a uniquely named temporary tap and removes it afterward):
 
    ```bash
    AICOMMIT_HOMEBREW_SMOKE=1 HOMEBREW_NO_AUTO_UPDATE=1 npm run test:homebrew
