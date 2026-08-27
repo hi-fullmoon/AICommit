@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-27
+
+### Fixed
+
+- Normalized Windows 8.3 path aliases before validating split plan destinations, so repository-local output is rejected before any provider request.
+
 ## [1.5.0] - 2026-08-27
 
 ### Added
@@ -105,5 +111,6 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
 [1.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.0
