@@ -7,7 +7,7 @@ AI-powered git commit message generator: reads your diff, asks an AI model for a
 ## Install
 
 ```bash
-npm install --global @hi-fullmoon/aicommit
+npm install --global @hifullmoon/aicommit
 ```
 
 Or install with Homebrew:

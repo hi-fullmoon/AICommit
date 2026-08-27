@@ -1,9 +1,9 @@
 class Aicommit < Formula
   desc "Safe, local-first AI commit message generator"
   homepage "https://github.com/hi-fullmoon/AICommit"
-  url "https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-1.4.0.tgz"
+  url "https://registry.npmjs.org/@hifullmoon/aicommit/-/aicommit-1.4.0.tgz"
   version "1.4.0"
-  sha256 "bf1feaa4cf3aeee49b82d845c58f19b1da2390c7fa8e97fd924f5972f3fc908a"
+  sha256 "97d5a778337697021070e5976c355d0e110d0b5a12a2b9d9ce99a3bb7c649507"
   license "MIT"
 
   depends_on "node"

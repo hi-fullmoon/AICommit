@@ -19,7 +19,7 @@ const manifest = JSON.parse(await readFile(new URL('../package.json', import.met
 test('release assets bind the npm tarball, Homebrew formula, SBOM, and checksums', async () => {
   const root = await mkdtemp(join(tmpdir(), 'aicommit-release-assets-'));
   try {
-    const tarball = join(root, `hi-fullmoon-aicommit-${manifest.version}.tgz`);
+    const tarball = join(root, `hifullmoon-aicommit-${manifest.version}.tgz`);
     const sbom = join(root, `aicommit-${manifest.version}.spdx.json`);
     await writeFile(tarball, 'deterministic tarball fixture');
     await writeFile(sbom, '{"spdxVersion":"SPDX-2.3"}\n');
@@ -27,7 +27,7 @@ test('release assets bind the npm tarball, Homebrew formula, SBOM, and checksums
     assert.equal(result.tarballSha256, hash('deterministic tarball fixture'));
     assert.equal(
       result.formulaUrl,
-      `https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-${manifest.version}.tgz`,
+      `https://registry.npmjs.org/@hifullmoon/aicommit/-/aicommit-${manifest.version}.tgz`,
     );
     const formula = await readFile(result.formulaPath, 'utf8');
     assert.match(formula, /class Aicommit < Formula/);
@@ -48,7 +48,7 @@ test('formula rendering rejects insecure or incomplete release coordinates', asy
   const valid = {
     version: '1.4.0',
     sha256: 'a'.repeat(64),
-    url: 'https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-1.4.0.tgz',
+    url: 'https://registry.npmjs.org/@hifullmoon/aicommit/-/aicommit-1.4.0.tgz',
   };
   assert.match(await renderHomebrewFormula(valid), /sha256 "a{64}"/);
   await assert.rejects(
@@ -59,19 +59,19 @@ test('formula rendering rejects insecure or incomplete release coordinates', asy
 });
 
 test('npm organization coordinates keep the scoped registry identity and canonical assets', () => {
-  assert.deepEqual(scopedPackage('@hi-fullmoon/aicommit'), {
-    organization: 'hi-fullmoon',
+  assert.deepEqual(scopedPackage('@hifullmoon/aicommit'), {
+    organization: 'hifullmoon',
     packageName: 'aicommit',
   });
-  assert.deepEqual(npmPackageCoordinates('@hi-fullmoon/aicommit', '1.4.0'), {
-    scope: 'hi-fullmoon',
+  assert.deepEqual(npmPackageCoordinates('@hifullmoon/aicommit', '1.4.0'), {
+    scope: 'hifullmoon',
     packageName: 'aicommit',
     canonicalTarballName: 'aicommit-1.4.0.tgz',
-    packedTarballName: 'hi-fullmoon-aicommit-1.4.0.tgz',
-    registryUrl: 'https://registry.npmjs.org/@hi-fullmoon/aicommit/-/aicommit-1.4.0.tgz',
+    packedTarballName: 'hifullmoon-aicommit-1.4.0.tgz',
+    registryUrl: 'https://registry.npmjs.org/@hifullmoon/aicommit/-/aicommit-1.4.0.tgz',
   });
-  assert.equal(assertOrgMembership({ zhengbiwen: 'owner' }, 'zhengbiwen', 'hi-fullmoon'), 'owner');
-  assert.throws(() => assertOrgMembership({}, 'zhengbiwen', 'hi-fullmoon'), /not a member/);
+  assert.equal(assertOrgMembership({ zhengbiwen: 'owner' }, 'zhengbiwen', 'hifullmoon'), 'owner');
+  assert.throws(() => assertOrgMembership({}, 'zhengbiwen', 'hifullmoon'), /not a member/);
   assert.throws(() => scopedPackage('aicommit'), /@organization\/package/);
 });
 
@@ -140,7 +140,7 @@ test('release and CI workflows preserve signed npm and Homebrew distribution gat
   assert.match(ci, /homebrew-smoke:/);
   assert.match(ci, /AICOMMIT_HOMEBREW_SMOKE: '1'/);
   assert.equal(manifest.publishConfig.provenance, true);
-  assert.equal(manifest.name, '@hi-fullmoon/aicommit');
+  assert.equal(manifest.name, '@hifullmoon/aicommit');
 });
 
 test('release, rollback, verification, and preset compatibility docs remain executable', async () => {

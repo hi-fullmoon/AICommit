@@ -9,7 +9,7 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 使用 npm：
 
 ```bash
-npm install --global @hi-fullmoon/aicommit
+npm install --global @hifullmoon/aicommit
 ```
 
 或使用 Homebrew：

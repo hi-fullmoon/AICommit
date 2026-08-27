@@ -1,5 +1,5 @@
 {
-  "name": "@hi-fullmoon/aicommit",
+  "name": "@hifullmoon/aicommit",
   "version": "1.4.0",
   "description": "Safe, local-first AI commit message generator for Git workflows",
   "type": "module",
