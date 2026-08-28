@@ -46,7 +46,9 @@ complete -F _aicommit aicommit
 
 const ZSH = `#compdef aicommit
 _aicommit() {
+  local curcontext="$curcontext" state state_descr line
   local -a commands options
+  typeset -A opt_args
   commands=(
     'setup:interactive configuration wizard'
     'doctor:diagnose configuration and connectivity'
@@ -71,15 +73,17 @@ _aicommit() {
     '--output=[output mode]:output:(text json)'
     '--debug[show debug details]'
   )
-  _arguments -C $options '*::argument:->args'
+  _arguments -C $options '1:command:->command' '*::argument:->args'
   case $state in
+    command)
+      _describe 'command' commands
+      ;;
     args)
-      case $words[2] in
+      case $line[1] in
         config) _values 'config action' show validate path ;;
         policy) _values 'policy action' template check ;;
         completion) _values 'shell' bash zsh fish ;;
         split) _values 'split action' run plan apply resume abort ;;
-        *) _describe 'command' commands ;;
       esac
       ;;
   esac

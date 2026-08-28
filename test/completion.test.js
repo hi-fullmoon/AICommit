@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import { generateCompletion } from '../src/completion.js';
 
@@ -36,3 +36,24 @@ test(
     execFileSync('bash', ['-n'], { input: generateCompletion('bash') });
   },
 );
+
+const hasZsh = spawnSync('zsh', ['--version'], { encoding: 'utf8' }).status === 0;
+
+test('generated Zsh completion dispatches nested split actions', { skip: !hasZsh }, () => {
+  const harness = `
+_arguments() {
+  state=args
+  line=(split)
+}
+_describe() {
+  print -r -- "describe:$*"
+}
+_values() {
+  print -r -- "values:$*"
+}
+${generateCompletion('zsh')}
+`;
+  const output = execFileSync('zsh', ['-f'], { input: harness, encoding: 'utf8' });
+  assert.match(output, /values:split action run plan apply resume abort/);
+  assert.doesNotMatch(output, /describe:command/);
+});
