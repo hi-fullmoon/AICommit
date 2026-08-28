@@ -217,7 +217,7 @@ Requests retry only transient failures: HTTP 429, recoverable 5xx responses, net
 
 ### Built-in provider defaults
 
-Setup uses validated provider defaults shipped with AICommit. For another OpenAI-compatible service, add a named provider directly to the user config; no separate manifest installation or third-party executable code is required.
+Setup uses validated provider defaults shipped with AICommit. OpenAI includes GPT-4o and GPT-5.6 profiles; DeepSeek includes V4 Flash and Pro; OpenRouter includes Auto plus current GPT, Claude, Gemini, DeepSeek, Qwen, GLM, Kimi, and Grok choices; Ollama includes Qwen 3, DeepSeek R1, and GPT-OSS profiles. These are starting points: setup keeps the model IDs editable and existing user-defined profiles take precedence. For another OpenAI-compatible service, add a named provider directly to the user config; no separate manifest installation or third-party executable code is required.
 
 ### Saving tokens
 
@@ -306,12 +306,37 @@ Completion scripts are generated from the installed CLI and contain no configura
 # Bash
 aicommit completion bash > ~/.local/share/bash-completion/completions/aicommit
 
-# Zsh (ensure the destination directory is in $fpath)
+# Zsh
+mkdir -p ~/.zfunc
 aicommit completion zsh > ~/.zfunc/_aicommit
 
 # Fish
 aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 ```
+
+For Zsh, add the completion directory to `fpath` before the line that initializes Oh My Zsh or another completion framework. For Oh My Zsh, place this in `~/.zshrc` before `source "$ZSH/oh-my-zsh.sh"`:
+
+```zsh
+fpath=("$HOME/.zfunc" $fpath)
+source "$ZSH/oh-my-zsh.sh"
+```
+
+If no Zsh framework initializes completion, use this instead:
+
+```zsh
+fpath=("$HOME/.zfunc" $fpath)
+autoload -Uz compinit
+compinit
+```
+
+Restart Zsh after editing the file. If a previous completion cache prevents discovery, remove only that cache before restarting:
+
+```bash
+rm -f "$HOME"/.zcompdump*
+exec zsh
+```
+
+Verify the registration with `whence -w _aicommit`; it should print `_aicommit: function`. Then type `aicommit`, add a space, and press `Tab`.
 
 ### Machine-readable output
 

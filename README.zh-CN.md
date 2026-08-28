@@ -219,7 +219,7 @@ aicommit policy check --range=origin/main..HEAD --output=json
 
 ### 内置 Provider 默认值
 
-setup 使用随 AICommit 一起发布并经过校验的 Provider 默认值。需要其他 OpenAI 兼容服务时，直接在用户配置中增加命名 Provider；无需安装额外清单或执行第三方代码。
+setup 使用随 AICommit 一起发布并经过校验的 Provider 默认值。OpenAI 预置 GPT-4o 与 GPT-5.6 系列，DeepSeek 预置 V4 Flash 与 Pro，OpenRouter 预置 Auto 以及当前常用的 GPT、Claude、Gemini、DeepSeek、Qwen、GLM、Kimi 和 Grok，Ollama 预置 Qwen 3、DeepSeek R1 与 GPT-OSS。这些配置只是起点：setup 仍允许编辑模型 ID，已有的用户自定义模型配置也会优先保留。需要其他 OpenAI 兼容服务时，直接在用户配置中增加命名 Provider；无需安装额外清单或执行第三方代码。
 
 ### 节省 Token
 
@@ -308,12 +308,37 @@ aicommit -h              # 帮助
 # Bash
 aicommit completion bash > ~/.local/share/bash-completion/completions/aicommit
 
-# Zsh（请确保目标目录位于 $fpath 中）
+# Zsh
+mkdir -p ~/.zfunc
 aicommit completion zsh > ~/.zfunc/_aicommit
 
 # Fish
 aicommit completion fish > ~/.config/fish/completions/aicommit.fish
 ```
+
+Zsh 还需要在 Oh My Zsh 或其他补全框架初始化之前，将补全目录加入 `fpath`。使用 Oh My Zsh 时，请在 `~/.zshrc` 的 `source "$ZSH/oh-my-zsh.sh"` 之前加入：
+
+```zsh
+fpath=("$HOME/.zfunc" $fpath)
+source "$ZSH/oh-my-zsh.sh"
+```
+
+如果没有使用负责初始化补全的 Zsh 框架，则改用：
+
+```zsh
+fpath=("$HOME/.zfunc" $fpath)
+autoload -Uz compinit
+compinit
+```
+
+修改后重启 Zsh。如果旧补全缓存导致脚本仍未被发现，可以只清理该缓存后再重启：
+
+```bash
+rm -f "$HOME"/.zcompdump*
+exec zsh
+```
+
+运行 `whence -w _aicommit` 验证注册结果；正常应输出 `_aicommit: function`。随后输入 `aicommit`、空一格并按 `Tab` 即可使用补全。
 
 ### 机器可读输出
 

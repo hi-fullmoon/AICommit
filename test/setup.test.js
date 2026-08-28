@@ -160,6 +160,9 @@ test('runSetup saves a preset provider atomically with environment credentials',
     defaultModel: 'quality',
     models: {
       'gpt-4o': { label: 'GPT-4o', modelId: 'gpt-test' },
+      'gpt-5.6-sol': { label: 'GPT-5.6 Sol', modelId: 'gpt-5.6-sol' },
+      'gpt-5.6-terra': { label: 'GPT-5.6 Terra', modelId: 'gpt-5.6-terra' },
+      'gpt-5.6-luna': { label: 'GPT-5.6 Luna', modelId: 'gpt-5.6-luna' },
       quality: { modelId: 'gpt-quality' },
     },
   });
@@ -221,7 +224,7 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   writeFileSync(targetPath, '{invalid json\n');
   chmodSync(targetPath, 0o600);
 
-  const selections = ['deepseek', 'zh'];
+  const selections = ['deepseek', 'chat', 'zh'];
   const modelInputs = ['chat', 'deepseek-test'];
   const spinnerEvents = [];
   await runSetup({

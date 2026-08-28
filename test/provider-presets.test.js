@@ -20,7 +20,7 @@ test('bundled provider presets are strict, versioned, and core-compatible', asyn
   });
   assert.equal(loaded.manifest.kind, 'aicommit-provider-presets');
   assert.equal(loaded.manifest.schemaVersion, 2);
-  assert.match(loaded.manifest.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(loaded.manifest.version, '2.1.0');
   assert.equal(loaded.manifest.compatibility.adapterContract, 1);
   assert.ok(loaded.manifest.providers.length >= 5);
   assert.ok(loaded.manifest.providers.every((provider) => !Object.hasOwn(provider, 'apiKey')));
@@ -34,6 +34,34 @@ test('bundled provider presets are strict, versioned, and core-compatible', asyn
       defaultModel: 'default',
       models: { default: { modelId: 'kimi-for-coding' } },
     },
+  );
+
+  const providers = Object.fromEntries(
+    loaded.manifest.providers.map((provider) => [provider.id, provider]),
+  );
+  assert.deepEqual(
+    Object.values(providers.openai.models).map((model) => model.modelId),
+    ['gpt-4o', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+  );
+  assert.equal(providers.deepseek.models.pro.modelId, 'deepseek-v4-pro');
+  assert.deepEqual(
+    Object.values(providers.openrouter.models).map((model) => model.modelId),
+    [
+      'openai/gpt-4o-mini',
+      'openrouter/auto',
+      'openai/gpt-5.6-terra',
+      'anthropic/claude-sonnet-5',
+      'google/gemini-3.7-flash',
+      'deepseek/deepseek-v4-pro',
+      'qwen/qwen3.8-max',
+      'z-ai/glm-5.3',
+      'moonshotai/kimi-k3',
+      'x-ai/grok-4.6',
+    ],
+  );
+  assert.deepEqual(
+    Object.values(providers.ollama.models).map((model) => model.modelId),
+    ['qwen3:8b', 'deepseek-r1:8b', 'gpt-oss:20b'],
   );
 
   const raw = JSON.parse(await readFile(BUNDLED_PROVIDER_PRESET_PATH, 'utf8'));

@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-28
+
+### Added
+
+- Expanded bundled model presets for OpenAI, DeepSeek, OpenRouter, and Ollama, including current GPT, Claude, Gemini, Qwen, GLM, Kimi, Grok, DeepSeek, and local open-model choices.
+
 ## [2.1.0] - 2026-08-27
 
 ### Changed
@@ -147,7 +153,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.0
 [2.1.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.1.0
 [2.0.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.1
 [2.0.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.0
