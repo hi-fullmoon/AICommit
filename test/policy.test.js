@@ -58,6 +58,26 @@ test('structured policy prompt remains authoritative after user-approved guidanc
   assert.match(prompt, /Language: English/);
 });
 
+test('runtime commitlint constraints enforce disallowed scopes and complete header length', () => {
+  const policy = normalizeCommitPolicy({
+    scope: { mode: 'optional', values: [], disallowedValues: ['legacy'] },
+    subject: { maxLength: 72, headerMaxLength: 24 },
+    language: 'en',
+  });
+  const prompt = buildCommitPolicyPrompt(policy);
+  assert.match(prompt, /disallowed values: legacy/);
+  assert.match(prompt, /Complete header: at most 24 characters/);
+
+  const forbiddenScope = validateCommitCandidate('feat(legacy): update api', { policy });
+  assert.deepEqual(
+    forbiddenScope.errors.map((item) => item.code),
+    ['scope_value'],
+  );
+  const longHeader = validateCommitCandidate('feat: add a deliberately long subject', { policy });
+  assert.ok(longHeader.errors.some((item) => item.code === 'header_length'));
+  assert.equal(validateCommitCandidate('feat: add retry', { policy }).valid, true);
+});
+
 test('candidate validator enforces type, scope, subject, body, breaking, and explicit language', () => {
   const policy = normalizeCommitPolicy({
     types: ['feat', 'fix'],

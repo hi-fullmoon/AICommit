@@ -381,20 +381,22 @@ function quotedValues(text) {
 
 function enumRule(text, name) {
   const index = text.search(new RegExp(`['"]?${name}['"]?\\s*:`));
-  if (index < 0) return [];
+  if (index < 0) return null;
   const window = text.slice(index, index + 3000);
   const nested = window.match(
-    /\[\s*[012]\s*,\s*['"](?:always|never)['"]\s*,\s*\[([\s\S]*?)\]\s*\]/i,
+    /\[\s*([012])\s*,\s*['"](always|never)['"]\s*,\s*\[([\s\S]*?)\]\s*\]/i,
   );
-  return nested ? quotedValues(nested[1]) : [];
+  if (!nested || nested[1] === '0') return null;
+  return { condition: nested[2].toLowerCase(), values: quotedValues(nested[3]) };
 }
 
 function numberRule(text, name) {
   const index = text.search(new RegExp(`['"]?${name}['"]?\\s*:`));
   if (index < 0) return null;
   const window = text.slice(index, index + 500);
-  const match = window.match(/\[\s*[012]\s*,\s*['"](?:always|never)['"]\s*,\s*(\d{1,3})\s*\]/i);
-  return match ? Number(match[1]) : null;
+  const match = window.match(/\[\s*([012])\s*,\s*['"](always|never)['"]\s*,\s*(\d{1,3})\s*\]/i);
+  if (!match || match[1] === '0') return null;
+  return { condition: match[2].toLowerCase(), value: Number(match[3]) };
 }
 
 export function detectCommitlintConstraints(
@@ -410,22 +412,53 @@ export function detectCommitlintConstraints(
     ) {
       continue;
     }
-    const types = enumRule(text, 'type-enum').filter((value) => /^[a-z][a-z0-9-]*$/.test(value));
-    const scopes = enumRule(text, 'scope-enum').filter((value) => /^[a-z0-9._/-]+$/i.test(value));
-    const subjectMaxLength = numberRule(text, 'subject-max-length');
-    const headerMaxLength = numberRule(text, 'header-max-length');
-    if (!types.length && !scopes.length && !subjectMaxLength && !headerMaxLength) continue;
+    const typeRule = enumRule(text, 'type-enum');
+    const scopeRule = enumRule(text, 'scope-enum');
+    const subjectLengthRule = numberRule(text, 'subject-max-length');
+    const headerLengthRule = numberRule(text, 'header-max-length');
+    const validTypes = (typeRule?.values || []).filter((value) => /^[a-z][a-z0-9-]*$/.test(value));
+    const validScopes = (scopeRule?.values || []).filter((value) => /^[a-z0-9._/-]+$/i.test(value));
+    const types = typeRule?.condition === 'always' ? validTypes : [];
+    const disallowedTypes = typeRule?.condition === 'never' ? validTypes : [];
+    const scopes = scopeRule?.condition === 'always' ? validScopes : [];
+    const disallowedScopes = scopeRule?.condition === 'never' ? validScopes : [];
+    const subjectMaxLength =
+      subjectLengthRule?.condition === 'always' ? subjectLengthRule.value : null;
+    const headerMaxLength =
+      headerLengthRule?.condition === 'always' ? headerLengthRule.value : null;
+    const unsupported = [];
+    if (subjectLengthRule?.condition === 'never') unsupported.push('subject-max-length: never');
+    if (headerLengthRule?.condition === 'never') unsupported.push('header-max-length: never');
+    if (
+      !types.length &&
+      !disallowedTypes.length &&
+      !scopes.length &&
+      !disallowedScopes.length &&
+      !subjectMaxLength &&
+      !headerMaxLength &&
+      !unsupported.length
+    ) {
+      continue;
+    }
     const lines = [`Detected commitlint constraints from ${path}:`];
     if (types.length) lines.push(`- allowed types: ${types.join(', ')}`);
+    if (disallowedTypes.length) lines.push(`- disallowed types: ${disallowedTypes.join(', ')}`);
     if (scopes.length) lines.push(`- allowed scopes: ${scopes.join(', ')}`);
+    if (disallowedScopes.length) {
+      lines.push(`- disallowed scopes: ${disallowedScopes.join(', ')}`);
+    }
     if (subjectMaxLength) lines.push(`- subject max length: ${subjectMaxLength}`);
     if (headerMaxLength) lines.push(`- header max length: ${headerMaxLength}`);
+    if (unsupported.length) lines.push(`- unsupported inverted rules: ${unsupported.join(', ')}`);
     return {
       path,
       types,
+      disallowedTypes,
       scopes,
+      disallowedScopes,
       subjectMaxLength,
       headerMaxLength,
+      unsupported,
       text: truncate(lines.join('\n'), settings.maxChars),
     };
   }
@@ -436,17 +469,72 @@ export function applyCommitlintPolicy(commitPolicy, constraints, fallbackLanguag
   if (!constraints) return commitPolicy;
   const current = normalizeCommitPolicy(commitPolicy, fallbackLanguage);
   const patch = {};
-  if (constraints.types?.length) patch.types = constraints.types;
-  if (constraints.scopes?.length) {
-    patch.scope = {
-      ...current.scope,
-      values: constraints.scopes,
-    };
+  if (constraints.unsupported?.length) {
+    throw new Error(
+      `Invalid config: unsupported inverted commitlint rules: ${constraints.unsupported.join(', ')}.`,
+    );
   }
-  if (constraints.subjectMaxLength) {
+
+  let types = [...current.types];
+  if (constraints.types?.length) {
+    types = types.filter((type) => constraints.types.includes(type));
+  }
+  if (constraints.disallowedTypes?.length) {
+    types = types.filter((type) => !constraints.disallowedTypes.includes(type));
+  }
+  if (!types.length) {
+    throw new Error('Invalid config: commitPolicy and commitlint allow no common commit types.');
+  }
+  if (types.length !== current.types.length) patch.types = types;
+
+  let scopeMode = current.scope.mode;
+  let scopes = [...current.scope.values];
+  const disallowedScopes = new Set(current.scope.disallowedValues || []);
+  const hasFiniteScopeAllowlist = Boolean(
+    current.scope.values.length || constraints.scopes?.length,
+  );
+  if (constraints.scopes?.length) {
+    scopes = scopes.length
+      ? scopes.filter((scope) => constraints.scopes.includes(scope))
+      : [...constraints.scopes];
+  }
+  for (const scope of constraints.disallowedScopes || []) disallowedScopes.add(scope);
+  if (scopes.length) scopes = scopes.filter((scope) => !disallowedScopes.has(scope));
+  if (!scopes.length && hasFiniteScopeAllowlist) {
+    if (scopeMode === 'required') {
+      throw new Error('Invalid config: commitPolicy and commitlint allow no common scopes.');
+    }
+    scopeMode = 'forbidden';
+    disallowedScopes.clear();
+  }
+  if (
+    scopeMode !== current.scope.mode ||
+    JSON.stringify(scopes) !== JSON.stringify(current.scope.values) ||
+    JSON.stringify([...disallowedScopes]) !== JSON.stringify(current.scope.disallowedValues || [])
+  ) {
+    const nextScope = {
+      ...current.scope,
+      mode: scopeMode,
+      values: scopes,
+      ...(disallowedScopes.size ? { disallowedValues: [...disallowedScopes] } : {}),
+    };
+    if (!disallowedScopes.size) delete nextScope.disallowedValues;
+    patch.scope = nextScope;
+  }
+  if (constraints.subjectMaxLength || constraints.headerMaxLength) {
     patch.subject = {
       ...current.subject,
-      maxLength: Math.min(current.subject.maxLength, constraints.subjectMaxLength),
+      maxLength: constraints.subjectMaxLength
+        ? Math.min(current.subject.maxLength, constraints.subjectMaxLength)
+        : current.subject.maxLength,
+      ...(constraints.headerMaxLength
+        ? {
+            headerMaxLength: Math.min(
+              current.subject.headerMaxLength ?? Infinity,
+              constraints.headerMaxLength,
+            ),
+          }
+        : {}),
     };
   }
   const merged = mergeCommitPolicy(current, patch);

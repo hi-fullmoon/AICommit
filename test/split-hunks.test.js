@@ -13,7 +13,7 @@ import {
   stripHunkCatalog,
   validateHunkTransaction,
 } from '../src/split-hunks.js';
-import { executeSplit, resumeSplit } from '../src/split.js';
+import { executeSplit, getSplitStateFingerprint, resumeSplit } from '../src/split.js';
 
 function git(repo, args, input) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', input });
@@ -69,7 +69,7 @@ test('experimental hunk transaction uses temporary patches and reconstructs the 
   const plan = createSplitPlanArtifact({
     scope: 'all',
     baseHead,
-    fingerprint: 'a'.repeat(64),
+    fingerprint: getSplitStateFingerprint(repo, true, changes, 'all'),
     language: 'en',
     commitPolicy: DEFAULT_COMMIT_POLICY,
     changes,
@@ -160,7 +160,7 @@ test('checkpoint resume continues a same-file hunk transaction without replaying
   const plan = createSplitPlanArtifact({
     scope: 'all',
     baseHead,
-    fingerprint: 'b'.repeat(64),
+    fingerprint: getSplitStateFingerprint(repo, true, changes, 'all'),
     language: 'en',
     commitPolicy: DEFAULT_COMMIT_POLICY,
     changes,

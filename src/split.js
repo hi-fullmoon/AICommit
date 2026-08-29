@@ -117,17 +117,22 @@ function canonicalDestination(path) {
   }
 }
 
-function safeExportPlanPath(projectRoot, path) {
+export function safeExportPlanPath(projectRoot, path) {
   const absolute = resolve(path);
   const rawGitDir = readGit(['rev-parse', '--git-dir'], projectRoot).trim();
   const gitDir = isAbsolute(rawGitDir) ? rawGitDir : resolve(projectRoot, rawGitDir);
   const canonicalRoot = canonicalExistingPath(projectRoot);
   const canonicalGitDir = canonicalDestination(gitDir);
+  const canonicalAicommitDir = canonicalDestination(join(gitDir, 'aicommit'));
   const canonicalPlan = canonicalDestination(absolute);
-  if (pathIsWithin(canonicalRoot, canonicalPlan) && !pathIsWithin(canonicalGitDir, canonicalPlan)) {
+  const insideAicommitDir = pathIsWithin(canonicalAicommitDir, canonicalPlan);
+  if (
+    (pathIsWithin(canonicalRoot, canonicalPlan) && !insideAicommitDir) ||
+    (pathIsWithin(canonicalGitDir, canonicalPlan) && !insideAicommitDir)
+  ) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,
-      'Split plan output must be outside the working tree or inside the repository Git directory.',
+      "Split plan output must be outside the working tree or inside the repository Git directory's dedicated .git/aicommit/ metadata subdirectory.",
     );
   }
   return absolute;
@@ -336,8 +341,13 @@ export async function generateSplitPlan(
       : []),
     'Rules:',
     `- Each group must represent ONE logical change and use one allowed type: ${policy.types.join(', ')}.`,
-    `- Scope mode: ${policy.scope.mode}${policy.scope.values.length ? `; allowed scopes: ${policy.scope.values.join(', ')}` : ''}.`,
+    `- Scope mode: ${policy.scope.mode}${policy.scope.values.length ? `; allowed scopes: ${policy.scope.values.join(', ')}` : ''}${policy.scope.disallowedValues?.length ? `; disallowed scopes: ${policy.scope.disallowedValues.join(', ')}` : ''}.`,
     `- Subject text must not exceed ${policy.subject.maxLength} characters.`,
+    ...(policy.subject.headerMaxLength
+      ? [
+          `- The complete commit header must not exceed ${policy.subject.headerMaxLength} characters.`,
+        ]
+      : []),
     `- Body mode: ${policy.body.mode}; at most ${policy.body.maxLines} non-empty lines.`,
     `- Breaking changes: ${policy.breakingChange}.`,
     '- Give every message a short subject line; when the subject alone does not say it all, add a body of bullet lines (what changed and why), each starting with "- " — the same format the single-commit flow produces.',
@@ -1277,13 +1287,39 @@ export function executeSplit(
           groups,
           hunkMode: allFiles.some((change) => change.hunks?.length),
         });
+      const fingerprintBeforeSnapshot = getSplitStateFingerprint(
+        projectRoot,
+        hasHead(projectRoot),
+        undefined,
+        scope,
+      );
+      if (fingerprintBeforeSnapshot !== plan.fingerprint) {
+        throw fail(
+          ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+          'Split state changed before the transaction snapshot was captured.',
+        );
+      }
+      options.faultInjector?.('before_snapshot_capture', { plan });
       const snapshots = captureCheckpointSnapshots(projectRoot, scope, allFiles);
+      const fingerprintAfterSnapshot = getSplitStateFingerprint(
+        projectRoot,
+        hasHead(projectRoot),
+        undefined,
+        scope,
+      );
+      if (fingerprintAfterSnapshot !== plan.fingerprint) {
+        throw fail(
+          ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+          'Split state changed while the transaction snapshot was being captured.',
+        );
+      }
       hunkExecution = validateHunkTransaction(projectRoot, plan, snapshots);
       transaction = {
         ...createSplitCheckpoint(projectRoot, plan, snapshots),
         faultInjector: options.faultInjector,
       };
     } catch (err) {
+      if (err?.category === ERROR_CATEGORIES.CONCURRENT_MODIFICATION) throw err;
       throw fail(ERROR_CATEGORIES.GIT_STATE, `Failed to create split checkpoint: ${err.message}`, {
         cause: err,
       });

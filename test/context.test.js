@@ -182,4 +182,68 @@ test('commitlint detection ignores executable code and extracts only recognized 
   assert.deepEqual(result.types, ['docs']);
   assert.equal(result.headerMaxLength, 80);
   assert.doesNotMatch(result.text, /sendSecrets|attacker/);
+
+  const policy = applyCommitlintPolicy(undefined, result, 'en');
+  assert.deepEqual(policy.types, ['docs']);
+  assert.equal(policy.subject.headerMaxLength, 80);
+});
+
+test('commitlint never enums exclude values and disabled rules stay inactive', (t) => {
+  const root = makeRepo(t);
+  writeFileSync(
+    join(root, 'commitlint.config.cjs'),
+    "module.exports = { rules: { 'type-enum': [2, 'never', ['wip']], " +
+      "'scope-enum': [2, 'never', ['legacy']], " +
+      "'subject-max-length': [0, 'always', 10] } };\n",
+  );
+
+  const result = detectCommitlintConstraints(root, { enabled: true, maxChars: 500 });
+  assert.deepEqual(result.types, []);
+  assert.deepEqual(result.disallowedTypes, ['wip']);
+  assert.deepEqual(result.scopes, []);
+  assert.deepEqual(result.disallowedScopes, ['legacy']);
+  assert.equal(result.subjectMaxLength, null);
+
+  const policy = applyCommitlintPolicy(undefined, result, 'en');
+  assert.doesNotMatch(policy.types.join(','), /wip/);
+  assert.deepEqual(policy.scope.disallowedValues, ['legacy']);
+});
+
+test('commitlint constraints intersect with the existing team policy', () => {
+  const teamPolicy = {
+    version: 1,
+    types: ['feat', 'fix'],
+    scope: { mode: 'required', values: ['api', 'web'] },
+    subject: { maxLength: 72 },
+    body: { mode: 'optional', maxLines: 8 },
+    breakingChange: 'allow',
+    language: 'en',
+  };
+  const effective = applyCommitlintPolicy(
+    teamPolicy,
+    {
+      types: ['feat', 'docs'],
+      disallowedTypes: [],
+      scopes: ['api', 'legacy'],
+      disallowedScopes: [],
+      subjectMaxLength: 60,
+      headerMaxLength: 72,
+      unsupported: [],
+    },
+    'en',
+  );
+  assert.deepEqual(effective.types, ['feat']);
+  assert.deepEqual(effective.scope.values, ['api']);
+  assert.equal(effective.subject.maxLength, 60);
+  assert.equal(effective.subject.headerMaxLength, 72);
+
+  assert.throws(
+    () =>
+      applyCommitlintPolicy(
+        teamPolicy,
+        { types: ['docs'], disallowedTypes: [], scopes: [], disallowedScopes: [] },
+        'en',
+      ),
+    /no common commit types/,
+  );
 });

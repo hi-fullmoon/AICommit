@@ -336,7 +336,7 @@ const SENSITIVE_FILE_RE =
 const PRIVATE_KEY_RE = /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/i;
 const AWS_KEY_RE = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
 const ASSIGNED_SECRET_RE =
-  /(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\b\s*[:=]\s*["']?)([^\s,"'}]{8,})/gi;
+  /(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\b["']?\s*[:=]\s*["']?)([^\s,"'}]{8,})/gi;
 
 export function isSensitiveFile(path) {
   const normalized = String(path || '').replace(/\\/g, '/');

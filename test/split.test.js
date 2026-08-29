@@ -29,6 +29,7 @@ import {
   captureUntrackedSnapshots,
   preflightSplit,
   resumeSplit,
+  safeExportPlanPath,
   splitFlow,
 } from '../src/split.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -46,6 +47,15 @@ function makeRepo() {
 }
 
 const M = (s) => ({ status: 'M', path: s });
+
+test('split plan exports cannot target Git control files', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  assert.throws(() => safeExportPlanPath(repo, join(repo, '.git', 'config')), /\.git\/aicommit/);
+
+  const dedicated = join(repo, '.git', 'aicommit', 'plan.json');
+  assert.equal(safeExportPlanPath(repo, dedicated), dedicated);
+});
 
 test('normalizePlan assembles a subject+body message from subject/body fields', () => {
   const groups = [
@@ -367,6 +377,40 @@ test('split state fingerprint detects changes to untracked file content', (t) =>
   writeFileSync(join(repo, 'new.txt'), 'second version\n');
   const after = getSplitStateFingerprint(repo, false, getAllChangedFiles(repo));
   assert.notEqual(after, before);
+});
+
+test('executeSplit rejects content changed during transaction snapshot capture', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'app.txt'), 'base\n');
+  execFileSync('git', ['add', 'app.txt'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'app.txt'), 'reviewed\n');
+  const files = getAllChangedFiles(repo);
+
+  assert.throws(
+    () =>
+      executeSplit(
+        [{ message: 'fix: update app', files: ['app.txt'] }],
+        repo,
+        files,
+        false,
+        'all',
+        {
+          faultInjector(event) {
+            if (event === 'before_snapshot_capture') {
+              writeFileSync(join(repo, 'app.txt'), 'changed concurrently\n');
+            }
+          },
+        },
+      ),
+    /changed while the transaction snapshot was being captured/,
+  );
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
+  assert.equal(
+    execFileSync('git', ['log', '-1', '--format=%s'], { cwd: repo, encoding: 'utf8' }).trim(),
+    'init',
+  );
 });
 
 test('executeSplit on an unborn branch commits every group without deleting earlier files', (t) => {

@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
@@ -35,7 +35,13 @@ function clonePolicy(policy, language) {
   return {
     version: normalized.version,
     types: [...normalized.types],
-    scope: { ...normalized.scope, values: [...normalized.scope.values] },
+    scope: {
+      ...normalized.scope,
+      values: [...normalized.scope.values],
+      ...(normalized.scope.disallowedValues
+        ? { disallowedValues: [...normalized.scope.disallowedValues] }
+        : {}),
+    },
     subject: { ...normalized.subject },
     body: { ...normalized.body },
     breakingChange: normalized.breakingChange,
@@ -310,12 +316,19 @@ export async function writeSplitPlanArtifact(path, artifact) {
     await writeFile(temporary, JSON.stringify(validated, null, 2) + '\n', {
       encoding: 'utf8',
       mode: 0o600,
+      flag: 'wx',
     });
-    await rename(temporary, absolute);
+    // A same-directory hard link installs the completed file atomically while
+    // failing with EEXIST instead of replacing an unrelated destination.
+    await link(temporary, absolute);
   } catch (err) {
     await unlink(temporary).catch(() => {});
+    if (err.code === 'EEXIST') {
+      throw new Error(`Split plan output already exists: ${absolute}`, { cause: err });
+    }
     throw err;
   }
+  await unlink(temporary).catch(() => {});
   return absolute;
 }
 

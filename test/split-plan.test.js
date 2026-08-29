@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,4 +165,14 @@ test('split plan reader rejects symbolic links', async (t) => {
   const link = join(root, 'link.json');
   symlinkSync(target, link);
   await assert.rejects(() => readSplitPlanArtifact(link), /regular, non-symbolic-link/);
+});
+
+test('split plan writer never overwrites an existing destination', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-plan-existing-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'important.json');
+  writeFileSync(path, '{"keep":true}\n');
+
+  await assert.rejects(() => writeSplitPlanArtifact(path, validPlan()), /already exists/);
+  assert.equal(await readFile(path, 'utf8'), '{"keep":true}\n');
 });

@@ -46,7 +46,13 @@ function clonePolicy(policy) {
   return {
     ...policy,
     types: [...policy.types],
-    scope: { ...policy.scope, values: [...policy.scope.values] },
+    scope: {
+      ...policy.scope,
+      values: [...policy.scope.values],
+      ...(policy.scope.disallowedValues
+        ? { disallowedValues: [...policy.scope.disallowedValues] }
+        : {}),
+    },
     subject: { ...policy.subject },
     body: { ...policy.body },
   };
@@ -69,6 +75,14 @@ export function mergeCommitPolicy(base = DEFAULT_COMMIT_POLICY, override = {}) {
               : base.scope.values,
           }
         : override.scope;
+  if (object(scope)) {
+    if (Array.isArray(scope.values)) scope.values = [...scope.values];
+    if (Array.isArray(scope.disallowedValues)) {
+      scope.disallowedValues = [...scope.disallowedValues];
+    } else {
+      delete scope.disallowedValues;
+    }
+  }
   const subject =
     override.subject === undefined
       ? { ...base.subject }
@@ -111,6 +125,25 @@ function assertStringArray(values, name, { max = 64, pattern } = {}) {
   }
 }
 
+function assertOptionalStringArray(values, name, { max = 64, pattern } = {}) {
+  if (values === undefined) return;
+  if (!Array.isArray(values) || values.length > max) {
+    throw new Error(`Invalid config "${name}": expected at most ${max} strings.`);
+  }
+  if (
+    values.some(
+      (value) =>
+        typeof value !== 'string' ||
+        !value ||
+        value.length > 64 ||
+        (pattern && !pattern.test(value)),
+    ) ||
+    new Set(values).size !== values.length
+  ) {
+    throw new Error(`Invalid config "${name}": contains an invalid or duplicate value.`);
+  }
+}
+
 export function validateCommitPolicyConfig(value) {
   if (!object(value)) throw new Error('Invalid config "commitPolicy": expected an object.');
   if (value.version !== 1) {
@@ -137,6 +170,14 @@ export function validateCommitPolicyConfig(value) {
   ) {
     throw new Error('Invalid config "commitPolicy.scope.values": contains an invalid value.');
   }
+  assertOptionalStringArray(value.scope.disallowedValues, 'commitPolicy.scope.disallowedValues', {
+    pattern: SCOPE_RE,
+  });
+  if (value.scope.disallowedValues?.some((scope) => value.scope.values.includes(scope))) {
+    throw new Error(
+      'Invalid config "commitPolicy.scope": allowed and disallowed values must not overlap.',
+    );
+  }
 
   if (!object(value.subject)) {
     throw new Error('Invalid config "commitPolicy.subject": expected an object.');
@@ -148,6 +189,16 @@ export function validateCommitPolicyConfig(value) {
   ) {
     throw new Error(
       'Invalid config "commitPolicy.subject.maxLength": expected an integer between 1 and 200.',
+    );
+  }
+  if (
+    value.subject.headerMaxLength !== undefined &&
+    (!Number.isInteger(value.subject.headerMaxLength) ||
+      value.subject.headerMaxLength < 1 ||
+      value.subject.headerMaxLength > 1000)
+  ) {
+    throw new Error(
+      'Invalid config "commitPolicy.subject.headerMaxLength": expected an integer between 1 and 1000.',
     );
   }
 
@@ -197,7 +248,10 @@ function scopeRule(policy) {
   const allowed = policy.scope.values.length
     ? `; allowed values: ${policy.scope.values.join(', ')}`
     : '';
-  return `${policy.scope.mode}${allowed}`;
+  const disallowed = policy.scope.disallowedValues?.length
+    ? `; disallowed values: ${policy.scope.disallowedValues.join(', ')}`
+    : '';
+  return `${policy.scope.mode}${allowed}${disallowed}`;
 }
 
 export function buildCommitPolicyPrompt(policy, customPrompt = '') {
@@ -219,6 +273,9 @@ export function buildCommitPolicyPrompt(policy, customPrompt = '') {
     `- Allowed types: ${policy.types.join(', ')}`,
     `- Scope: ${scopeRule(policy)}`,
     `- Subject text: required, at most ${policy.subject.maxLength} characters`,
+    ...(policy.subject.headerMaxLength
+      ? [`- Complete header: at most ${policy.subject.headerMaxLength} characters`]
+      : []),
     `- Body: ${policy.body.mode}, at most ${policy.body.maxLines} non-empty lines, separated from the subject by a blank line`,
     `- Breaking change: ${policy.breakingChange}; use "!" and/or a "BREAKING CHANGE:" footer`,
     `- Language: ${targetLanguage}`,
@@ -344,11 +401,25 @@ export function validateCommitCandidate(message, { policy, diff = '' } = {}) {
         ),
       );
     }
+    if (parsed.scope && normalizedPolicy.scope.disallowedValues?.includes(parsed.scope)) {
+      issues.push(issue('scope_value', `Scope "${parsed.scope}" is forbidden.`));
+    }
     if ([...parsed.subject].length > normalizedPolicy.subject.maxLength) {
       issues.push(
         issue(
           'subject_length',
           `Subject exceeds ${normalizedPolicy.subject.maxLength} characters.`,
+        ),
+      );
+    }
+    if (
+      normalizedPolicy.subject.headerMaxLength &&
+      [...parsedMessage.header].length > normalizedPolicy.subject.headerMaxLength
+    ) {
+      issues.push(
+        issue(
+          'header_length',
+          `Header exceeds ${normalizedPolicy.subject.headerMaxLength} characters.`,
         ),
       );
     }
@@ -414,6 +485,9 @@ export function buildPolicyCorrectionPrompt(badReply, errors, policy) {
     `Allowed types: ${policy.types.join(', ')}`,
     `Scope rule: ${scopeRule(policy)}`,
     `Maximum subject length: ${policy.subject.maxLength}`,
+    ...(policy.subject.headerMaxLength
+      ? [`Maximum complete header length: ${policy.subject.headerMaxLength}`]
+      : []),
     `Body rule: ${policy.body.mode}, maximum ${policy.body.maxLines} non-empty lines`,
     `Breaking-change rule: ${policy.breakingChange}`,
     'Rewrite it once. Output only the complete corrected commit message; do not include explanations or fences.',

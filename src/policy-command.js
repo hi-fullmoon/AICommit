@@ -21,8 +21,19 @@ function normalizedPolicyDocument(policy) {
   return {
     version: policy.version,
     types: [...policy.types],
-    scope: { mode: policy.scope.mode, values: [...policy.scope.values] },
-    subject: { maxLength: policy.subject.maxLength },
+    scope: {
+      mode: policy.scope.mode,
+      values: [...policy.scope.values],
+      ...(policy.scope.disallowedValues?.length
+        ? { disallowedValues: [...policy.scope.disallowedValues] }
+        : {}),
+    },
+    subject: {
+      maxLength: policy.subject.maxLength,
+      ...(policy.subject.headerMaxLength
+        ? { headerMaxLength: policy.subject.headerMaxLength }
+        : {}),
+    },
     body: { mode: policy.body.mode, maxLines: policy.body.maxLines },
     breakingChange: policy.breakingChange,
     language: policy.language,

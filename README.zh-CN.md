@@ -417,7 +417,7 @@ exec zsh
 
 `aicommit split`（也可以显式写成 `aicommit split run`）会询问是对暂存 index 快照分组，还是对全部已暂存、未暂存和未跟踪变更做文件级分组。边界必须明确时请使用 `--scope=staged` 或 `--scope=all`，所有非交互运行都应显式指定范围。提交前可以审阅计划、为选中的组重新生成消息，或直接编辑 JSON 计划。敏感内容检测会在非交互 Provider 请求或自动暂存前 fail closed。
 
-如需可审计的两步流程，使用 `aicommit split plan --scope=staged|all --file=<path>` 导出版本化 JSON 工件，再用 `aicommit split apply --file=<path>` 在接触 index 前重新校验 base commit、变更集和内容指纹。计划文件应保存在工作区之外或 `.git` 下，避免被纳入自身计划。
+如需可审计的两步流程，使用 `aicommit split plan --scope=staged|all --file=<path>` 导出版本化 JSON 工件，再用 `aicommit split apply --file=<path>` 在接触 index 前重新校验 base commit、变更集和内容指纹。计划文件应保存在工作区之外或专用的 `.git/aicommit/` 目录下，避免被纳入自身计划；导出不会覆盖已有目标文件。
 
 执行过程使用临时 index，并在 `.git/aicommit` 下保存不含代码内容的 checkpoint。hook、Git 错误、中断或崩溃发生后，已完成提交仍保留在历史中，待处理快照也会保留；失败报告会显示已 checkpoint、执行中、待处理，以及当前工作区 / index 状态。解决问题后运行 `aicommit split resume`。恢复流程会先协调“提交完成后崩溃”的可能窗口，再创建任何新提交，因此不会重复或遗漏已完成分组。如果你通过其他 Git 流程有意完成或替换了中断工作，请运行 `aicommit split abort`；它只删除过期 checkpoint，绝不会改写 HEAD、index 或工作区。新的 split 提交流程会在联系 Provider 前检测现有 checkpoint。如果规划或预检在第一组之前失败，不会创建任何 split 提交，真实 index 也保持不变。
 

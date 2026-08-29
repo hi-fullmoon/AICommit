@@ -153,12 +153,20 @@ test('sensitive model input protection omits risky files and redacts credentials
     '+++ b/src/config.js',
     '@@ -1 +1 @@',
     '+const accessToken = "token-value-12345";',
+    'diff --git a/src/settings.json b/src/settings.json',
+    '--- a/src/settings.json',
+    '+++ b/src/settings.json',
+    '@@ -1 +1 @@',
+    '+{"apiKey":"json-secret-value-12345","password": "json-password-value"}',
   ].join('\n');
 
   const protectedInput = protectSensitiveDiff(diff);
   assert.match(protectedInput.diff, /sensitive file — content omitted/);
   assert.doesNotMatch(protectedInput.diff, /super-secret-value/);
-  assert.doesNotMatch(protectedInput.diff, /token-value-12345/);
+  assert.doesNotMatch(
+    protectedInput.diff,
+    /token-value-12345|json-secret-value-12345|json-password-value/,
+  );
   assert.match(protectedInput.diff, /\[REDACTED\]/);
   assert.ok(protectedInput.findings.length >= 2);
   assert.equal(isSensitiveFile('.env.production'), true);
@@ -167,10 +175,13 @@ test('sensitive model input protection omits risky files and redacts credentials
   assert.equal(isSensitiveFile('.aicommit/config.json'), true);
 
   const preview = protectSensitiveText(
-    'API_KEY=preview-secret-value\nAWS=AKIAABCDEFGHIJKLMNOP\n',
+    'API_KEY=preview-secret-value\nAWS=AKIAABCDEFGHIJKLMNOP\n"access_token": "quoted-preview-secret"\n',
     'notes.txt',
   );
-  assert.doesNotMatch(preview.text, /preview-secret-value|AKIAABCDEFGHIJKLMNOP/);
+  assert.doesNotMatch(
+    preview.text,
+    /preview-secret-value|AKIAABCDEFGHIJKLMNOP|quoted-preview-secret/,
+  );
   assert.match(preview.text, /\[REDACTED\]/);
   assert.equal(preview.findings.length, 2);
 });
