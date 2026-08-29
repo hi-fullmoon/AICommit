@@ -4,6 +4,17 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-08-29
+
+### Fixed
+
+- Combined repository commit policies with commitlint constraints without allowing either source to relax the other, including correct `never` and complete-header length handling.
+- Hardened split transactions against changes during snapshot capture, restricted plan exports to safe locations, and prevented existing output files from being overwritten.
+
+### Security
+
+- Redacted credential assignments with quoted JSON or YAML keys before diffs and untracked previews are sent to a model.
+
 ## [2.2.0] - 2026-08-28
 
 ### Added
@@ -153,7 +164,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.1
 [2.2.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.0
 [2.1.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.1.0
 [2.0.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.0.1
