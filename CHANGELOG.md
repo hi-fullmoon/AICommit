@@ -4,6 +4,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-08-31
+
 ### Added
 
 - Added per-model reasoning mode and effort selection to interactive setup, with a balanced `medium` default and model-aware OpenAI option filtering.
@@ -168,7 +170,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.2...HEAD
+[2.2.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.2
 [2.2.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.1
 [2.2.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.0
 [2.1.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.1.0
