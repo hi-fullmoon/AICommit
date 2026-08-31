@@ -4,6 +4,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Added
+
+- Added per-model reasoning mode and effort selection to interactive setup, with a balanced `medium` default and model-aware OpenAI option filtering.
+
 ## [2.2.1] - 2026-08-29
 
 ### Fixed

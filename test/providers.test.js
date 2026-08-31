@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { detectProviderType, getProviderAdapter, normalizeUsage } from '../src/providers.js';
+import {
+  canDisableReasoningForModel,
+  detectProviderType,
+  getProviderAdapter,
+  normalizeUsage,
+  reasoningEffortsForModel,
+  REASONING_EFFORTS,
+} from '../src/providers.js';
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'providers');
 const fixtureFiles = (await readdir(fixtureDir)).filter((name) => name.endsWith('.json')).sort();
@@ -38,6 +45,16 @@ test('provider detection distinguishes native Ollama from its compatible /v1 end
     () => detectProviderType('https://gateway.example.test/chat', 'unknown'),
     /Unknown providerType/,
   );
+});
+
+test('setup effort choices follow known OpenAI model limits', () => {
+  assert.deepEqual(reasoningEffortsForModel('openai', 'o3'), ['low', 'medium', 'high']);
+  assert.deepEqual(reasoningEffortsForModel('openai', 'gpt-5.1-codex'), ['low', 'medium', 'high']);
+  assert.deepEqual(reasoningEffortsForModel('openai', 'gpt-5.6-sol'), REASONING_EFFORTS);
+  assert.deepEqual(reasoningEffortsForModel('openrouter', 'openai/o3'), REASONING_EFFORTS);
+  assert.equal(canDisableReasoningForModel('openai', 'o3'), false);
+  assert.equal(canDisableReasoningForModel('openai', 'gpt-5.1-codex'), true);
+  assert.equal(canDisableReasoningForModel('openrouter', 'openai/o3'), true);
 });
 
 test('usage normalization accepts OpenAI, Anthropic, Ollama, and total-only shapes', () => {

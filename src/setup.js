@@ -9,11 +9,56 @@ import password from '@inquirer/password';
 import confirm from '@inquirer/confirm';
 
 import { checkConnection } from './api.js';
-import { CONFIG_SCHEMA_VERSION, isSecureApiUrl, validateUserConfig } from './config.js';
+import {
+  CONFIG_SCHEMA_VERSION,
+  DEFAULT_CONFIG,
+  isSecureApiUrl,
+  validateUserConfig,
+} from './config.js';
 import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 import { loadProviderPresetManifest } from './provider-presets.js';
 import { resolveConfigLocations, userConfigLocations } from './config-paths.js';
+import {
+  canDisableReasoningForModel,
+  getProviderAdapter,
+  reasoningEffortsForModel,
+} from './providers.js';
+
+const REASONING_MODES = new Set(['auto', 'on', 'off']);
+const REASONING_MODE_CHOICES = Object.freeze([
+  {
+    name: 'Provider default (auto)',
+    value: 'auto',
+    description: 'Do not send an explicit reasoning switch',
+  },
+  {
+    name: 'Enabled (on)',
+    value: 'on',
+    description: 'Request reasoning and configure its effort',
+  },
+  {
+    name: 'Disabled (off)',
+    value: 'off',
+    description: 'Explicitly disable reasoning when the model supports that switch',
+  },
+]);
+
+function suggestedReasoningMode({ currentModel, globalReasoning, apiUrl, providerType, modelId }) {
+  const configured = currentModel.reasoning?.mode ?? globalReasoning?.mode;
+  if (REASONING_MODES.has(configured)) return configured;
+  return getProviderAdapter({ apiUrl, providerType, modelId }).capabilities.reasoning === 'native'
+    ? 'on'
+    : 'auto';
+}
+
+function effortDescription(effort) {
+  if (effort === 'low') return 'Fastest and lowest-cost reasoning';
+  if (effort === 'medium') return 'Balanced reasoning (default)';
+  if (effort === 'high') return 'Deeper reasoning with more latency and tokens';
+  if (effort === 'xhigh') return 'Very deep reasoning for models that support it';
+  return 'Maximum reasoning for models that support it';
+}
 
 // Merge the wizard's answers into the one supported Provider/Model schema.
 // Existing providers and unrelated global settings are preserved; the
@@ -175,6 +220,7 @@ export async function runSetup(dependencies = {}) {
 
   // ── 4. Model ────────────────────────────────────────────────────────
 
+  const providerType = presetAdapter || existingProvider.providerType || 'custom';
   const models = { ...presetModels, ...existingProvider.models };
   let suggestedModel = existingProvider.defaultModel || presetDefaultModel;
   while (true) {
@@ -192,7 +238,46 @@ export async function runSetup(dependencies = {}) {
       default: currentModel.modelId || undefined,
       validate: (v) => (v.trim() ? true : 'Model ID is required'),
     });
-    models[modelName] = { ...currentModel, modelId: modelIdInput.trim() };
+    const modelId = modelIdInput.trim();
+    const reasoningModeChoices = canDisableReasoningForModel(providerType, modelId)
+      ? REASONING_MODE_CHOICES
+      : REASONING_MODE_CHOICES.filter((choice) => choice.value !== 'off');
+    const suggestedMode = suggestedReasoningMode({
+      currentModel,
+      globalReasoning: existing.reasoning,
+      apiUrl,
+      providerType,
+      modelId,
+    });
+    const reasoningMode = await selectPrompt({
+      message: `Reasoning mode for ${modelName}`,
+      default: reasoningModeChoices.some((choice) => choice.value === suggestedMode)
+        ? suggestedMode
+        : 'auto',
+      choices: reasoningModeChoices,
+    });
+    const reasoning = { ...currentModel.reasoning, mode: reasoningMode };
+    if (reasoningMode === 'on') {
+      const efforts = reasoningEffortsForModel(providerType, modelId);
+      const configuredEffort = currentModel.reasoning?.effort ?? existing.reasoning?.effort;
+      const defaultEffort = efforts.includes(configuredEffort)
+        ? configuredEffort
+        : efforts.includes(DEFAULT_CONFIG.reasoning.effort)
+          ? DEFAULT_CONFIG.reasoning.effort
+          : efforts[0];
+      reasoning.effort = await selectPrompt({
+        message: `Reasoning effort for ${modelName}`,
+        default: defaultEffort,
+        choices: efforts.map((effort) => ({
+          name: effort,
+          value: effort,
+          description: effortDescription(effort),
+        })),
+      });
+    } else {
+      delete reasoning.effort;
+    }
+    models[modelName] = { ...currentModel, modelId, reasoning };
     const addAnother = await confirmPrompt({
       message: 'Add another model?',
       default: false,
@@ -214,6 +299,11 @@ export async function runSetup(dependencies = {}) {
           })),
         });
   const selectedModel = models[defaultModel];
+  const selectedReasoning = {
+    ...DEFAULT_CONFIG.reasoning,
+    ...existing.reasoning,
+    ...selectedModel.reasoning,
+  };
 
   // ── 5. Commit message language ──────────────────────────────────────
 
@@ -230,7 +320,7 @@ export async function runSetup(dependencies = {}) {
     apiUrl,
     apiKey,
     apiKeyEnv,
-    providerType: presetAdapter || existingProvider.providerType || 'custom',
+    providerType,
     defaultModel,
     models,
     ...(existingProvider.retry ? { retry: existingProvider.retry } : {}),
@@ -257,6 +347,7 @@ export async function runSetup(dependencies = {}) {
       const report = await connectionCheck({
         ...entry,
         ...selectedModel,
+        reasoning: selectedReasoning,
         apiKey: apiKeyEnv ? process.env[apiKeyEnv] : apiKey,
         maxTokens: 64,
         timeoutMs: 120000,
@@ -291,6 +382,16 @@ export async function runSetup(dependencies = {}) {
   console.log('  ' + chalk.dim(`  Path:     ${targetPath}`));
   console.log(
     '  ' + chalk.dim(`  Provider: ${providerName}/${defaultModel} (${selectedModel.modelId})`),
+  );
+  console.log(
+    '  ' +
+      chalk.dim(
+        `  Reasoning: ${
+          selectedReasoning.mode === 'on'
+            ? `${selectedReasoning.mode}/${selectedReasoning.effort}`
+            : selectedReasoning.mode
+        }`,
+      ),
   );
   console.log(
     '  ' + chalk.dim(`  API key:  ${apiKeyEnv ? `env:${apiKeyEnv}` : maskApiKey(apiKey)}`),

@@ -6,6 +6,8 @@ export const PROVIDER_TYPES = Object.freeze([
   'ollama',
   'custom',
 ]);
+export const REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
+export const DEFAULT_REASONING_EFFORT = 'medium';
 const PROVIDER_TYPE_SET = new Set(PROVIDER_TYPES);
 
 export function isProviderType(value) {
@@ -60,6 +62,24 @@ function openAIReasoningEfforts(modelId) {
   if (/^gpt-5\.1(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high'];
   if (/^gpt-5(?:-|$)/.test(id) || /^o\d(?:-|$)/.test(id)) return ['low', 'medium', 'high'];
   return null;
+}
+
+// Setup uses this to avoid offering an effort that a recognized official
+// OpenAI model will reject. Other adapters either accept the common effort
+// vocabulary, normalize it, or are model-dependent, so they retain the full
+// list and let the user/provider make the final choice.
+export function reasoningEffortsForModel(providerType, modelId) {
+  if ((providerType || '').toLowerCase() === 'openai') {
+    const supported = openAIReasoningEfforts(modelId);
+    if (supported) return supported.filter((effort) => effort !== 'none');
+  }
+  return [...REASONING_EFFORTS];
+}
+
+export function canDisableReasoningForModel(providerType, modelId) {
+  if ((providerType || '').toLowerCase() !== 'openai') return true;
+  const supported = openAIReasoningEfforts(modelId);
+  return !supported || supported.includes('none');
 }
 
 function openAIReasoningEffort(modelId, enabled, effort) {
@@ -179,7 +199,7 @@ function applyReasoning(payload, provider, modelId, reasoning, nativeOllama) {
   if (mode === 'auto') return;
 
   const enabled = mode === 'on';
-  const effort = reasoning?.effort || 'medium';
+  const effort = reasoning?.effort || DEFAULT_REASONING_EFFORT;
 
   if (provider === 'openai') {
     if (!isOpenAIReasoningModel(modelId)) return;

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import chalk from 'chalk';
 
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import { REASONING_EFFORTS } from './providers.js';
 
 const _require = createRequire(import.meta.url);
 const { version: VERSION } = _require('../package.json');
@@ -364,7 +365,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
   }
 
-  const reasoningLevels = ['off', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const reasoningLevels = ['off', ...REASONING_EFFORTS];
   if (cliReasoning && !reasoningLevels.includes(cliReasoning)) {
     throw fail(
       ERROR_CATEGORIES.CONFIG,

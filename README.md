@@ -46,6 +46,8 @@ aicommit setup
 
 It walks you through choosing built-in provider defaults (OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key and one or more models, choosing a default model and commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit/config.json`); a malformed or old-format existing file is backed up before replacement. The legacy `~/.aicommit.config.json` path remains readable and `aicommit setup` migrates its settings to the canonical path when saving.
 
+The model step configures reasoning independently for each profile. `auto` sends no explicit reasoning switch and leaves the behavior to the provider, `on` requests reasoning and then prompts for its effort, and `off` explicitly disables reasoning when the model supports that switch. Effort defaults to `medium`. For known OpenAI models, setup removes unsupported mode and effort choices, including `off` when reasoning cannot be disabled. When editing an existing model, the wizard preselects valid saved values, falling back to the global reasoning settings when applicable; an unsupported saved mode falls back to `auto`.
+
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from the project config at `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
 To keep a key out of the JSON file, set `"apiKeyEnv": "OPENAI_API_KEY"` (and leave `apiKey` empty), or enter `env:OPENAI_API_KEY` in the setup wizard. Environment variables take priority over every other credential source and are recommended for CI and other stateless environments.
@@ -68,10 +70,7 @@ Each provider owns one or more named model profiles. Switch providers with `-p` 
         "default": {
           "label": "MiniMax M3",
           "modelId": "MiniMax-M3",
-          "extraBody": {
-            "thinking": { "type": "disabled" },
-            "reasoning_split": true
-          }
+          "reasoning": { "mode": "on", "effort": "medium" }
         }
       }
     },
@@ -81,12 +80,83 @@ Each provider owns one or more named model profiles. Switch providers with `-p` 
       "apiKeyEnv": "DEEPSEEK_API_KEY",
       "defaultModel": "chat",
       "models": {
-        "chat": { "modelId": "deepseek-v4-flash" },
-        "reasoner": { "modelId": "deepseek-v4-pro" }
+        "chat": {
+          "modelId": "deepseek-v4-flash",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        },
+        "reasoner": {
+          "modelId": "deepseek-v4-pro",
+          "reasoning": { "mode": "on", "effort": "high" }
+        }
+      }
+    },
+    "openai": {
+      "providerType": "openai",
+      "apiUrl": "https://api.openai.com/v1/chat/completions",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "defaultModel": "fast",
+      "models": {
+        "fast": {
+          "modelId": "gpt-4o",
+          "reasoning": { "mode": "auto" }
+        },
+        "reasoner": {
+          "modelId": "gpt-5.6-sol",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        }
+      }
+    },
+    "openrouter": {
+      "providerType": "openrouter",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "defaultModel": "auto",
+      "models": {
+        "auto": {
+          "modelId": "openrouter/auto",
+          "reasoning": { "mode": "auto" }
+        },
+        "quality": {
+          "modelId": "openai/gpt-5.6-terra",
+          "reasoning": { "mode": "on", "effort": "high" }
+        }
+      }
+    },
+    "ollama": {
+      "providerType": "ollama",
+      "apiUrl": "http://127.0.0.1:11434/api/chat",
+      "defaultModel": "qwen",
+      "models": {
+        "qwen": {
+          "modelId": "qwen3:8b",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        },
+        "deepseek": {
+          "modelId": "deepseek-r1:8b",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        }
       }
     }
   }
 }
+```
+
+After exporting the API-key variables used by the providers you configured, validate each profile before its first real commit:
+
+```bash
+export MINIMAX_API_KEY='your-minimax-api-key'
+export DEEPSEEK_API_KEY='your-deepseek-api-key'
+export OPENAI_API_KEY='your-openai-api-key'
+export OPENROUTER_API_KEY='your-openrouter-api-key'
+
+aicommit doctor -p minimax -m default
+aicommit doctor -p deepseek -m reasoner
+aicommit doctor -p openai -m reasoner
+aicommit doctor -p openrouter -m quality
+aicommit doctor -p ollama -m qwen
+
+aicommit -p minimax
+aicommit -p deepseek -m reasoner
 ```
 
 `schemaVersion`, `defaultProvider`, `providers`, and every provider's `providerType`, `apiUrl`, `defaultModel`, and non-empty `models` map are required. Without `-p`, AICommit selects `defaultProvider`; without `-m`, it selects that provider's `defaultModel`. Model profiles inherit global generation settings and provider connection settings, then may override `temperature`, `maxTokens`, `timeoutMs`, `reasoning`, and `extraBody`. Provider and model names are stable local aliases; `modelId` is the identifier sent to the API.
@@ -123,43 +193,9 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `stripFiles`         | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper                                                       |
 | `extraBody`          | Model-profile JSON fields merged into the request body, except `model`/`messages` (default: `{}`)                                                                                                                            |
-| `reasoning`          | Global or model-profile reasoning controls: `mode`, `effort`, `maxTokens`, and `maxDisplayChars`; defaults to `mode: "on"` and streams reasoning automatically                                                               |
+| `reasoning`          | Global or model-profile reasoning controls: `mode` / `effort` (default: `on` / `medium`), `maxTokens`, and `maxDisplayChars`                                                                                                 |
 
 Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, [Kimi Code](https://www.kimi.com/code/docs/), Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
-
-### Kimi Code example
-
-Create an API key in the Kimi Code console, export it without storing the secret in JSON, and select the bundled preset in `aicommit setup`. For a manual configuration, use the OpenAI-compatible full endpoint:
-
-```bash
-export KIMI_API_KEY='your-kimi-code-api-key'
-```
-
-```json
-{
-  "schemaVersion": 1,
-  "defaultProvider": "kimi-code",
-  "providers": {
-    "kimi-code": {
-      "providerType": "custom",
-      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "defaultModel": "default",
-      "models": {
-        "default": { "modelId": "kimi-for-coding" }
-      }
-    }
-  }
-}
-```
-
-Verify the endpoint, key, and model before the first commit:
-
-```bash
-aicommit doctor -p kimi-code
-```
-
-`kimi-for-coding` is available to all Kimi Code membership tiers and follows the service's rolling model upgrades. Kimi Code membership keys use `api.kimi.com`; Kimi Platform pay-as-you-go keys use a different endpoint and are not interchangeable.
 
 See the bilingual [provider compatibility table](docs/provider-compatibility.md) for streaming, reasoning, token-budget, usage, and authentication boundaries.
 

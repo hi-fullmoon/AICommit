@@ -23,6 +23,10 @@ import {
 const bundledPresetLoader = () =>
   loadProviderPresetManifest({ path: BUNDLED_PROVIDER_PRESET_PATH, coreVersion: '1.5.1' });
 
+function unexpectedPrompt(kind, question) {
+  assert.fail(`Unexpected ${kind} prompt: ${question.message}`);
+}
+
 const entry = {
   providerType: 'deepseek',
   apiUrl: 'https://api.deepseek.com/v1/chat/completions',
@@ -117,22 +121,64 @@ test('runSetup saves a preset provider atomically with environment credentials',
     else process.env.AICOMMIT_SETUP_TEST_KEY = previousKey;
   });
 
-  const selections = ['openai', 'quality', 'en'];
-  const modelInputs = ['gpt-4o', 'gpt-test', 'quality', 'gpt-quality'];
+  const modelNames = ['gpt-4o', 'quality'];
   let addAnotherCount = 0;
+  const effortPrompts = [];
   const spinnerEvents = [];
   await runSetup({
     targetPath,
-    selectPrompt: async () => selections.shift(),
-    inputPrompt: async () => modelInputs.shift(),
+    selectPrompt: async (question) => {
+      if (question.message === 'Choose a provider') return 'openai';
+      if (question.message === 'Reasoning mode for gpt-4o') {
+        assert.equal(question.default, 'auto');
+        return 'off';
+      }
+      if (question.message === 'Reasoning mode for quality') {
+        assert.equal(question.default, 'on');
+        assert.deepEqual(
+          question.choices.map((choice) => choice.value),
+          ['auto', 'on'],
+          'o3 cannot disable reasoning',
+        );
+        return 'on';
+      }
+      if (question.message === 'Reasoning effort for quality') {
+        effortPrompts.push(question.message);
+        assert.equal(question.default, 'medium');
+        assert.deepEqual(
+          question.choices.map((choice) => choice.value),
+          ['low', 'medium', 'high'],
+          'known OpenAI models only offer supported effort levels',
+        );
+        return question.default;
+      }
+      if (question.message === 'Choose the default model') return 'quality';
+      if (question.message === 'Commit message language') return 'en';
+      return unexpectedPrompt('select', question);
+    },
+    inputPrompt: async (question) => {
+      if (question.message === 'Model name (used with aicommit -m <name>)') {
+        return modelNames.shift();
+      }
+      if (question.message === 'Model ID for gpt-4o') return 'gpt-test';
+      if (question.message === 'Model ID for quality') return 'o3';
+      return unexpectedPrompt('input', question);
+    },
     passwordPrompt: async () => 'env:AICOMMIT_SETUP_TEST_KEY',
     confirmPrompt: async (question) => {
       if (question.message === 'Add another model?') return addAnotherCount++ === 0;
-      return true;
+      if (question.message === 'Test the connection now?') return true;
+      return unexpectedPrompt('confirm', question);
     },
     connectionCheck: async (config) => {
       assert.equal(config.apiKey, 'secret-from-env');
-      assert.equal(config.modelId, 'gpt-quality');
+      assert.equal(config.modelId, 'o3');
+      assert.deepEqual(config.reasoning, {
+        mode: 'on',
+        effort: 'medium',
+        maxTokens: 4096,
+        maxDisplayChars: 12000,
+      });
       return { elapsed: 42 };
     },
     spinnerFactory: () => ({
@@ -159,13 +205,14 @@ test('runSetup saves a preset provider atomically with environment credentials',
     apiKeyEnv: 'AICOMMIT_SETUP_TEST_KEY',
     defaultModel: 'quality',
     models: {
-      'gpt-4o': { label: 'GPT-4o', modelId: 'gpt-test' },
+      'gpt-4o': { label: 'GPT-4o', modelId: 'gpt-test', reasoning: { mode: 'off' } },
       'gpt-5.6-sol': { label: 'GPT-5.6 Sol', modelId: 'gpt-5.6-sol' },
       'gpt-5.6-terra': { label: 'GPT-5.6 Terra', modelId: 'gpt-5.6-terra' },
       'gpt-5.6-luna': { label: 'GPT-5.6 Luna', modelId: 'gpt-5.6-luna' },
-      quality: { modelId: 'gpt-quality' },
+      quality: { modelId: 'o3', reasoning: { mode: 'on', effort: 'medium' } },
     },
   });
+  assert.deepEqual(effortPrompts, ['Reasoning effort for quality']);
   if (process.platform !== 'win32') {
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
   }
@@ -190,21 +237,49 @@ test('runSetup migrates a valid legacy user config to the canonical path', async
           apiUrl: 'https://api.openai.com/v1/chat/completions',
           apiKey: 'legacy-key',
           defaultModel: 'quality',
-          models: { quality: { modelId: 'legacy-model' } },
+          models: {
+            quality: {
+              modelId: 'legacy-model',
+              reasoning: { mode: 'on', effort: 'high' },
+            },
+          },
         },
       },
       temperature: 0.3,
     }),
   );
 
-  const selections = ['openai', 'quality', 'en'];
-  const modelInputs = ['quality', 'gpt-quality'];
   await runSetup({
     home: root,
-    selectPrompt: async () => selections.shift(),
-    inputPrompt: async () => modelInputs.shift(),
+    selectPrompt: async (question) => {
+      if (question.message === 'Choose a provider') return 'openai';
+      if (question.message === 'Reasoning mode for quality') {
+        assert.equal(question.default, 'on');
+        return question.default;
+      }
+      if (question.message === 'Reasoning effort for quality') {
+        assert.equal(question.default, 'high', 'existing model effort is used as the default');
+        assert.deepEqual(
+          question.choices.map((choice) => choice.value),
+          ['low', 'medium', 'high'],
+        );
+        return question.default;
+      }
+      if (question.message === 'Choose the default model') return 'quality';
+      if (question.message === 'Commit message language') return 'en';
+      return unexpectedPrompt('select', question);
+    },
+    inputPrompt: async (question) => {
+      if (question.message === 'Model name (used with aicommit -m <name>)') return 'quality';
+      if (question.message === 'Model ID for quality') return 'gpt-5.1-codex';
+      return unexpectedPrompt('input', question);
+    },
     passwordPrompt: async () => '',
-    confirmPrompt: async () => false,
+    confirmPrompt: async (question) => {
+      if (question.message === 'Add another model?') return false;
+      if (question.message === 'Test the connection now?') return false;
+      return unexpectedPrompt('confirm', question);
+    },
     spinnerFactory: () => assert.fail('connection test should not run'),
     presetLoader: bundledPresetLoader,
   });
@@ -212,7 +287,10 @@ test('runSetup migrates a valid legacy user config to the canonical path', async
   const migrated = JSON.parse(readFileSync(canonicalPath, 'utf8'));
   assert.equal(migrated.temperature, 0.3);
   assert.equal(migrated.providers.openai.apiKey, 'legacy-key');
-  assert.equal(migrated.providers.openai.models.quality.modelId, 'gpt-quality');
+  assert.deepEqual(migrated.providers.openai.models.quality, {
+    modelId: 'gpt-5.1-codex',
+    reasoning: { mode: 'on', effort: 'high' },
+  });
   assert.equal(readFileSync(legacyPath, 'utf8').includes('legacy-model'), true);
 });
 
@@ -224,20 +302,34 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   writeFileSync(targetPath, '{invalid json\n');
   chmodSync(targetPath, 0o600);
 
-  const selections = ['deepseek', 'chat', 'zh'];
-  const modelInputs = ['chat', 'deepseek-test'];
   const spinnerEvents = [];
+  let checkedConfig;
   await runSetup({
     targetPath,
-    selectPrompt: async () => selections.shift(),
-    inputPrompt: async () => modelInputs.shift(),
+    selectPrompt: async (question) => {
+      if (question.message === 'Choose a provider') return 'deepseek';
+      if (question.message === 'Reasoning mode for chat') {
+        assert.equal(question.default, 'on');
+        return 'auto';
+      }
+      if (question.message === 'Choose the default model') return 'chat';
+      if (question.message === 'Commit message language') return 'zh';
+      return unexpectedPrompt('select', question);
+    },
+    inputPrompt: async (question) => {
+      if (question.message === 'Model name (used with aicommit -m <name>)') return 'chat';
+      if (question.message === 'Model ID for chat') return 'deepseek-test';
+      return unexpectedPrompt('input', question);
+    },
     passwordPrompt: async () => '',
     confirmPrompt: async (question) => {
       if (question.message === 'Add another model?') return false;
       if (question.message === 'Test the connection now?') return true;
-      return false;
+      if (question.message === 'Save the config anyway?') return false;
+      return unexpectedPrompt('confirm', question);
     },
-    connectionCheck: async () => {
+    connectionCheck: async (config) => {
+      checkedConfig = config;
       throw new Error('offline test provider');
     },
     spinnerFactory: () => ({
@@ -258,6 +350,12 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   const backup = readdirSync(join(root, '.aicommit')).find((name) => name.includes('.invalid-'));
   assert.ok(backup, 'invalid source config is backed up');
   assert.equal(readFileSync(join(root, '.aicommit', backup), 'utf-8'), '{invalid json\n');
+  assert.deepEqual(checkedConfig.reasoning, {
+    mode: 'auto',
+    effort: 'medium',
+    maxTokens: 4096,
+    maxDisplayChars: 12000,
+  });
   assert.deepEqual(spinnerEvents, [['fail', 'Connection failed']]);
 });
 
@@ -279,19 +377,33 @@ test('setup discovers a new compatible provider only from preset data', async (t
     },
   ];
   validateProviderPresetManifest(manifest);
-  const selections = ['acme', 'en'];
-  const modelInputs = ['default', 'acme-v2'];
   let providerChoices;
   await runSetup({
     targetPath,
     presetLoader: async () => ({ manifest, path: 'test', source: 'file' }),
     selectPrompt: async (question) => {
-      if (question.message === 'Choose a provider') providerChoices = question.choices;
-      return selections.shift();
+      if (question.message === 'Choose a provider') {
+        providerChoices = question.choices;
+        return 'acme';
+      }
+      if (question.message === 'Reasoning mode for default') {
+        assert.equal(question.default, 'auto');
+        return 'auto';
+      }
+      if (question.message === 'Commit message language') return 'en';
+      return unexpectedPrompt('select', question);
     },
-    inputPrompt: async () => modelInputs.shift(),
+    inputPrompt: async (question) => {
+      if (question.message === 'Model name (used with aicommit -m <name>)') return 'default';
+      if (question.message === 'Model ID for default') return 'acme-v2';
+      return unexpectedPrompt('input', question);
+    },
     passwordPrompt: async () => '',
-    confirmPrompt: async () => false,
+    confirmPrompt: async (question) => {
+      if (question.message === 'Add another model?') return false;
+      if (question.message === 'Test the connection now?') return false;
+      return unexpectedPrompt('confirm', question);
+    },
   });
 
   assert.ok(providerChoices.some((choice) => choice.value === 'acme'));
@@ -302,6 +414,6 @@ test('setup discovers a new compatible provider only from preset data', async (t
     apiKey: '',
     apiKeyEnv: '',
     defaultModel: 'default',
-    models: { default: { modelId: 'acme-v2' } },
+    models: { default: { modelId: 'acme-v2', reasoning: { mode: 'auto' } } },
   });
 });

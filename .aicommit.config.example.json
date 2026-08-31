@@ -10,12 +10,7 @@
       "models": {
         "default": {
           "modelId": "MiniMax-M3",
-          "extraBody": {
-            "thinking": {
-              "type": "disabled"
-            },
-            "reasoning_split": true
-          }
+          "reasoning": { "mode": "on", "effort": "medium" }
         }
       }
     },
@@ -25,7 +20,10 @@
       "apiKeyEnv": "DEEPSEEK_API_KEY",
       "defaultModel": "chat",
       "models": {
-        "chat": { "modelId": "deepseek-v4-flash" }
+        "chat": {
+          "modelId": "deepseek-v4-flash",
+          "reasoning": { "mode": "on", "effort": "high" }
+        }
       }
     },
     "openrouter": {

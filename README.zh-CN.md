@@ -48,6 +48,8 @@ aicommit setup
 
 向导会引导你选择内置 Provider 默认值（OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和一个或多个模型、选择默认模型和提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit/config.json`；如果已有文件格式错误或属于旧格式，替换前会先备份。旧路径 `~/.aicommit.config.json` 仍可读取，运行 `aicommit setup` 并保存时会把其中设置迁移到规范路径。
 
+模型步骤会为每个配置单独设置推理。`auto` 不发送显式推理开关，交给 Provider 使用默认行为；`on` 请求推理并继续选择强度；`off` 在模型支持该开关时显式关闭推理。强度默认为 `medium`。对于已知的 OpenAI 模型，setup 会过滤不支持的模式和强度选项；无法关闭推理时也不会列出 `off`。编辑已有模型时，向导会回填其中仍有效的保存值；模型级未配置时，则在适用情况下回填全局推理设置，不再受支持的旧模式会回退到 `auto`。
+
 如需手动配置，请从 [.aicommit.config.example.json](.aicommit.config.example.json) 开始。AICommit 先加载用户配置，再将项目配置 `./.aicommit.config.json` 中白名单内的生成偏好深度合并到用户配置之上。项目配置可以设置 `language`、`commitPolicy`、`stripFiles`、`temperature`，也可以降低 diff、token、timeout 或仓库上下文上限。项目拥有的 `prompt` 默认会被忽略，除非用户配置明确设置 `allowProjectPrompt: true`。连接或 Provider 字段（包括 `apiKeyEnv`）、推理请求控制、未知字段，以及任何试图提高上限的配置，都会被忽略并给出警告。这样可以防止克隆的仓库重定向已鉴权请求，或在不知情的情况下扩大成本和数据范围。
 
 如需避免把密钥写入 JSON，请设置 `"apiKeyEnv": "OPENAI_API_KEY"`（并将 `apiKey` 留空），或在 setup 向导中输入 `env:OPENAI_API_KEY`。环境变量优先于所有其他凭据来源，推荐用于 CI 和其他无状态环境。
@@ -70,10 +72,7 @@ AICommit 也可以读取操作系统上已经配置的 Git credential helper。�
         "default": {
           "label": "MiniMax M3",
           "modelId": "MiniMax-M3",
-          "extraBody": {
-            "thinking": { "type": "disabled" },
-            "reasoning_split": true
-          }
+          "reasoning": { "mode": "on", "effort": "medium" }
         }
       }
     },
@@ -83,12 +82,83 @@ AICommit 也可以读取操作系统上已经配置的 Git credential helper。�
       "apiKeyEnv": "DEEPSEEK_API_KEY",
       "defaultModel": "chat",
       "models": {
-        "chat": { "modelId": "deepseek-v4-flash" },
-        "reasoner": { "modelId": "deepseek-v4-pro" }
+        "chat": {
+          "modelId": "deepseek-v4-flash",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        },
+        "reasoner": {
+          "modelId": "deepseek-v4-pro",
+          "reasoning": { "mode": "on", "effort": "high" }
+        }
+      }
+    },
+    "openai": {
+      "providerType": "openai",
+      "apiUrl": "https://api.openai.com/v1/chat/completions",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "defaultModel": "fast",
+      "models": {
+        "fast": {
+          "modelId": "gpt-4o",
+          "reasoning": { "mode": "auto" }
+        },
+        "reasoner": {
+          "modelId": "gpt-5.6-sol",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        }
+      }
+    },
+    "openrouter": {
+      "providerType": "openrouter",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "defaultModel": "auto",
+      "models": {
+        "auto": {
+          "modelId": "openrouter/auto",
+          "reasoning": { "mode": "auto" }
+        },
+        "quality": {
+          "modelId": "openai/gpt-5.6-terra",
+          "reasoning": { "mode": "on", "effort": "high" }
+        }
+      }
+    },
+    "ollama": {
+      "providerType": "ollama",
+      "apiUrl": "http://127.0.0.1:11434/api/chat",
+      "defaultModel": "qwen",
+      "models": {
+        "qwen": {
+          "modelId": "qwen3:8b",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        },
+        "deepseek": {
+          "modelId": "deepseek-r1:8b",
+          "reasoning": { "mode": "on", "effort": "medium" }
+        }
       }
     }
   }
 }
+```
+
+导出所配置 Provider 使用的 API Key 环境变量后，建议在第一次真实提交前逐个验证模型配置：
+
+```bash
+export MINIMAX_API_KEY='your-minimax-api-key'
+export DEEPSEEK_API_KEY='your-deepseek-api-key'
+export OPENAI_API_KEY='your-openai-api-key'
+export OPENROUTER_API_KEY='your-openrouter-api-key'
+
+aicommit doctor -p minimax -m default
+aicommit doctor -p deepseek -m reasoner
+aicommit doctor -p openai -m reasoner
+aicommit doctor -p openrouter -m quality
+aicommit doctor -p ollama -m qwen
+
+aicommit -p minimax
+aicommit -p deepseek -m reasoner
 ```
 
 `schemaVersion`、`defaultProvider`、`providers`，以及每个 Provider 的 `providerType`、`apiUrl`、`defaultModel` 和非空 `models` 都是必填项。未指定 `-p` 时选择 `defaultProvider`；未指定 `-m` 时选择该 Provider 的 `defaultModel`。模型配置会继承全局生成设置和 Provider 连接设置，并可覆盖 `temperature`、`maxTokens`、`timeoutMs`、`reasoning` 与 `extraBody`。Provider 名和模型名是稳定的本地别名，`modelId` 才是发送给 API 的模型标识。
@@ -125,43 +195,9 @@ AICommit 也可以读取操作系统上已经配置的 Git credential helper。�
 | `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖） |
 | `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                 |
 | `extraBody`          | 模型配置中合并到请求体的 JSON 字段，但不允许覆盖 `model` / `messages`（默认：`{}`）                                                   |
-| `reasoning`          | 全局或模型级推理控制：`mode`、`effort`、`maxTokens` 和 `maxDisplayChars`；默认为 `mode: "on"`，并自动流式展示推理                     |
+| `reasoning`          | 全局或模型级推理控制：`mode` / `effort`（默认：`on` / `medium`）、`maxTokens` 和 `maxDisplayChars`                                    |
 
 AICommit 支持 OpenAI、DeepSeek、[OpenRouter](https://openrouter.ai)、MiniMax、[Kimi Code](https://www.kimi.com/code/docs/)、Ollama（原生 `/api/chat` 或 OpenAI 兼容 `/v1/chat/completions`）、LiteLLM，以及其他兼容端点。远程端点必须使用 HTTPS；明文 HTTP 只允许 localhost / loopback。
-
-### Kimi Code 示例
-
-在 Kimi Code 控制台创建 API Key，通过环境变量导出，避免把密钥存入 JSON，然后在 `aicommit setup` 中选择内置预设。手动配置时请使用完整的 OpenAI 兼容端点：
-
-```bash
-export KIMI_API_KEY='your-kimi-code-api-key'
-```
-
-```json
-{
-  "schemaVersion": 1,
-  "defaultProvider": "kimi-code",
-  "providers": {
-    "kimi-code": {
-      "providerType": "custom",
-      "apiUrl": "https://api.kimi.com/coding/v1/chat/completions",
-      "apiKeyEnv": "KIMI_API_KEY",
-      "defaultModel": "default",
-      "models": {
-        "default": { "modelId": "kimi-for-coding" }
-      }
-    }
-  }
-}
-```
-
-首次提交前验证端点、Key 和模型：
-
-```bash
-aicommit doctor -p kimi-code
-```
-
-`kimi-for-coding` 对所有 Kimi Code 会员档位开放，并随服务滚动升级模型。Kimi Code 会员 Key 使用 `api.kimi.com`；Kimi 开放平台按量付费 Key 使用不同端点，两者不能混用。
 
 流式输出、推理、token 预算、usage 和鉴权边界，请参阅双语 [Provider 兼容表](docs/provider-compatibility.md)。
 

@@ -14,7 +14,12 @@ import {
   validateRepositoryContextConfig,
 } from './context.js';
 import { readTeamPolicy } from './team-policy.js';
-import { isProviderType, PROVIDER_TYPES } from './providers.js';
+import {
+  DEFAULT_REASONING_EFFORT,
+  isProviderType,
+  PROVIDER_TYPES,
+  REASONING_EFFORTS,
+} from './providers.js';
 import { projectConfigPath, resolveConfigLocations, userConfigLocations } from './config-paths.js';
 
 // Repository-owned config is untrusted input: a cloned repository must never
@@ -173,7 +178,7 @@ export const DEFAULT_CONFIG = {
   // switch.
   reasoning: {
     mode: 'on',
-    effort: 'medium',
+    effort: DEFAULT_REASONING_EFFORT,
     maxTokens: 4096,
     maxDisplayChars: 12000,
   },
@@ -508,10 +513,8 @@ export function validateConfig(config) {
   if (!['auto', 'on', 'off'].includes(config.reasoning.mode)) {
     throw new Error('Invalid config "reasoning.mode": expected "auto", "on", or "off".');
   }
-  if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(config.reasoning.effort)) {
-    throw new Error(
-      'Invalid config "reasoning.effort": expected low, medium, high, xhigh, or max.',
-    );
+  if (!REASONING_EFFORTS.includes(config.reasoning.effort)) {
+    throw new Error(`Invalid config "reasoning.effort": expected ${REASONING_EFFORTS.join(', ')}.`);
   }
   for (const key of ['enabledBody', 'disabledBody']) {
     const value = config.reasoning[key];
