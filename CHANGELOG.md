@@ -4,6 +4,14 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-09-01
+
+### Fixed
+
+- Prevented accepted provider requests from being replayed after response-body interruptions, avoiding duplicate generations and potential duplicate billing.
+- Honored provider retry timing safely by failing clearly when `Retry-After` exceeds the configured maximum delay instead of retrying too early.
+- Stopped setup from replacing valid JSON configurations with unsupported schemas or invalid structures.
+
 ## [2.2.2] - 2026-08-31
 
 ### Added
@@ -170,7 +178,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.2...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.3...HEAD
+[2.2.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.3
 [2.2.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.2
 [2.2.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.1
 [2.2.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.0

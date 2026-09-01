@@ -1,6 +1,6 @@
 {
   "name": "@hifullmoon/aicommit",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "Safe, local-first AI commit message generator for Git workflows",
   "type": "module",
   "bin": {
