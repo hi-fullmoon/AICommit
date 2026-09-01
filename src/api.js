@@ -136,18 +136,24 @@ async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) 
       } catch (err) {
         const wrappedTimeout = timeoutError(err, timeout);
         if (wrappedTimeout) throw wrappedTimeout;
-        if (!networkFailure(err) || attempt >= policy.maxAttempts) throw err;
-        const delay = Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
-        await policy.sleep(delay);
-        continue;
+        // Once the provider has accepted a generation request, replaying it is
+        // unsafe: the first request may already have completed and been billed
+        // even though its response body was interrupted locally.
+        throw err;
       }
     }
     if (RETRYABLE_STATUS.has(response.status) && attempt < policy.maxAttempts) {
       const requestedDelay = retryAfterMs(response.headers.get('retry-after'), policy.now);
-      const delay = Math.min(
-        requestedDelay ?? policy.baseDelayMs * 2 ** (attempt - 1),
-        policy.maxDelayMs,
-      );
+      if (requestedDelay !== null && requestedDelay > policy.maxDelayMs) {
+        await response.body?.cancel().catch(() => {});
+        throw new Error(
+          `HTTP ${response.status}: provider requested a retry after ${Math.ceil(
+            requestedDelay / 1000,
+          )}s, exceeding the configured retry.maxDelayMs limit.`,
+        );
+      }
+      const delay =
+        requestedDelay ?? Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
       await response.body?.cancel().catch(() => {});
       await policy.sleep(delay);
       continue;

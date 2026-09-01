@@ -652,6 +652,33 @@ test('429 retries respect Retry-After and expose the attempt count', async () =>
   assert.deepEqual(delays, [2000]);
 });
 
+test('Retry-After beyond the configured delay limit fails without retrying early', async () => {
+  const delays = [];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response('rate limited', { status: 429, headers: { 'Retry-After': '60' } });
+  };
+
+  await assert.rejects(
+    () =>
+      requestGeneration(
+        cfg({
+          retry: {
+            maxAttempts: 3,
+            baseDelayMs: 10,
+            maxDelayMs: 5000,
+            sleep: async (delay) => delays.push(delay),
+          },
+        }),
+        { messages: [], temperature: 0, maxTokens: 20 },
+      ),
+    /requested a retry after 60s.*maxDelayMs/,
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+});
+
 test('recoverable 5xx retries use bounded exponential backoff', async () => {
   const delays = [];
   let calls = 0;
@@ -716,7 +743,7 @@ test('network interruption retries, but never exceeds maxAttempts', async () => 
   assert.equal(calls, 3);
 });
 
-test('network interruption while consuming a response body is retried', async () => {
+test('network interruption while consuming an accepted response is not replayed', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
@@ -729,21 +756,20 @@ test('network interruption while consuming a response body is retried', async ()
         },
       };
     }
-    return new Response(
-      JSON.stringify({ choices: [{ message: { content: 'fix: retry interrupted body' } }] }),
-      { status: 200 },
-    );
+    return new Response('{}', { status: 200 });
   };
 
-  const result = await requestGeneration(
-    cfg({
-      retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
-    }),
-    { messages: [], temperature: 0, maxTokens: 20 },
+  await assert.rejects(
+    () =>
+      requestGeneration(
+        cfg({
+          retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0, sleep: async () => {} },
+        }),
+        { messages: [], temperature: 0, maxTokens: 20 },
+      ),
+    /response body terminated/,
   );
-
-  assert.equal(result.content, 'fix: retry interrupted body');
-  assert.equal(result.attempts, 2);
+  assert.equal(calls, 1);
 });
 
 test('authentication, parameter, and content-safety failures are not retried', async () => {

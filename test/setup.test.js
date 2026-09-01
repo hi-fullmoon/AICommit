@@ -359,6 +359,28 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   assert.deepEqual(spinnerEvents, [['fail', 'Connection failed']]);
 });
 
+test('runSetup stops on structurally invalid JSON config without replacing it', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-structure-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const targetPath = join(root, '.aicommit', 'config.json');
+  mkdirSync(join(root, '.aicommit'));
+  const original = JSON.stringify({ schemaVersion: 999, providers: {} });
+  writeFileSync(targetPath, original);
+
+  await assert.rejects(
+    () =>
+      runSetup({
+        targetPath,
+        selectPrompt: async () => assert.fail('wizard must not start'),
+        presetLoader: async () => assert.fail('presets must not load'),
+      }),
+    /valid JSON but has an unsupported structure.*Fix it or move it aside/,
+  );
+
+  assert.equal(readFileSync(targetPath, 'utf8'), original);
+  assert.deepEqual(readdirSync(join(root, '.aicommit')), ['config.json']);
+});
+
 test('setup discovers a new compatible provider only from preset data', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-setup-preset-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

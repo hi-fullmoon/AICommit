@@ -74,15 +74,25 @@ export function mergeSetupConfig(existing, { providerName, entry, language }) {
 
 async function readExistingConfig(path) {
   if (!(await fileExists(path))) return {};
+  let parsed;
   try {
-    const parsed = JSON.parse(await readFile(path, 'utf-8'));
-    return validateUserConfig(parsed);
+    parsed = JSON.parse(await readFile(path, 'utf-8'));
   } catch (err) {
     const backup = `${path}.invalid-${Date.now()}.bak`;
     await copyFile(path, backup);
     console.log(chalk.yellow(`  ⚠ Could not parse ${path} (${err.message}) — starting fresh.`));
     console.log(chalk.dim(`    The original file was preserved at ${backup}.`));
     return {};
+  }
+
+  try {
+    return validateUserConfig(parsed);
+  } catch (err) {
+    throw new Error(
+      `Existing config ${path} is valid JSON but has an unsupported structure: ${err.message} ` +
+        'Fix it or move it aside before running setup.',
+      { cause: err },
+    );
   }
 }
 
