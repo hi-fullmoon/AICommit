@@ -50,6 +50,7 @@ import { runDoctor } from './doctor.js';
 import { runConfigCommand } from './config-command.js';
 import { generateCompletion } from './completion.js';
 import { runPolicyCommand } from './policy-command.js';
+import { runUpdate } from './update.js';
 import {
   applyCommitlintPolicy,
   collectRepositoryContext,
@@ -97,6 +98,7 @@ async function runMain() {
     dryRun,
     yes,
     setup,
+    update,
     doctor,
     configAction,
     policyAction,
@@ -113,9 +115,11 @@ async function runMain() {
     return { exitReason: 'completion' };
   }
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !doctor && !configAction && !policyAction) {
+  if (machineOutput && !yes && !doctor && !configAction && !policyAction && !update) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
+
+  if (update) return runUpdate({ machineOutput, debug });
 
   // The setup wizard is a standalone flow — no git repo, diff, or loaded
   // config required.

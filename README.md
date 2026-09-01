@@ -32,6 +32,14 @@ npm install --global @hifullmoon/aicommit
 
 Requires Node.js >= 18.
 
+Update an npm-global installation from the configured registry:
+
+```bash
+aicommit update
+```
+
+The command resolves npm's `latest` dist-tag, installs that exact version, and verifies the installed manifest. It refuses to modify a source checkout, an `npm link`, or a package owned by a different active Node.js/npm environment; use the manual upgrade command from the distribution guide in those cases.
+
 See the bilingual [installation, upgrade, signature-verification, and rollback guide](docs/distribution.md). The npm package has an automated installation smoke test.
 
 To install a source checkout instead, run `npm install --global .` from the repository root.
@@ -287,6 +295,7 @@ Project-level configuration is treated as untrusted: it cannot change the endpoi
 
 ```bash
 aicommit setup           # interactive configuration wizard
+aicommit update          # update the global npm installation to latest
 aicommit doctor          # diagnose runtime, config, credentials, and connectivity
 aicommit config show     # show the effective config with secrets redacted
 aicommit config validate # validate config without resolving credentials
@@ -376,7 +385,7 @@ Verify the registration with `whence -w _aicommit`; it should print `_aicommit: 
 
 ### Machine-readable output
 
-Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `doctor --output=json` does not require `--yes`.
+Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `doctor --output=json` and `update --output=json` do not require `--yes`.
 
 ```json
 {

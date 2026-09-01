@@ -4,6 +4,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Added
+
+- Added `aicommit update` for verified self-updates of regular npm-global installations, with exact-version installation, JSON output, and safeguards against updating source links or the wrong Node.js environment.
+
 ## [2.2.3] - 2026-09-01
 
 ### Fixed

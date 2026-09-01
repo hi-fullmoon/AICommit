@@ -7,7 +7,7 @@ import { generateCompletion } from '../src/completion.js';
 test('completion generators cover stable commands and shell-specific registration', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const script = generateCompletion(shell);
-    for (const command of ['config', 'policy', 'completion', 'split', 'doctor']) {
+    for (const command of ['config', 'policy', 'completion', 'split', 'doctor', 'update']) {
       assert.match(script, new RegExp(`\\b${command}\\b`), `${shell} omits ${command}`);
     }
     const longOptionPrefix = shell === 'fish' ? '-l ' : '--';

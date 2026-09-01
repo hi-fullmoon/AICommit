@@ -15,10 +15,12 @@ function showHelp() {
   ${chalk.bold('Usage:')}
     ${chalk.dim('$')} aicommit [path] [options]
     ${chalk.dim('$')} aicommit setup
+    ${chalk.dim('$')} aicommit update
     ${chalk.dim('$')} aicommit split [run|plan|apply|resume|abort] [options]
 
   ${chalk.bold('Everyday commands:')}
     setup                 Interactive configuration wizard
+    update                Update the global npm installation to latest
     doctor                Diagnose runtime, config, credentials, and connectivity
     split                 Plan and create file-level logical commits
 
@@ -92,6 +94,7 @@ function parsedDefaults(overrides = {}) {
     dryRun: false,
     yes: false,
     setup: false,
+    update: false,
     doctor: false,
     configAction: null,
     policyAction: null,
@@ -132,7 +135,10 @@ export function parseArgs(args = process.argv.slice(2)) {
     return parsedDefaults({ completionShell: shell });
   }
 
-  if (args[0] === 'policy' && args[1] === 'template') {
+  const update = args[0] === 'update';
+  if (update) args = args.slice(1);
+
+  if (!update && args[0] === 'policy' && args[1] === 'template') {
     if (args.length !== 2) {
       throw fail(ERROR_CATEGORIES.CONFIG, 'policy template takes no arguments.');
     }
@@ -140,7 +146,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
 
   let policyAction = null;
-  if (args[0] === 'policy') {
+  if (!update && args[0] === 'policy') {
     policyAction = args[1];
     if (policyAction !== 'check') {
       throw fail(ERROR_CATEGORIES.CONFIG, 'policy requires one action: template or check.');
@@ -149,7 +155,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
 
   let configAction = null;
-  if (args[0] === 'config') {
+  if (!update && args[0] === 'config') {
     configAction = args[1];
     if (!['show', 'validate', 'path'].includes(configAction)) {
       throw fail(ERROR_CATEGORIES.CONFIG, 'config requires one action: show, validate, or path.');
@@ -158,7 +164,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   }
 
   let splitCommand = null;
-  if (args[0] === 'split') {
+  if (!update && args[0] === 'split') {
     const requestedAction = args[1];
     const actions = ['run', 'plan', 'apply', 'resume', 'abort'];
     if (!requestedAction || requestedAction.startsWith('-')) {
@@ -178,7 +184,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     }
   }
 
-  const doctor = args[0] === 'doctor';
+  const doctor = !update && args[0] === 'doctor';
   if (doctor) args = args.slice(1);
 
   let targetPath = null;
@@ -458,6 +464,25 @@ export function parseArgs(args = process.argv.slice(2)) {
       'doctor accepts only --provider, --model, --output, and --debug options.',
     );
   }
+  if (
+    update &&
+    (targetPath ||
+      cliLang ||
+      cliProvider ||
+      cliModel ||
+      cliReasoning ||
+      split ||
+      splitCommand ||
+      splitPlanFile ||
+      dryRun ||
+      yes ||
+      configAction ||
+      policyAction ||
+      policyMessageFile ||
+      policyRange)
+  ) {
+    throw fail(ERROR_CATEGORIES.CONFIG, 'update accepts only --output and --debug options.');
+  }
 
   return {
     targetPath,
@@ -473,6 +498,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     dryRun,
     yes,
     setup,
+    update,
     doctor,
     configAction,
     policyAction,

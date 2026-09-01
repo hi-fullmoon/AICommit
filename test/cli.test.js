@@ -147,6 +147,17 @@ test('parseArgs recognizes config inspection and shell completion commands', () 
   assert.throws(() => parseArgs(['completion', 'powershell']), /bash, zsh, or fish/);
 });
 
+test('parseArgs recognizes update as a standalone command', () => {
+  const update = parseArgs(['update']);
+  assert.equal(update.update, true);
+  assert.equal(update.output, 'text');
+  assert.equal(parseArgs(['update', '--output=json', '--debug']).output, 'json');
+  assert.throws(() => parseArgs(['update', '--yes']), /accepts only --output and --debug/);
+  assert.throws(() => parseArgs(['update', '/tmp/repo']), /accepts only --output and --debug/);
+  assert.throws(() => parseArgs(['update', 'policy', 'template']), /Unexpected extra argument/);
+  assert.equal(parseArgs([]).update, false);
+});
+
 test('parseArgs recognizes team policy template and check inputs', () => {
   assert.equal(parseArgs(['policy', 'template']).policyAction, 'template');
   const file = parseArgs(['policy', 'check', '--file=.git/COMMIT_EDITMSG', '--output=json']);

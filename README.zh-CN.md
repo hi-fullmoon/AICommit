@@ -34,6 +34,14 @@ npm install --global @hifullmoon/aicommit
 
 需要 Node.js >= 18。
 
+从当前配置的 registry 更新 npm 全局安装：
+
+```bash
+aicommit update
+```
+
+该命令会解析 npm 的 `latest` dist-tag，安装对应的精确版本，并校验安装后的 manifest。源码检出、`npm link`，或属于另一个 Node.js/npm 环境的安装会被拒绝；这些情况请使用分发指南中的手动升级命令。
+
 安装、升级、签名校验与回滚请参阅双语[分发指南](docs/distribution.md)。npm package 带有自动化安装冒烟测试。
 
 如需直接安装源码检出版本，请在仓库根目录运行 `npm install --global .`。
@@ -289,6 +297,7 @@ AICommit 不会主动发送无关的仓库文件、历史提交正文、环境�
 
 ```bash
 aicommit setup           # 交互式配置向导
+aicommit update          # 将 npm 全局安装更新到最新版
 aicommit doctor          # 诊断运行时、配置、凭据和连接
 aicommit config show     # 显示脱敏后的有效配置
 aicommit config validate # 校验配置，但不解析凭据
@@ -378,7 +387,7 @@ exec zsh
 
 ### 机器可读输出
 
-脚本和 CI 请使用 `--output=json`。提交和 split 流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`doctor --output=json` 不要求 `--yes`。
+脚本和 CI 请使用 `--output=json`。提交和 split 流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`doctor --output=json` 和 `update --output=json` 不要求 `--yes`。
 
 ```json
 {

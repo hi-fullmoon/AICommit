@@ -1,5 +1,6 @@
 const TOP_LEVEL = [
   'setup',
+  'update',
   'doctor',
   'config',
   'policy',
@@ -51,6 +52,7 @@ _aicommit() {
   typeset -A opt_args
   commands=(
     'setup:interactive configuration wizard'
+    'update:update the global npm installation'
     'doctor:diagnose configuration and connectivity'
     'config:inspect or validate configuration'
     'policy:print or enforce a repository team policy'
@@ -94,6 +96,7 @@ _aicommit "$@"
 const FISH = `# fish completion for aicommit
 complete -c aicommit -f
 complete -c aicommit -n '__fish_use_subcommand' -a setup -d 'Interactive configuration wizard'
+complete -c aicommit -n '__fish_use_subcommand' -a update -d 'Update the global npm installation'
 complete -c aicommit -n '__fish_use_subcommand' -a doctor -d 'Diagnose configuration and connectivity'
 complete -c aicommit -n '__fish_use_subcommand' -a config -d 'Inspect or validate configuration'
 complete -c aicommit -n '__fish_use_subcommand' -a policy -d 'Print or enforce a repository team policy'
