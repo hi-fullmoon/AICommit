@@ -517,12 +517,12 @@ async function runMain() {
               description:
                 'Omit sensitive files/private keys and redact detected credential values',
             },
-            { name: 'Cancel', value: 'cancel', description: 'Do not send repository content' },
             {
               name: 'Send original diff',
               value: 'original',
               description: 'Send the unredacted content to the configured provider',
             },
+            { name: 'Cancel', value: 'cancel', description: 'Do not send repository content' },
           ],
         });
     if (sensitiveAction === 'cancel') {
