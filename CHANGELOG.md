@@ -4,9 +4,15 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-05
+
 ### Added
 
 - Added `aicommit update` for verified self-updates of regular npm-global installations, with exact-version installation, JSON output, and safeguards against updating source links or the wrong Node.js environment.
+
+### Changed
+
+- Moved the cancel action to the end of sensitive-data confirmation menus to keep send choices together.
 
 ## [2.2.3] - 2026-09-01
 
@@ -182,7 +188,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.2.3...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.3.0
 [2.2.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.3
 [2.2.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.2
 [2.2.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.1
