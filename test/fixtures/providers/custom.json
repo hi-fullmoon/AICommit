@@ -17,6 +17,7 @@
     "streaming": false
   },
   "expectedRequest": {
+    "stream": true,
     "model": "company-model",
     "messages": [{ "role": "user", "content": "commit" }],
     "temperature": 0.5,

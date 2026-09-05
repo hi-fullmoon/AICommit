@@ -13,11 +13,12 @@
     "streaming": false
   },
   "expectedRequest": {
+    "stream": true,
     "model": "deepseek-v4-flash",
     "messages": [{ "role": "user", "content": "commit" }],
     "max_tokens": 4096,
     "thinking": { "type": "enabled" },
-    "reasoning_effort": "high"
+    "reasoning_effort": "max"
   },
   "response": {
     "model": "deepseek-v4-flash",

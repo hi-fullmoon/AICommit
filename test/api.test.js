@@ -319,49 +319,56 @@ test('token-limited reasoning response is retried as a complete compact answer',
   assert.match(calls[1].messages.at(-1).content, /COMPLETE answer from the beginning/);
 });
 
-test('streaming preserves a length finish_reason and recovers the response', async () => {
+for (const finishReason of ['length', 'max_tokens', 'max_output_tokens', 'token_limit']) {
+  test(`streaming recovers a ${finishReason} finish_reason`, async () => {
+    const calls = [];
+    const responses = [
+      [
+        { choices: [{ delta: { content: '[{"subject":"fix: x"' } }] },
+        { choices: [{ delta: {}, finish_reason: finishReason }] },
+      ],
+      [
+        { choices: [{ delta: { content: '[{"subject":"fix: x","files":["x.js"]}]' } }] },
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      ],
+    ];
+    let responseIndex = 0;
+    globalThis.fetch = async (_url, opts) => {
+      calls.push(JSON.parse(opts.body));
+      const events = responses[Math.min(responseIndex++, responses.length - 1)];
+      const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
+      return new Response(body, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    };
+
+    const { text } = await getResponseText(
+      cfg(),
+      [{ role: 'user', content: 'plan these files' }],
+      0.3,
+      2048,
+      'Output ONLY the complete JSON array.',
+      { onReasoningDelta() {} },
+    );
+
+    assert.equal(text, '[{"subject":"fix: x","files":["x.js"]}]');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].max_tokens, 2048);
+  });
+}
+
+test('streaming validator recovers incomplete content after an explicit finish_reason', async () => {
   const calls = [];
   const responses = [
     [
-      { choices: [{ delta: { content: '[{"subject":"fix: x"' } }] },
-      { choices: [{ delta: {}, finish_reason: 'length' }] },
-    ],
-    [
-      { choices: [{ delta: { content: '[{"subject":"fix: x","files":["x.js"]}]' } }] },
+      { choices: [{ delta: { content: '[{"subject":"fix: partial"' } }] },
       { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      '[DONE]',
     ],
-  ];
-  let responseIndex = 0;
-  globalThis.fetch = async (_url, opts) => {
-    calls.push(JSON.parse(opts.body));
-    const events = responses[Math.min(responseIndex++, responses.length - 1)];
-    const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
-    return new Response(body, {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    });
-  };
-
-  const { text } = await getResponseText(
-    cfg(),
-    [{ role: 'user', content: 'plan these files' }],
-    0.3,
-    2048,
-    'Output ONLY the complete JSON array.',
-    { onReasoningDelta() {} },
-  );
-
-  assert.equal(text, '[{"subject":"fix: x","files":["x.js"]}]');
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].max_tokens, 2048);
-});
-
-test('streaming validator recovers incomplete content when [DONE] has no finish_reason', async () => {
-  const calls = [];
-  const responses = [
-    [{ choices: [{ delta: { content: '[{"subject":"fix: partial"' } }] }, '[DONE]'],
     [
       { choices: [{ delta: { content: '[{"subject":"fix: complete","files":["x.js"]}]' } }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
       '[DONE]',
     ],
   ];
@@ -530,7 +537,7 @@ test('reasoning mode consumes SSE deltas and streams normalized reasoning', asyn
   const calls = stubSSE([
     { model: 'mock-stream', choices: [{ delta: { reasoning_content: 'step one\n' } }] },
     { choices: [{ delta: { reasoning_details: [{ text: 'step two\n' }] } }] },
-    { choices: [{ delta: { content: 'feat: stream reasoning' } }] },
+    { choices: [{ delta: { content: 'feat: stream reasoning' }, finish_reason: 'stop' }] },
     { choices: [], usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 } },
     '[DONE]',
   ]);
@@ -562,7 +569,7 @@ test('streaming rejects a clean EOF that has no completion marker', async () => 
 
   await assert.rejects(
     () => generateCommitMessage(cfg(), diff, 0, '', { onReasoningDelta() {} }),
-    /ended before the provider sent \[DONE\] or a finish_reason/,
+    /ended before the provider sent a finish_reason/,
   );
 });
 
@@ -578,7 +585,7 @@ test('streaming accepts finish_reason when a compatible provider omits [DONE]', 
 
 test('OpenAI streams request usage while preserving other stream options', async () => {
   const calls = stubSSE([
-    { model: 'gpt-4o', choices: [{ delta: { content: 'feat: usage' } }] },
+    { model: 'gpt-4o', choices: [{ delta: { content: 'feat: usage' }, finish_reason: 'stop' }] },
     { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
     '[DONE]',
   ]);
@@ -1005,4 +1012,42 @@ test('custom endpoints stay standard by default and accept explicit enabledBody'
     diff,
   );
   assert.equal(calls[1].enable_thinking, true);
+});
+
+test('reasoning-only legacy SSE supplies the complete analysis to the recovery request', async () => {
+  const calls = [];
+  globalThis.fetch = async (_url, init) => {
+    calls.push(JSON.parse(init.body));
+    const events =
+      calls.length === 1
+        ? [
+            { choices: [{ delta: { reasoning_content: 'first analysis\n' } }] },
+            {
+              choices: [
+                {
+                  delta: { reasoning_details: [{ text: 'final conclusion' }] },
+                  finish_reason: 'stop',
+                },
+              ],
+            },
+          ]
+        : [{ choices: [{ delta: { content: 'fix: recovered answer' }, finish_reason: 'stop' }] }];
+    return new Response(events.map((value) => `data: ${JSON.stringify(value)}\n\n`).join(''), {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  };
+  const result = await getResponseText(
+    cfg(),
+    [{ role: 'user', content: 'original diff' }],
+    0,
+    256,
+    'Return the final answer.',
+  );
+  assert.equal(result.text, 'fix: recovered answer');
+  assert.equal(calls.length, 2);
+  assert.equal(
+    calls[1].messages.find((message) => message.role === 'assistant').content,
+    'first analysis\nfinal conclusion',
+  );
+  assert.ok(!JSON.stringify(calls[1].messages).includes('original diff'));
 });

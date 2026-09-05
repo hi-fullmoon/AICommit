@@ -32,7 +32,7 @@ AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合
 npm install --global @hifullmoon/aicommit
 ```
 
-需要 Node.js >= 18。
+需要 Node.js >= 22.19.0。
 
 从当前配置的 registry 更新 npm 全局安装：
 

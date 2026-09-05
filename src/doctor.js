@@ -8,9 +8,7 @@ import { classifyError, ERROR_CATEGORIES, fail } from './errors.js';
 import { getProviderAdapter } from './providers.js';
 import { formatMs, formatUsage, redactSensitiveUrl, sanitizeTerminalText } from './utils.js';
 
-function nodeSupported(version = process.versions.node) {
-  return Number(version.split('.')[0]) >= 18;
-}
+import { nodeSupported, MIN_NODE_VERSION } from './runtime.js';
 
 function renderCheck(check) {
   const icon = check.status === 'pass' ? chalk.green('✓') : check.status === 'warn' ? '⚠' : '✗';
@@ -43,7 +41,7 @@ export async function runDoctor(cliProvider = null, cliModel = null) {
     checks,
     'Node.js',
     nodeSupported(nodeVersion) ? 'pass' : 'fail',
-    `v${nodeVersion}${nodeSupported(nodeVersion) ? ' (supported)' : ' (requires >=18)'}`,
+    `v${nodeVersion}${nodeSupported(nodeVersion) ? ' (supported)' : ` (requires >=${MIN_NODE_VERSION})`}`,
   );
 
   try {

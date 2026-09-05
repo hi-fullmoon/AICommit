@@ -12,6 +12,7 @@
     "streaming": false
   },
   "expectedRequest": {
+    "stream": true,
     "model": "openai/gpt-5.4",
     "messages": [{ "role": "user", "content": "commit" }],
     "temperature": 0.3,

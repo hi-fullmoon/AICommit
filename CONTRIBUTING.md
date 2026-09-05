@@ -4,7 +4,7 @@ Thanks for helping improve AICommit. Keep changes focused on safe, local commit 
 
 ## Development setup
 
-You need Git and a supported Node.js release: 18, 20, 22, or 24.
+You need Git and a supported Node.js release: 22 (>=22.19.0) or 24.
 
 ```bash
 git clone https://github.com/hi-fullmoon/AICommit.git

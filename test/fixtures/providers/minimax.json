@@ -13,6 +13,7 @@
     "streaming": false
   },
   "expectedRequest": {
+    "stream": true,
     "model": "MiniMax-M3",
     "messages": [{ "role": "user", "content": "commit" }],
     "temperature": 0.4,

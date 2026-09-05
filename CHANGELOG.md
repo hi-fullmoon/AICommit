@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Changed
+
+- Moved model requests and streamed response decoding to Pi AI, using its bundled model metadata for reasoning capabilities while retaining existing Provider/Model configuration, custom endpoints, and native Ollama compatibility.
+- Raised the minimum Node.js version to 22.19.0 for Pi AI; startup now reports unsupported runtimes before loading the model SDK.
+- Streamed responses require an explicit provider finish reason. Token-limit aliases remain recoverable, mixed reasoning fields retain their text, and endpoints that only support complete JSON can use `extraBody.stream: false` without streaming-only parameters.
+
 ## [2.3.0] - 2026-09-05
 
 ### Added

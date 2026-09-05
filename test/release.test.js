@@ -19,7 +19,7 @@ test('all quality and compatibility checks must pass before npm publishing', asy
   const release = await readText(new URL('../.github/workflows/release.yml', import.meta.url));
   assert.match(release, /quality:\n    name: Quality \/ Node 24/);
   assert.match(release, /compatibility:\n    name: Compatibility \/ \$\{\{ matrix\.os \}\}/);
-  assert.match(release, /- os: ubuntu-latest\n            node: 18/);
+  assert.match(release, /- os: ubuntu-latest\n            node: '22\.19\.0'/);
   assert.match(release, /- os: macos-latest\n            node: 24/);
   assert.match(release, /- os: windows-latest\n            node: 24/);
   assert.match(

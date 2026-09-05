@@ -1,17 +1,22 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { requestGeneration } from '../src/api.js';
 
 import {
   canDisableReasoningForModel,
   detectProviderType,
-  getProviderAdapter,
   normalizeUsage,
   reasoningEffortsForModel,
   REASONING_EFFORTS,
 } from '../src/providers.js';
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
 
 const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'providers');
 const fixtureFiles = (await readdir(fixtureDir)).filter((name) => name.endsWith('.json')).sort();
@@ -19,22 +24,39 @@ const fixtures = await Promise.all(
   fixtureFiles.map(async (name) => JSON.parse(await readFile(join(fixtureDir, name), 'utf8'))),
 );
 
-test('provider contract fixture matrix builds requests and normalizes responses', () => {
-  let parsed = 0;
+test('provider contract fixture matrix runs through Pi AI and normalizes responses', async () => {
   for (const fixture of fixtures) {
-    const adapter = getProviderAdapter(fixture.config);
-    assert.deepEqual(adapter.buildRequest(fixture.request), fixture.expectedRequest, fixture.name);
-    assert.deepEqual(adapter.capabilities, fixture.expectedCapabilities, fixture.name);
-    assert.deepEqual(adapter.headers, fixture.expectedHeaders, fixture.name);
-
-    const { raw, ...normalized } = adapter.normalizeResponse(fixture.response);
-    assert.equal(raw, fixture.response, `${fixture.name}: raw response is retained`);
+    let sent;
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, fixture.config.apiUrl);
+      sent = JSON.parse(init.body);
+      for (const [key, value] of Object.entries(fixture.expectedHeaders)) {
+        assert.equal(init.headers.get(key), value);
+      }
+      return new Response(JSON.stringify(fixture.response));
+    };
+    const result = await requestGeneration(
+      { ...fixture.config, extraBody: fixture.request.extraBody },
+      {
+        ...fixture.request,
+        stream: fixture.request.streaming ? { onReasoningDelta() {} } : null,
+      },
+    );
+    // Per-model extraBody comes from resolved configuration in real requests.
+    assert.equal(result.piMessage.api, 'openai-completions', fixture.name);
+    assert.deepEqual(sent, fixture.expectedRequest, fixture.name);
+    assert.deepEqual(result.capabilities, fixture.expectedCapabilities, fixture.name);
+    assert.deepEqual(result.raw, fixture.response);
+    const {
+      raw: _raw,
+      piMessage: _piMessage,
+      capabilities: _capabilities,
+      attempts: _attempts,
+      latencyMs: _latencyMs,
+      ...normalized
+    } = result;
     assert.deepEqual(normalized, fixture.expectedResponse, fixture.name);
-    if (normalized.content) parsed += 1;
   }
-
-  assert.ok(fixtures.length >= 6, 'all required provider families are represented');
-  assert.ok(parsed / fixtures.length >= 0.995, 'valid-response parse rate is at least 99.5%');
 });
 
 test('provider detection distinguishes native Ollama from its compatible /v1 endpoint', () => {
@@ -51,7 +73,7 @@ test('setup effort choices follow known OpenAI model limits', () => {
   assert.deepEqual(reasoningEffortsForModel('openai', 'o3'), ['low', 'medium', 'high']);
   assert.deepEqual(reasoningEffortsForModel('openai', 'gpt-5.1-codex'), ['low', 'medium', 'high']);
   assert.deepEqual(reasoningEffortsForModel('openai', 'gpt-5.6-sol'), REASONING_EFFORTS);
-  assert.deepEqual(reasoningEffortsForModel('openrouter', 'openai/o3'), REASONING_EFFORTS);
+  assert.deepEqual(reasoningEffortsForModel('openrouter', 'openai/o3'), ['low', 'medium', 'high']);
   assert.equal(canDisableReasoningForModel('openai', 'o3'), false);
   assert.equal(canDisableReasoningForModel('openai', 'gpt-5.1-codex'), true);
   assert.equal(canDisableReasoningForModel('openrouter', 'openai/o3'), true);

@@ -37,7 +37,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            node: 18
+            node: '22.19.0'
           - os: macos-latest
             node: 24
           - os: windows-latest

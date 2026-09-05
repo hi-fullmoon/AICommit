@@ -2,7 +2,7 @@
 
 import chalk from 'chalk';
 
-import { main } from '../src/main.js';
+import { nodeSupported, MIN_NODE_VERSION } from '../src/runtime.js';
 import { sanitizeTerminalText } from '../src/utils.js';
 import { classifyError } from '../src/errors.js';
 import { errorOutput, isJsonOutputRequested, successOutput } from '../src/output.js';
@@ -15,6 +15,11 @@ if (jsonOutput) {
 }
 
 try {
+  if (!nodeSupported())
+    throw new Error(
+      `AICommit requires Node.js >=${MIN_NODE_VERSION}; current version is ${process.versions.node}.`,
+    );
+  const { main } = await import('../src/main.js');
   const result = await main();
   if (jsonOutput) process.stdout.write(`${JSON.stringify(successOutput(result))}\n`);
 } catch (err) {

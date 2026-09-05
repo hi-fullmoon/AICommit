@@ -1,3 +1,7 @@
+import { clampThinkingLevel, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
+import { OPENAI_MODELS } from '@earendil-works/pi-ai/providers/openai.models';
+import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models';
+import { OPENROUTER_MODELS } from '@earendil-works/pi-ai/providers/openrouter.models';
 export const PROVIDER_TYPES = Object.freeze([
   'openai',
   'openrouter',
@@ -48,78 +52,6 @@ export function detectProviderType(apiUrl, explicitType = '') {
   return 'custom';
 }
 
-export function isOpenAIReasoningModel(modelId) {
-  const id = (modelId || '').split('/').pop();
-  return /^(?:o\d|gpt-5)/i.test(id);
-}
-
-function openAIReasoningEfforts(modelId) {
-  const id = (modelId || '').split('/').pop().toLowerCase();
-  if (/^gpt-5\.6(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
-  if (/^gpt-5\.(?:2|3|4|5)(?:-|$)/.test(id)) {
-    return ['none', 'low', 'medium', 'high', 'xhigh'];
-  }
-  if (/^gpt-5\.1(?:-|$)/.test(id)) return ['none', 'low', 'medium', 'high'];
-  if (/^gpt-5(?:-|$)/.test(id) || /^o\d(?:-|$)/.test(id)) return ['low', 'medium', 'high'];
-  return null;
-}
-
-// Setup uses this to avoid offering an effort that a recognized official
-// OpenAI model will reject. Other adapters either accept the common effort
-// vocabulary, normalize it, or are model-dependent, so they retain the full
-// list and let the user/provider make the final choice.
-export function reasoningEffortsForModel(providerType, modelId) {
-  if ((providerType || '').toLowerCase() === 'openai') {
-    const supported = openAIReasoningEfforts(modelId);
-    if (supported) return supported.filter((effort) => effort !== 'none');
-  }
-  return [...REASONING_EFFORTS];
-}
-
-export function canDisableReasoningForModel(providerType, modelId) {
-  if ((providerType || '').toLowerCase() !== 'openai') return true;
-  const supported = openAIReasoningEfforts(modelId);
-  return !supported || supported.includes('none');
-}
-
-function openAIReasoningEffort(modelId, enabled, effort) {
-  const requested = enabled ? effort : 'none';
-  const supported = openAIReasoningEfforts(modelId);
-  if (!supported || supported.includes(requested)) return requested;
-
-  const action = enabled ? `reasoning effort "${requested}"` : 'disabling reasoning';
-  throw new Error(
-    `OpenAI model "${modelId}" does not support ${action}. ` +
-      `Supported reasoning efforts: ${supported.join(', ')}.`,
-  );
-}
-
-function mergeRequestExtras(payload, extras) {
-  if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return;
-  const { model: _model, messages: _messages, ...safe } = extras;
-  Object.assign(payload, safe);
-}
-
-function reasoningText(value) {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(reasoningText).filter(Boolean).join('\n');
-  if (value && typeof value === 'object') {
-    return reasoningText(value.text ?? value.summary ?? value.content);
-  }
-  return '';
-}
-
-function messageText(value) {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value
-      .map((part) => part?.text ?? part?.content ?? '')
-      .filter(Boolean)
-      .join('');
-  }
-  return value?.text ?? value?.content ?? '';
-}
-
 function firstNumber(...values) {
   return values.find((value) => typeof value === 'number' && Number.isFinite(value));
 }
@@ -154,172 +86,168 @@ export function normalizeUsage(usage) {
   return Object.keys(normalized).length ? normalized : null;
 }
 
-function normalizeResponse(provider, data) {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('Provider returned an invalid response: expected a JSON object.');
-  }
-
-  const choice = data?.choices?.[0];
-  const message = choice?.message ?? data.message;
-  const content =
-    messageText(message?.content) ||
-    messageText(data?.content?.[0]?.text) ||
-    messageText(data.response);
-  const reasoning =
-    reasoningText(message?.reasoning_content) ||
-    reasoningText(message?.reasoning) ||
-    reasoningText(message?.reasoning_details) ||
-    reasoningText(message?.thinking) ||
-    reasoningText(data.thinking) ||
-    null;
-  const finishReason =
-    choice?.finish_reason ?? data.stop_reason ?? data.done_reason ?? (data.done ? 'stop' : null);
-  const usageSource =
-    data.usage ||
-    (data.prompt_eval_count !== undefined || data.eval_count !== undefined
-      ? {
-          prompt_eval_count: data.prompt_eval_count,
-          eval_count: data.eval_count,
-        }
-      : null);
-
-  return {
-    provider,
-    model: data.model || null,
-    content,
-    reasoning,
-    usage: normalizeUsage(usageSource),
-    finishReason,
-    raw: data,
-  };
-}
-
-function applyReasoning(payload, provider, modelId, reasoning, nativeOllama) {
-  const mode = reasoning?.mode || 'auto';
-  if (mode === 'auto') return;
-
-  const enabled = mode === 'on';
-  const effort = reasoning?.effort || DEFAULT_REASONING_EFFORT;
-
+// Read Pi's bundled catalog locally. Credentials and network model discovery remain
+// outside this layer; a configured model ID need not be present in the catalog.
+function catalogModel(provider, modelId) {
   if (provider === 'openai') {
-    if (!isOpenAIReasoningModel(modelId)) return;
-    payload.reasoning_effort = openAIReasoningEffort(modelId, enabled, effort);
-    return;
+    return OPENAI_MODELS[modelId] || OPENAI_MODELS[modelId.replace(/-codex$/, '')];
   }
-
-  if (provider === 'deepseek') {
-    delete payload.enable_thinking;
-    payload.thinking = { type: enabled ? 'enabled' : 'disabled' };
-    if (enabled) {
-      payload.reasoning_effort = effort === 'low' || effort === 'max' ? effort : 'high';
-      delete payload.temperature;
-    } else {
-      delete payload.reasoning_effort;
-    }
-    return;
-  }
-
-  if (provider === 'openrouter') {
-    payload.reasoning = { effort: enabled ? effort : 'none' };
-    return;
-  }
-
-  if (provider === 'minimax') {
-    payload.reasoning_split = true;
-    if (enabled) {
-      delete payload.thinking;
-      delete payload.enable_thinking;
-    } else {
-      delete payload.enable_thinking;
-      payload.thinking = { type: 'disabled' };
-    }
-    return;
-  }
-
-  if (provider === 'ollama' && nativeOllama) {
-    payload.think = enabled;
-    return;
-  }
-
-  const customBody = enabled ? reasoning?.enabledBody : reasoning?.disabledBody;
-  if (customBody !== undefined) mergeRequestExtras(payload, customBody);
+  if (provider === 'deepseek') return DEEPSEEK_MODELS[modelId];
+  if (provider === 'openrouter') return OPENROUTER_MODELS[modelId];
+  return undefined;
 }
 
-function reasoningForFollowUp(provider, modelId, reasoning) {
-  if (reasoning?.mode !== 'on') return reasoning;
-  if (['deepseek', 'openrouter', 'minimax', 'ollama'].includes(provider)) {
-    return { ...reasoning, mode: 'off' };
-  }
-  if (provider === 'openai') {
-    const supported = openAIReasoningEfforts(modelId);
-    if (supported?.includes('none')) return { ...reasoning, mode: 'off' };
-  }
-  if (reasoning.disabledBody !== undefined) return { ...reasoning, mode: 'off' };
-  return reasoning;
+export function isOpenAIReasoningModel(modelId = '') {
+  return catalogModel('openai', modelId)?.reasoning ?? /^(?:o\d|gpt-5)/i.test(modelId);
 }
 
+export function reasoningEffortsForModel(providerType, modelId) {
+  const known = catalogModel((providerType || '').toLowerCase(), modelId);
+  if (known?.reasoning) {
+    const supported = getSupportedThinkingLevels(known);
+    return REASONING_EFFORTS.filter((effort) => supported.includes(effort));
+  }
+  return [...REASONING_EFFORTS];
+}
+
+export function canDisableReasoningForModel(providerType, modelId) {
+  const known = catalogModel((providerType || '').toLowerCase(), modelId);
+  return !known || getSupportedThinkingLevels(known).includes('off');
+}
+
+function mergeRequestExtras(payload, extras) {
+  if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return;
+  const { model: _model, messages: _messages, stream: _stream, ...safe } = extras;
+  Object.assign(payload, safe);
+}
+
+function resolveEffort(provider, model, reasoning) {
+  if ((reasoning?.mode || 'auto') === 'auto' || !model.reasoning) return undefined;
+  const requested = reasoning.mode === 'on' ? reasoning.effort || DEFAULT_REASONING_EFFORT : 'off';
+  const known = catalogModel(provider, model.id);
+  if (
+    known &&
+    ['openai', 'openrouter'].includes(provider) &&
+    !getSupportedThinkingLevels(known).includes(requested)
+  ) {
+    throw new Error(
+      `${provider === 'openai' ? 'OpenAI' : 'OpenRouter'} model "${model.id}" does not support ${requested === 'off' ? 'disabling reasoning' : `reasoning effort "${requested}"`}. ` +
+        `Supported reasoning efforts: ${getSupportedThinkingLevels(known).join(', ')}.`,
+    );
+  }
+  const level = known && provider === 'deepseek' ? clampThinkingLevel(known, requested) : requested;
+  return level === 'off' ? undefined : level;
+}
+
+// The application selects a Pi model and applies only configuration compatibility
+// overrides. Pi owns message conversion, model effort mapping and wire protocols.
 export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) {
   const provider = detectProviderType(apiUrl, providerType);
-  const url = endpoint(apiUrl);
   const nativeOllama =
-    provider === 'ollama' && /\/api\/(?:chat|generate)\/?$/i.test(url?.pathname || '');
+    provider === 'ollama' && /\/api\/(?:chat|generate)\/?$/i.test(endpoint(apiUrl)?.pathname || '');
+  const known = catalogModel(provider, modelId);
   const openAIReasoning = provider === 'openai' && isOpenAIReasoningModel(modelId);
-
+  const tokenField = openAIReasoning ? 'max_completion_tokens' : 'max_tokens';
+  const model = {
+    ...known,
+    id: modelId,
+    name: known?.name || modelId,
+    api: 'openai-completions',
+    provider,
+    // The transport pins the full configured URL, including nonstandard proxy paths.
+    baseUrl: endpoint(apiUrl)?.origin || '',
+    reasoning:
+      known?.reasoning ?? (openAIReasoning || ['deepseek', 'openrouter'].includes(provider)),
+    input: ['text'],
+    cost: known?.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: known?.contextWindow || 128000,
+    maxTokens: known?.maxTokens || 16384,
+    compat: {
+      ...(known?.api === 'openai-completions' ? known.compat : {}),
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: ['openai', 'deepseek', 'openrouter'].includes(provider),
+      supportsUsageInStreaming: provider === 'openai',
+      supportsFinishReason: true,
+      maxTokensField: tokenField,
+      thinkingFormat:
+        provider === 'deepseek' ? 'deepseek' : provider === 'openrouter' ? 'openrouter' : 'openai',
+    },
+  };
   const capabilities = Object.freeze({
     streaming: !nativeOllama,
     reasoning:
       provider === 'custom'
         ? 'configurable'
-        : provider === 'openai' && !openAIReasoning
+        : ['openai', 'openrouter', 'deepseek'].includes(provider) && !model.reasoning
           ? 'model-dependent'
           : 'native',
-    tokenBudget: nativeOllama
-      ? 'options.num_predict'
-      : openAIReasoning
-        ? 'max_completion_tokens'
-        : 'max_tokens',
+    tokenBudget: nativeOllama ? 'options.num_predict' : tokenField,
     usage: true,
     finishReason: true,
   });
-
   return Object.freeze({
     id: provider,
+    model,
+    nativeOllama,
     capabilities,
     headers: provider === 'openrouter' ? { 'X-Title': 'aicommit' } : {},
-    buildRequest({ messages, temperature, maxTokens, extraBody = {}, reasoning, streaming }) {
-      const payload = { model: modelId, messages };
-      if (nativeOllama) {
-        // Ollama's native stream is newline-delimited JSON rather than SSE.
-        // Use its complete JSON response until the request layer exposes an
-        // NDJSON consumer; reasoning still reaches the callback once parsed.
-        payload.stream = false;
-        payload.options = { temperature, num_predict: maxTokens };
-      } else if (openAIReasoning) {
-        payload.max_completion_tokens = maxTokens;
-      } else {
-        payload.temperature = temperature;
-        payload.max_tokens = maxTokens;
-      }
-
-      mergeRequestExtras(payload, extraBody);
-      applyReasoning(payload, provider, modelId, reasoning, nativeOllama);
-      if (streaming && !nativeOllama) {
-        payload.stream = true;
-        if (provider === 'openai') {
-          const current = payload.stream_options;
-          payload.stream_options = {
-            ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
-            include_usage: true,
-          };
-        }
-      }
-      return payload;
-    },
-    normalizeResponse(data) {
-      return normalizeResponse(provider, data);
+    options({ temperature, maxTokens, extraBody, reasoning }) {
+      const mode = reasoning?.mode || 'auto';
+      const reasoningEffort = resolveEffort(provider, model, reasoning);
+      return {
+        maxTokens,
+        temperature:
+          openAIReasoning || (provider === 'deepseek' && mode === 'on') ? undefined : temperature,
+        reasoningEffort,
+        cacheRetention: 'none',
+        onPayload(payload) {
+          // Pi's absent effort means "off"; AICommit's auto means server defaults.
+          const reasoningKeys = ['thinking', 'reasoning', 'reasoning_effort'];
+          const mapped = Object.fromEntries(
+            reasoningKeys
+              .filter((key) => payload[key] !== undefined)
+              .map((key) => [key, payload[key]]),
+          );
+          if (mode === 'auto') for (const key of reasoningKeys) delete payload[key];
+          mergeRequestExtras(payload, extraBody);
+          if (mode !== 'auto') {
+            if (model.reasoning) {
+              for (const key of reasoningKeys) delete payload[key];
+              Object.assign(payload, mapped);
+              if (provider === 'openai' && mode === 'off')
+                payload.reasoning_effort = model.thinkingLevelMap?.off || 'none';
+            }
+            if (provider === 'deepseek') {
+              delete payload.enable_thinking;
+              if (mode === 'on') delete payload.temperature;
+            } else if (provider === 'minimax') {
+              payload.reasoning_split = true;
+              delete payload.enable_thinking;
+              if (mode === 'off') payload.thinking = { type: 'disabled' };
+              else delete payload.thinking;
+            } else if (nativeOllama) {
+              payload.think = mode === 'on';
+            } else if (provider === 'custom' || provider === 'ollama') {
+              mergeRequestExtras(
+                payload,
+                mode === 'on' ? reasoning?.enabledBody : reasoning?.disabledBody,
+              );
+            }
+          }
+          if (provider === 'openai') {
+            payload.stream_options = { ...payload.stream_options, include_usage: true };
+          }
+          payload.stream = true;
+        },
+      };
     },
     reasoningForFollowUp(reasoning) {
-      return reasoningForFollowUp(provider, modelId, reasoning);
+      if (reasoning?.mode !== 'on') return reasoning;
+      if (provider !== 'custom' && canDisableReasoningForModel(provider, modelId))
+        return { ...reasoning, mode: 'off' };
+      if (reasoning.disabledBody !== undefined) return { ...reasoning, mode: 'off' };
+      return reasoning;
     },
   });
 }

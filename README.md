@@ -30,7 +30,7 @@ These screenshots were captured from real interactive terminal sessions in this 
 npm install --global @hifullmoon/aicommit
 ```
 
-Requires Node.js >= 18.
+Requires Node.js >= 22.19.0.
 
 Update an npm-global installation from the configured registry:
 

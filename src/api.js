@@ -1,5 +1,7 @@
 import { cleanCommitMessage } from './utils.js';
 import { getProviderAdapter, normalizeUsage } from './providers.js';
+import { requestGeneration } from './model-client.js';
+export { requestGeneration } from './model-client.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import {
   buildCommitPolicyPrompt,
@@ -8,9 +10,6 @@ import {
   validateCommitCandidate,
 } from './policy.js';
 import { encodeUntrustedData } from './trust.js';
-
-// Default per-request timeout; overridable via the "timeoutMs" config key.
-const DEFAULT_TIMEOUT_MS = 120_000;
 
 export async function callAPI(
   apiUrl,
@@ -39,294 +38,6 @@ export async function callAPI(
     { messages, temperature, maxTokens, stream },
   );
   return result.raw;
-}
-
-const DEFAULT_RETRY_POLICY = Object.freeze({
-  maxAttempts: 3,
-  baseDelayMs: 500,
-  maxDelayMs: 5000,
-});
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const RETRYABLE_NETWORK_CODES = new Set([
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'EHOSTUNREACH',
-  'ENETUNREACH',
-  'EPIPE',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_SOCKET',
-]);
-
-function secureEndpoint(apiUrl) {
-  const endpoint = new URL(apiUrl);
-  const loopback =
-    endpoint.hostname === 'localhost' ||
-    endpoint.hostname === '127.0.0.1' ||
-    endpoint.hostname.startsWith('127.') ||
-    endpoint.hostname === '[::1]';
-  if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
-    throw new Error(
-      'Refusing insecure API endpoint: use HTTPS, or HTTP only for localhost/loopback.',
-    );
-  }
-  return endpoint;
-}
-
-function retryPolicy(value = {}) {
-  return {
-    maxAttempts: value?.maxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts,
-    baseDelayMs: value?.baseDelayMs ?? DEFAULT_RETRY_POLICY.baseDelayMs,
-    maxDelayMs: value?.maxDelayMs ?? DEFAULT_RETRY_POLICY.maxDelayMs,
-    sleep:
-      value?.sleep ??
-      ((delayMs) =>
-        new Promise((resolve) => {
-          globalThis.setTimeout(resolve, delayMs);
-        })),
-    now: value?.now ?? (() => Date.now()),
-  };
-}
-
-function retryAfterMs(value, now) {
-  if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(value);
-  if (Number.isNaN(date)) return null;
-  return Math.max(0, date - now());
-}
-
-function networkFailure(err) {
-  if (err instanceof TypeError) return true;
-  return RETRYABLE_NETWORK_CODES.has(err?.code) || RETRYABLE_NETWORK_CODES.has(err?.cause?.code);
-}
-
-function timeoutError(err, timeout) {
-  if (err?.name !== 'TimeoutError' && err?.name !== 'AbortError') return null;
-  return new Error(
-    `Request timed out after ${Math.round(timeout / 1000)}s — the model took too long to respond. ` +
-      `Raise "timeoutMs" in your config if this keeps happening.`,
-  );
-}
-
-async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) {
-  const policy = retryPolicy(configuredPolicy);
-  let attempt = 0;
-
-  while (attempt < policy.maxAttempts) {
-    attempt += 1;
-    let response;
-    try {
-      response = await fetch(apiUrl, {
-        ...init,
-        signal: AbortSignal.timeout(timeout),
-      });
-    } catch (err) {
-      const wrappedTimeout = timeoutError(err, timeout);
-      if (wrappedTimeout) throw wrappedTimeout;
-      if (!networkFailure(err) || attempt >= policy.maxAttempts) throw err;
-      const delay = Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
-      await policy.sleep(delay);
-      continue;
-    }
-
-    if (response.ok) {
-      try {
-        return { value: await consume(response), attempts: attempt };
-      } catch (err) {
-        const wrappedTimeout = timeoutError(err, timeout);
-        if (wrappedTimeout) throw wrappedTimeout;
-        // Once the provider has accepted a generation request, replaying it is
-        // unsafe: the first request may already have completed and been billed
-        // even though its response body was interrupted locally.
-        throw err;
-      }
-    }
-    if (RETRYABLE_STATUS.has(response.status) && attempt < policy.maxAttempts) {
-      const requestedDelay = retryAfterMs(response.headers.get('retry-after'), policy.now);
-      if (requestedDelay !== null && requestedDelay > policy.maxDelayMs) {
-        await response.body?.cancel().catch(() => {});
-        throw new Error(
-          `HTTP ${response.status}: provider requested a retry after ${Math.ceil(
-            requestedDelay / 1000,
-          )}s, exceeding the configured retry.maxDelayMs limit.`,
-        );
-      }
-      const delay =
-        requestedDelay ?? Math.min(policy.baseDelayMs * 2 ** (attempt - 1), policy.maxDelayMs);
-      await response.body?.cancel().catch(() => {});
-      await policy.sleep(delay);
-      continue;
-    }
-
-    const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 400)}`);
-  }
-
-  throw new Error('Provider request exhausted its retry budget.');
-}
-
-// Unified provider request contract. Provider adapters own request dialects
-// and response normalization; callers receive the same shape regardless of
-// whether the endpoint is OpenAI-compatible or native Ollama.
-export async function requestGeneration(config, request) {
-  secureEndpoint(config.apiUrl);
-  const timeout = config.timeoutMs || DEFAULT_TIMEOUT_MS;
-  const adapter = getProviderAdapter(config);
-  const payload = await adapter.buildRequest({
-    messages: request.messages,
-    temperature: request.temperature,
-    maxTokens: request.maxTokens,
-    extraBody: config.extraBody,
-    reasoning: request.reasoning ?? config.reasoning,
-    streaming: Boolean(request.stream?.onReasoningDelta),
-  });
-  const startedAt = performance.now();
-  const { value: consumed, attempts } = await fetchWithRetry(
-    config.apiUrl,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-        ...adapter.headers,
-      },
-      body: JSON.stringify(payload),
-    },
-    timeout,
-    config.retry,
-    async (response) => {
-      const contentType = response.headers.get('content-type') || '';
-      if (payload.stream && contentType.includes('text/event-stream')) {
-        return {
-          data: await consumeEventStream(response, request.stream.onReasoningDelta),
-          eventStream: true,
-        };
-      }
-      try {
-        return { data: await response.json(), eventStream: false };
-      } catch (err) {
-        if (err instanceof SyntaxError) {
-          throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Provider returned invalid JSON.', {
-            cause: err,
-          });
-        }
-        throw err;
-      }
-    },
-  );
-
-  const { data, eventStream } = consumed;
-  const normalized = await adapter.normalizeResponse(data);
-  if (request.stream?.onReasoningDelta && !eventStream && normalized.reasoning) {
-    request.stream.onReasoningDelta(normalized.reasoning);
-  }
-  return {
-    ...normalized,
-    capabilities: adapter.capabilities,
-    attempts,
-    latencyMs: performance.now() - startedAt,
-  };
-}
-
-function streamContent(value) {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value
-      .map((part) => part?.text ?? part?.content ?? '')
-      .filter(Boolean)
-      .join('');
-  }
-  return value?.text ?? '';
-}
-
-// Consume OpenAI-compatible SSE (`data: {...}` / `data: [DONE]`) while
-// assembling a normal Chat Completions-shaped response for the existing
-// parsing and retry pipeline. Reasoning fields differ by provider, so every
-// delta goes through the same normalization used for non-stream responses.
-async function consumeEventStream(response, onReasoningDelta) {
-  if (!response.body) throw new Error('Streaming response did not include a body.');
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let dataLines = [];
-  let content = '';
-  let reasoning = '';
-  let usage = null;
-  let model = null;
-  let finishReason = null;
-  let completed = false;
-
-  const consumeData = (raw) => {
-    const payloadText = raw.trim();
-    if (!payloadText) return;
-    if (payloadText === '[DONE]') {
-      completed = true;
-      return;
-    }
-
-    let event;
-    try {
-      event = JSON.parse(payloadText);
-    } catch {
-      throw new Error(`Invalid JSON in streaming response: ${payloadText.slice(0, 200)}`);
-    }
-    if (event.error) {
-      const message = event.error.message || JSON.stringify(event.error);
-      throw new Error(`Streaming API error: ${message}`);
-    }
-
-    model ||= event.model || null;
-    if (event.usage) usage = event.usage;
-    const finishedChoice = event?.choices?.find((choice) => choice?.finish_reason != null);
-    if (finishedChoice) {
-      completed = true;
-      finishReason ||= finishedChoice.finish_reason;
-    }
-    const delta = event?.choices?.[0]?.delta ?? event?.choices?.[0]?.message;
-    if (!delta) return;
-
-    content += streamContent(delta.content);
-    const reasoningDelta = extractReasoning(delta);
-    if (reasoningDelta) {
-      reasoning += reasoningDelta;
-      onReasoningDelta(reasoningDelta);
-    }
-  };
-
-  const consumeLine = (line) => {
-    if (line === '') {
-      if (dataLines.length) consumeData(dataLines.join('\n'));
-      dataLines = [];
-      return;
-    }
-    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
-  };
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || '';
-    for (const line of lines) consumeLine(line);
-  }
-
-  buffer += decoder.decode();
-  if (buffer) consumeLine(buffer);
-  if (dataLines.length) consumeData(dataLines.join('\n'));
-
-  if (!completed) {
-    throw new Error(
-      'Streaming response ended before the provider sent [DONE] or a finish_reason. ' +
-        'The partial response was discarded; retry the request.',
-    );
-  }
-
-  const message = { content: content || null };
-  if (reasoning) message.reasoning_content = reasoning;
-  return { model, choices: [{ message, finish_reason: finishReason }], usage };
 }
 
 // Minimal "ping" request to verify the endpoint, API key, and model are all
@@ -368,7 +79,10 @@ const MAX_REASONING_CHARS = 8000;
 // normal `stop` (or a provider omitting finish_reason) remains untouched.
 function hitTokenLimit(data) {
   const reason = data?.finishReason;
-  return typeof reason === 'string' && /^(?:length|max_tokens|max_output_tokens)$/i.test(reason);
+  return (
+    typeof reason === 'string' &&
+    /^(?:length|max_tokens|max_output_tokens|token_limit)$/i.test(reason)
+  );
 }
 
 // A formatting follow-up does not need to repeat reasoning that has already
@@ -395,30 +109,6 @@ function regeneratePrompt(previousMessage, policy) {
       'then an optional body after a blank line. ' +
       'Output ONLY the new message — no explanation, no quotes, no code fences.',
   ].join('\n');
-}
-
-// Normalize reasoning from the vendor-specific fields that can carry it:
-// OpenAI-style `reasoning_content` (DeepSeek), OpenRouter-style `reasoning`,
-// MiniMax/OpenRouter-style `reasoning_details` ([{ type: 'thinking', text }],
-// possibly multiple segments with interleaved thinking).
-function reasoningText(value) {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value.map(reasoningText).filter(Boolean).join('\n');
-  }
-  if (value && typeof value === 'object') {
-    return reasoningText(value.text ?? value.summary ?? value.content);
-  }
-  return '';
-}
-
-function extractReasoning(msg0) {
-  return (
-    reasoningText(msg0?.reasoning_content) ||
-    reasoningText(msg0?.reasoning) ||
-    reasoningText(msg0?.reasoning_details) ||
-    null
-  );
 }
 
 // Last-ditch extraction from raw reasoning text: prefer the first line that
