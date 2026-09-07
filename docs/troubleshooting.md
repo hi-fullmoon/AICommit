@@ -33,3 +33,13 @@ JSON 模式保证 stdout 只有一个机器对象，诊断进入 stderr。`error
 If a failure remains, capture `aicommit doctor --output=json`, Node/Git versions, the error category, and redacted config sources. Never attach a diff, commit message, config file, API key, reasoning trace, or credential-helper output to a public issue.
 
 若问题仍未解决，请记录 `aicommit doctor --output=json`、Node/Git 版本、错误分类与脱敏后的配置来源。不要在公开 issue 中附加 diff、commit message、配置文件、API key、reasoning 或 credential-helper 输出。
+
+## Large-change limits / 大变更限制
+
+If analysis reaches its token, request (256), depth (8), or time limit, no incomplete plan is committed. Increase the personal `largeChange` budget or stage a smaller logical change. Unknown model token counts use conservative estimates; a request exceeding the input estimate fails before dispatch. An oversized provider-context response is not blindly replayed.
+
+分析达到 token、请求数（256）、汇总层级（8）或时间上限时，不会提交不完整计划。可提高个人 `largeChange` 预算或缩小暂存范围。未知模型采用保守 token 估算，输入估算超限会在发送前失败；Provider 上下文超限不会盲目重试。
+
+Text lines over 1 MiB fail explicitly. Large-change hunk plans are unsupported; use file-level split. Metadata-only files remain in the complete plan. Invalid, duplicate, or missing IDs are response-format errors, not automatic catch-all groups.
+
+单行超过 1 MiB 会明确报错。大变更暂不支持 hunk 规划，请使用文件级拆分。仅统计的文件仍纳入完整计划。无效、重复或遗漏 ID 会报响应格式错误，不会自动归入兜底组。

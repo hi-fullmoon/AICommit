@@ -195,10 +195,10 @@ aicommit -p deepseek -m reasoner
 | `timeoutMs`          | 单次请求超时，单位为毫秒（默认：`120000`）                                                                                            |
 | `retry`              | 瞬时错误重试限制：`maxAttempts`、`baseDelayMs`、`maxDelayMs`（默认：`3`、`500`、`5000`）                                              |
 | `credentialHelper`   | 通过 `enabled` 和 `username` 选择性启用 `git credential fill`（默认：`false`、`aicommit`）                                            |
-| `maxDiffChars`       | 单次发送给模型的 diff 字符数；超限后改为 `--stat` 摘要和截断的 hunk（默认：`30000`）                                                  |
-| `maxFileDiffChars`   | 单文件 diff 上限；超限文件只保留前部 hunk，避免一个大文件挤占全部上下文（默认：`3000`）                                               |
-| `splitMaxDiffChars`  | 拆分规划请求的 diff 字符数；规划阶段需要的 hunk 细节少于最终信息生成（默认：`16000`）                                                 |
-| `splitMaxPlanFiles`  | 交给拆分规划器的最大变更文件数；超出部分归入兜底提交（默认：`100`）                                                                   |
+| `maxDiffChars`       | 每次分析的 diff 字符预算；超限自动分块汇总（默认：`30000`）                                                                           |
+| `maxFileDiffChars`   | 单文件正文分块参考大小；剩余内容继续分析（默认：`3000`）                                                                              |
+| `splitMaxDiffChars`  | 每次批次规划的上下文字符预算（默认：`16000`）                                                                                         |
+| `splitMaxPlanFiles`  | 每次规划的文件或候选组数量上限；超限分层规划（默认：`100`）                                                                           |
 | `diffContextLines`   | 每个 diff hunk 周围的上下文行数（`git diff --unified=<n>`）；越小越节省 token（默认：`1`）                                            |
 | `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖） |
 | `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                 |
@@ -473,3 +473,11 @@ exec zsh
 ## 许可证
 
 [MIT](LICENSE)
+
+### 大变更自动分析
+
+单次提交仍生成一个 commit，批次提交仍按逻辑分组。超出输入预算时，AICommit 自动分块读取、分析和汇总，并显示正文分析与仅统计的文件数量。不会因为文件超过 100 个就自动生成兜底提交。小变更保持原有请求路径。
+
+个人配置可设置 `largeChange`：`chunkInputTokens: 12000`、`maxTotalTokens: 200000`、`concurrency: 2`、`timeoutMs: 180000`，`strategy` 为 `auto`。仓库配置不能提高这项费用预算。token 数使用保守估算；未知 usage 按预留额度计入。重试、汇总、规划和消息生成共用预算。超限或无效分组会停止，不自动提交不完整结果。
+
+完整补丁及较大未跟踪文本暂存到本地临时文件，正常结束或取消时清理；异常崩溃可能遗留临时文件。正文读取有界。单行超过 1 MiB、无法在预算内合并的独立分组，以及大变更的实验性 hunk 规划会明确报错。

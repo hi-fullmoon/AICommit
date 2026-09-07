@@ -31,6 +31,7 @@ import {
   protectSensitiveDiff,
   protectSensitiveText,
   isSensitiveFile,
+  pathBatches,
 } from './git.js';
 import { statusColor, statusIcon, highlightMessage, vimSelect, vimCheckbox } from './ui.js';
 import {
@@ -64,6 +65,15 @@ import {
 } from './split-checkpoint.js';
 import { fallbackHunkGroups, stripHunkCatalog, validateHunkTransaction } from './split-hunks.js';
 import { runModelTask } from './generation-ui.js';
+import {
+  captureChanges,
+  needsAnalysis,
+  analysisConfig,
+  analyzeChanges,
+  planAnalyzedChanges,
+  summarizeChanges,
+} from './change-analysis.js';
+import { updateGitHash, spoolGit } from './git-spool.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode: group changes into multiple logical commits
@@ -256,10 +266,10 @@ export function getSplitStateFingerprint(projectRoot, head, files, scope = 'all'
   files ||= getAllChangedFiles(projectRoot);
   hash.update(readGit(['status', '--porcelain', '-z', '-uall'], projectRoot));
   if (head) {
-    hash.update(readGit(['diff', '--binary', '--full-index', 'HEAD'], projectRoot));
+    updateGitHash(hash, ['diff', '--binary', '--full-index', 'HEAD'], projectRoot);
   } else {
-    hash.update(readGit(['diff', '--binary', '--full-index', '--cached'], projectRoot));
-    hash.update(readGit(['diff', '--binary', '--full-index'], projectRoot));
+    updateGitHash(hash, ['diff', '--binary', '--full-index', '--cached'], projectRoot);
+    updateGitHash(hash, ['diff', '--binary', '--full-index'], projectRoot);
   }
 
   const buffer = Buffer.alloc(64 * 1024);
@@ -665,6 +675,7 @@ export function captureUntrackedSnapshots(
   maxPreviewBytes = 2000,
 ) {
   const previews = new Map();
+  previews.sources = new Map();
   const findings = [];
   const scanBuffer = Buffer.alloc(64 * 1024);
   const overlapBytes = 256;
@@ -698,6 +709,11 @@ export function captureUntrackedSnapshots(
       fd = openSync(fullPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
       const opened = fstatSync(fd);
       if (!opened.isFile()) continue;
+      const full =
+        includePreview && opened.size > maxPreviewBytes
+          ? { source: spoolGit([], projectRoot), privateKey: false, binary: false }
+          : null;
+      if (full) previews.sources.set(path, full);
 
       const previewParts = [];
       let previewLength = 0;
@@ -707,6 +723,10 @@ export function captureUntrackedSnapshots(
         const count = readSync(fd, scanBuffer, 0, scanBuffer.length, offset);
         if (!count) break;
         const chunk = Buffer.from(scanBuffer.subarray(0, count));
+        if (full) {
+          full.source.append(chunk);
+          if (chunk.includes(0)) full.binary = true;
+        }
 
         if (includePreview && previewLength < maxPreviewBytes) {
           const take = Math.min(count, maxPreviewBytes - previewLength);
@@ -715,7 +735,15 @@ export function captureUntrackedSnapshots(
         }
 
         const scanWindow = overlap.length ? Buffer.concat([overlap, chunk]) : chunk;
-        findings.push(...protectSensitiveText(scanWindow.toString('utf-8'), path).findings);
+        const detected = protectSensitiveText(scanWindow.toString('utf-8'), path).findings;
+        findings.push(...detected);
+        if (
+          full &&
+          detected.some(
+            (item) => item.startsWith('private-key') || item.startsWith('sensitive file:'),
+          )
+        )
+          full.privateKey = true;
         overlap = Buffer.from(scanWindow.subarray(Math.max(0, scanWindow.length - overlapBytes)));
         offset += count;
       }
@@ -730,6 +758,12 @@ export function captureUntrackedSnapshots(
     } catch {
       // The path/name remains in the plan, but unreadable content is neither
       // previewed nor treated as if it had been successfully scanned.
+      const full = previews.sources.get(path);
+      if (full) {
+        full.source.dispose();
+        previews.sources.delete(path);
+      }
+      findings.push(`unreadable file: ${path}`);
     } finally {
       if (fd !== undefined) closeSync(fd);
     }
@@ -848,11 +882,12 @@ function readStageZeroEntries(projectRoot) {
   return parseStageZeroEntries(readGit(['ls-files', '--stage', '-z'], projectRoot));
 }
 
-function runGitWithIndex(args, projectRoot, indexPath, inherit = false) {
+function runGitWithIndex(args, projectRoot, indexPath, inherit = false, input = undefined) {
   try {
     return execFileSync('git', args, {
       cwd: projectRoot,
       env: { ...process.env, GIT_INDEX_FILE: indexPath },
+      input,
       encoding: 'utf8',
       stdio:
         inherit === 'stderr'
@@ -900,13 +935,21 @@ function activeCommitHooks(projectRoot) {
 
 function submodulePaths(projectRoot, paths) {
   const found = new Set();
-  const index = readGit(['ls-files', '--stage', '-z', '--', ...paths], projectRoot);
+  const index = pathBatches(paths)
+    .map((batch) =>
+      readGit(['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...batch], projectRoot),
+    )
+    .join('');
   for (const entry of index.split('\0')) {
     const match = entry.match(/^160000 [0-9a-f]+ \d\t([\s\S]+)$/);
     if (match) found.add(match[1]);
   }
   if (hasHead(projectRoot)) {
-    const tree = readGit(['ls-tree', '-rz', 'HEAD', '--', ...paths], projectRoot);
+    const tree = pathBatches(paths)
+      .map((batch) =>
+        readGit(['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD', '--', ...batch], projectRoot),
+      )
+      .join('');
     for (const entry of tree.split('\0')) {
       const match = entry.match(/^160000 commit [0-9a-f]+\t([\s\S]+)$/);
       if (match) found.add(match[1]);
@@ -1011,7 +1054,19 @@ export function preflightSplit(groups, projectRoot, allFiles, scope = 'all') {
 function resetCommittedPaths(projectRoot, groups, allFiles) {
   const paths = [...new Set(groups.flatMap((group) => expandGroupPaths(group, allFiles)))];
   if (paths.length && hasHead(projectRoot))
-    runGit(['reset', '-q', 'HEAD', '--', ...paths], projectRoot);
+    runGit(
+      [
+        '--literal-pathspecs',
+        'reset',
+        '-q',
+        'HEAD',
+        '--pathspec-from-file=-',
+        '--pathspec-file-nul',
+      ],
+      projectRoot,
+      false,
+      paths.join('\0') + '\0',
+    );
 }
 
 function captureTargetEntries(projectRoot, scope, paths) {
@@ -1024,7 +1079,13 @@ function captureTargetEntries(projectRoot, scope, paths) {
       projectRoot,
       indexPath,
     );
-    runGitWithIndex(['add', '-A', '--', ...paths], projectRoot, indexPath);
+    runGitWithIndex(
+      ['--literal-pathspecs', 'add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'],
+      projectRoot,
+      indexPath,
+      false,
+      paths.join('\0') + '\0',
+    );
     return parseStageZeroEntries(
       runGitWithIndex(['ls-files', '--stage', '-z'], projectRoot, indexPath),
     );
@@ -1063,7 +1124,11 @@ function currentHeadParent(projectRoot) {
 function readHeadEntries(projectRoot, paths) {
   const entries = new Map();
   if (!hasHead(projectRoot) || !paths.length) return entries;
-  const text = readGit(['ls-tree', '-rz', 'HEAD', '--', ...paths], projectRoot);
+  const text = pathBatches(paths)
+    .map((batch) =>
+      readGit(['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD', '--', ...batch], projectRoot),
+    )
+    .join('');
   for (const field of text.split('\0')) {
     if (!field) continue;
     const match = field.match(/^(\d+) \S+ ([0-9a-f]+)\t([\s\S]+)$/);
@@ -1157,22 +1222,20 @@ function executeTransactionalSplit(
         if (hunkExecution) {
           runGitWithIndex(['read-tree', hunkExecution.groupTrees[i]], projectRoot, indexPath);
         } else {
-          for (const path of paths) {
-            const entry = snapshot.get(path);
-            if (entry) {
-              runGitWithIndex(
-                ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
-                projectRoot,
-                indexPath,
-              );
-            } else {
-              runGitWithIndex(
-                ['update-index', '--force-remove', '--', path],
-                projectRoot,
-                indexPath,
-              );
-            }
-          }
+          const oidLength = baseTree.length;
+          const entries = paths
+            .map((path) => {
+              const entry = snapshot.get(path);
+              return `${entry ? `${entry.mode} ${entry.oid}` : `0 ${'0'.repeat(oidLength)}`}\t${path}\0`;
+            })
+            .join('');
+          runGitWithIndex(
+            ['update-index', '-z', '--index-info'],
+            projectRoot,
+            indexPath,
+            false,
+            entries,
+          );
         }
         const groupTree = runGitWithIndex(['write-tree'], projectRoot, indexPath).trim();
         if (groupTree === baseTree) {
@@ -1459,7 +1522,18 @@ export async function splitFlow(
   );
 
   const plannedStateFingerprint = getSplitStateFingerprint(projectRoot, head, allFiles, scope);
-  const diff = getSplitDiff(projectRoot, head, config.diffContextLines, scope);
+  const u = unifiedArg(config.diffContextLines);
+  const commands =
+    scope === 'staged'
+      ? [['diff', u, '--cached']]
+      : head
+        ? [['diff', u, 'HEAD']]
+        : [
+            ['diff', u, '--cached'],
+            ['diff', u],
+          ];
+  const captured = captureChanges(commands, projectRoot, allFiles, config);
+  const diff = captured.diff || '';
   const untrackedSnapshot =
     scope === 'all'
       ? captureUntrackedSnapshots(projectRoot, allFiles, config.stripFiles)
@@ -1482,6 +1556,7 @@ export async function splitFlow(
     .filter(isSensitiveFile);
   const sensitiveFindings = [
     ...protectedInput.findings,
+    ...captured.findings,
     ...sensitivePaths.map((path) => `sensitive file: ${path}`),
     ...untrackedSnapshot.findings,
   ].filter((item, index, all) => all.indexOf(item) === index);
@@ -1545,6 +1620,25 @@ export async function splitFlow(
   }
 
   let raw, reasoningText, elapsed, usage;
+  let analysis;
+  const large =
+    needsAnalysis(captured, config, true) ||
+    untrackedSnapshot.previews.sources?.size > 0 ||
+    [...untrackedSnapshot.previews.values()].reduce(
+      (n, text) => n + (text?.length || 0),
+      diff.length,
+    ) > (config.splitMaxDiffChars || 16000);
+  if (large) {
+    if (allFiles.some((file) => file.hunks?.length))
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'Large-change analysis does not support experimental hunk plans; use file-level split.',
+      );
+    planningConfig = analysisConfig(planningConfig);
+    console.log(
+      chalk.dim(`  Large change: analyzing all ${allFiles.length} files in bounded chunks.`),
+    );
+  }
   try {
     ({
       raw,
@@ -1557,15 +1651,43 @@ export async function splitFlow(
       machineOutput,
       cancelMessage: 'Split cancelled.',
       failureMessage: 'API call failed',
-      task: (stream) =>
-        generateSplitPlan(
+      task: async (stream) => {
+        if (large) {
+          analysis = await analyzeChanges(
+            planningConfig,
+            captured,
+            protectModelInput,
+            untrackedSnapshot.previews,
+            ({ completedChunks }) =>
+              console.error(`  Analysis: ${completedChunks} chunks completed`),
+          );
+          const plan = await planAnalyzedChanges(planningConfig, analysis.facts);
+          const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
+          if (plan.some((group) => !groupMessage(group, policy))) {
+            throw fail(
+              ERROR_CATEGORIES.RESPONSE_FORMAT,
+              'Large-change plan contains a commit message that violates commitPolicy. No fallback groups were created.',
+            );
+          }
+          console.error(
+            `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
+          );
+          return {
+            raw: JSON.stringify(plan),
+            elapsed: planningConfig.analysisBudget.snapshot().elapsedMs,
+            usage: planningConfig.analysisBudget.snapshot().usage,
+            reasoning: null,
+          };
+        }
+        return generateSplitPlan(
           planningConfig,
           allFiles,
           planningDiff,
           projectRoot,
           stream,
           untrackedSnapshot.previews,
-        ),
+        );
+      },
       successMessage(result) {
         let done = `Plan generated in ${chalk.bold(formatMs(result.elapsed))}`;
         if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
@@ -1686,17 +1808,22 @@ export async function splitFlow(
       });
 
       for (const idx of picked) {
-        const rawGroupDiff = getGroupDiff(
-          projectRoot,
-          head,
-          scope,
-          groups[idx],
-          allFiles,
-          config.diffContextLines,
-          planningConfig.stripFiles,
-          protectModelInput,
-          untrackedSnapshot.previews,
-        );
+        const rawGroupDiff = analysis
+          ? await summarizeChanges(
+              planningConfig,
+              analysis.facts.filter((fact) => groups[idx].files.includes(fact.path)),
+            )
+          : getGroupDiff(
+              projectRoot,
+              head,
+              scope,
+              groups[idx],
+              allFiles,
+              config.diffContextLines,
+              planningConfig.stripFiles,
+              protectModelInput,
+              untrackedSnapshot.previews,
+            );
         const groupDiff = protectModelInput
           ? protectSensitiveDiff(rawGroupDiff).diff
           : rawGroupDiff;
@@ -1728,7 +1855,7 @@ export async function splitFlow(
             failureMessage: `Group ${idx + 1} regenerate failed`,
             task: (stream) =>
               generateCommitMessage(
-                config,
+                analysis ? planningConfig : config,
                 groupDiff,
                 regenCounts[idx],
                 groups[idx].message,
@@ -1754,6 +1881,10 @@ export async function splitFlow(
     break; // commit, or finish the dry run
   }
 
+  if (analysis) {
+    usage = planningConfig.analysisBudget.snapshot().usage;
+    elapsed = planningConfig.analysisBudget.snapshot().elapsedMs;
+  }
   const reviewedPlan = createSplitPlanArtifact({
     scope,
     baseHead: head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : null,
@@ -1781,6 +1912,13 @@ export async function splitFlow(
       usage,
       warnings,
       exitReason: 'dry_run',
+      ...(analysis
+        ? {
+            data: {
+              analysis: { ...analysis.coverage, ...planningConfig.analysisBudget.snapshot() },
+            },
+          }
+        : {}),
       committed: false,
       edited: planEdited,
       rewrites: rewriteCount,
@@ -1821,6 +1959,11 @@ export async function splitFlow(
     usage,
     warnings,
     exitReason: 'success',
+    ...(analysis
+      ? {
+          data: { analysis: { ...analysis.coverage, ...planningConfig.analysisBudget.snapshot() } },
+        }
+      : {}),
     committed: true,
     edited: planEdited,
     rewrites: rewriteCount,

@@ -2,6 +2,7 @@ import { stream as streamPi } from '@earendil-works/pi-ai/api/openai-completions
 import { getProviderAdapter, normalizeUsage } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { completionEvent, normalizeEventStream } from './provider-response.js';
+import { estimateTokens } from './analysis-budget.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -73,12 +74,20 @@ function timeoutError(err, timeout) {
   );
 }
 
-async function fetchWithRetry(apiUrl, init, timeout, configuredPolicy, consume) {
+async function fetchWithRetry(
+  apiUrl,
+  init,
+  timeout,
+  configuredPolicy,
+  consume,
+  beforeAttempt = null,
+) {
   const policy = retryPolicy(configuredPolicy);
   let attempt = 0;
 
   while (attempt < policy.maxAttempts) {
     attempt += 1;
+    beforeAttempt?.();
     let response;
     try {
       response = await fetch(apiUrl, {
@@ -211,7 +220,18 @@ function transport(config, adapter, state) {
           redirect: 'error',
         },
         config.timeoutMs || DEFAULT_TIMEOUT_MS,
-        config.retry,
+        config.analysisBudget
+          ? {
+              ...config.retry,
+              sleep: async (ms) => {
+                if (ms >= config.analysisBudget.remainingMs())
+                  throw new Error('Analysis timed out during retry backoff.');
+                await new Promise((resolve) => {
+                  setTimeout(resolve, ms);
+                });
+              },
+            }
+          : config.retry,
         async (response) => {
           if (
             (response.headers.get('content-type') || '').toLowerCase().includes('text/event-stream')
@@ -233,6 +253,14 @@ function transport(config, adapter, state) {
             headers: { 'Content-Type': 'text/event-stream' },
           });
         },
+        config.analysisBudget
+          ? () => {
+              state.ticket = config.analysisBudget.reserve(
+                config.analysisInputTokens,
+                config.analysisOutputTokens,
+              );
+            }
+          : null,
       );
       state.attempts = result.attempts;
       return result.value;
@@ -245,6 +273,17 @@ function transport(config, adapter, state) {
 
 export async function requestGeneration(config, request) {
   secureEndpoint(config.apiUrl);
+  if (config.analysisBudget) {
+    config = {
+      ...config,
+      analysisInputTokens: estimateTokens(JSON.stringify(request.messages)),
+      analysisOutputTokens: request.maxTokens,
+      timeoutMs: Math.max(
+        1,
+        Math.min(config.timeoutMs || DEFAULT_TIMEOUT_MS, config.analysisBudget.remainingMs()),
+      ),
+    };
+  }
   const adapter = getProviderAdapter(config);
   const options = adapter.options({
     ...request,
@@ -263,7 +302,9 @@ export async function requestGeneration(config, request) {
     env: {},
     maxRetries: 0,
     timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS,
-    signal: controller.signal,
+    signal: config.analysisBudget
+      ? AbortSignal.any([controller.signal, config.analysisBudget.signal])
+      : controller.signal,
     fetch: transport(config, adapter, state),
   });
   let result;
@@ -331,6 +372,7 @@ export async function requestGeneration(config, request) {
     state.raw?.done_reason ??
     result.rawStopReason ??
     result.stopReason;
+  config.analysisBudget?.settle(state.ticket, usage);
   return {
     provider: adapter.id,
     model: result.responseModel || result.model,

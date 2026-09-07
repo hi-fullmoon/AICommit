@@ -1,4 +1,5 @@
 import { readFile, chmod } from 'node:fs/promises';
+import { DEFAULT_LARGE_CHANGE } from './analysis-budget.js';
 import { execSync } from 'node:child_process';
 
 import chalk from 'chalk';
@@ -148,6 +149,7 @@ export const DEFAULT_CONFIG = {
   // condensed to a `git diff --stat` summary plus truncated hunks, so a huge
   // change set doesn't burn tokens on lines the model doesn't need.
   maxDiffChars: 30000,
+  largeChange: DEFAULT_LARGE_CHANGE,
   // Cap on a single file's diff section. One huge file (e.g. a new generated
   // asset) is truncated to its header and leading hunks instead of eating
   // the whole maxDiffChars budget and pushing every other file out.
@@ -434,6 +436,20 @@ function assertNumber(config, key, { integer = false, min = -Infinity, max = Inf
 }
 
 export function validateConfig(config) {
+  if (config.largeChange !== undefined) {
+    const value = config.largeChange;
+    if (!object(value)) throw new Error('Invalid config "largeChange": expected an object.');
+    assertKnownKeys(value, new Set(Object.keys(DEFAULT_LARGE_CHANGE)), 'largeChange');
+    const settings = { ...DEFAULT_LARGE_CHANGE, ...value };
+    if (settings.strategy !== 'auto')
+      throw new Error('Invalid config "largeChange.strategy": expected auto.');
+    for (const key of ['chunkInputTokens', 'maxTotalTokens', 'timeoutMs']) {
+      assertNumber(settings, key, { integer: true, min: 1024 });
+    }
+    assertNumber(settings, 'concurrency', { integer: true, min: 1, max: 4 });
+    if (settings.maxTotalTokens < settings.chunkInputTokens)
+      throw new Error('largeChange.maxTotalTokens must cover one input request.');
+  }
   assertUrl(config, 'apiUrl');
   assertString(config, 'modelId');
   if (typeof config.prompt !== 'string' || config.prompt.length > 100_000) {

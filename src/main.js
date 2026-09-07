@@ -6,9 +6,7 @@ import chalk from 'chalk';
 import { parseArgs } from './cli.js';
 import { getProjectRoot, loadConfig } from './config.js';
 import {
-  getStagedDiff,
   getChangedFiles,
-  getDiffStats,
   getBranch,
   gitCommit,
   stripLockFileContent,
@@ -21,7 +19,16 @@ import {
   getIndexFingerprint,
   createIndexTransaction,
   protectSensitiveDiff,
+  unifiedArg,
 } from './git.js';
+import {
+  captureChanges,
+  needsAnalysis,
+  analysisConfig,
+  analyzeChanges,
+  summarizeChanges,
+} from './change-analysis.js';
+import { cleanupGitSpools } from './git-spool.js';
 import { generateCommitMessage } from './api.js';
 import {
   statusColor,
@@ -41,7 +48,13 @@ import {
   stringifyConfigRedacted,
   redactSensitiveUrl,
 } from './utils.js';
-import { abortSplit, applySplitPlan, resumeSplit, splitFlow } from './split.js';
+import {
+  abortSplit,
+  applySplitPlan,
+  resumeSplit,
+  splitFlow,
+  getStagedChangedFiles,
+} from './split.js';
 import { runModelTask } from './generation-ui.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
@@ -357,8 +370,7 @@ async function runMain() {
     indexTransaction ||= createIndexTransaction(projectRoot);
     return indexTransaction;
   };
-  let diff = getStagedDiff(projectRoot, config.diffContextLines);
-  if (!diff) {
+  if (!getChangedFiles(projectRoot).length) {
     // Nothing staged. But git diff --staged is also empty for unstaged work
     // and untracked files — surface what git status actually shows instead of
     // falsely claiming there's nothing to commit.
@@ -429,7 +441,14 @@ async function runMain() {
 
     try {
       beginIndexTransaction();
-      runGit(toStage ? ['add', '--', ...toStage] : ['add', '-A'], projectRoot);
+      runGit(
+        toStage
+          ? ['--literal-pathspecs', 'add', '--pathspec-from-file=-', '--pathspec-file-nul']
+          : ['add', '-A'],
+        projectRoot,
+        false,
+        toStage ? toStage.join('\0') + '\0' : undefined,
+      );
       indexTransaction.markOwned();
     } catch (err) {
       indexTransaction?.restore({ force: true });
@@ -443,8 +462,7 @@ async function runMain() {
       });
     }
 
-    diff = getStagedDiff(projectRoot, config.diffContextLines);
-    if (!diff) {
+    if (!getChangedFiles(projectRoot).length) {
       console.log('\n  ' + chalk.yellow('✗ Nothing staged — no diff to commit.\n'));
       throw fail(ERROR_CATEGORIES.GIT_STATE, 'Nothing staged; no diff to commit.', {
         reported: true,
@@ -455,7 +473,14 @@ async function runMain() {
   // Re-read the final diff between two complete-index fingerprints so the
   // prompt is guaranteed to describe one stable staged snapshot.
   const plannedIndexFingerprint = getIndexFingerprint(projectRoot);
-  diff = getStagedDiff(projectRoot, config.diffContextLines);
+  const changedFiles = getChangedFiles(projectRoot);
+  const captured = captureChanges(
+    [['diff', unifiedArg(config.diffContextLines), '--staged']],
+    projectRoot,
+    getStagedChangedFiles(projectRoot),
+    config,
+  );
+  const diff = captured.diff || '';
   if (getIndexFingerprint(projectRoot) !== plannedIndexFingerprint) {
     console.log(
       '\n  ' + chalk.red('✗ The staged changes are being modified concurrently; commit aborted.\n'),
@@ -467,8 +492,7 @@ async function runMain() {
     );
   }
 
-  const stats = getDiffStats(diff);
-  const changedFiles = getChangedFiles(projectRoot);
+  const stats = captured.stats;
   const branch = getBranch(projectRoot);
   const stageIcon = chalk.green('staged');
   const changeStr = chalk.green(`+${stats.additions}`) + '  ' + chalk.red(`-${stats.deletions}`);
@@ -499,7 +523,9 @@ async function runMain() {
   // Protect common secrets before any repository content leaves the machine.
   // The protected diff affects only the model request, never the actual index.
   const protectedInput = protectSensitiveDiff(diff);
+  protectedInput.findings = [...new Set([...protectedInput.findings, ...captured.findings])];
   let diffForModel = diff;
+  let protectAnalysis = true;
   if (protectedInput.findings.length) {
     warnings.push('Sensitive data was detected and protected before the provider request.');
     console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
@@ -529,6 +555,7 @@ async function runMain() {
       return finishCancelled();
     }
     if (sensitiveAction === 'protect') diffForModel = protectedInput.diff;
+    if (sensitiveAction === 'original') protectAnalysis = false;
   }
 
   // Prepare the diff the model sees (computed once — it doesn't change across
@@ -537,13 +564,23 @@ async function runMain() {
   // plus truncated hunks, so token spend stays proportional to what the
   // model needs.
   const strippedDiff = stripLockFileContent(diffForModel, config.stripFiles);
-  const { diff: modelDiff, truncated } = condenseDiff(
+  let { diff: modelDiff, truncated } = condenseDiff(
     strippedDiff,
     config.maxDiffChars,
     getDiffStat(projectRoot),
     config.maxFileDiffChars,
   );
-  if (truncated) {
+  const large = needsAnalysis(captured, config);
+  let analysis;
+  let analyzedFacts;
+  let generationConfig = config;
+  if (large) {
+    generationConfig = analysisConfig(config);
+    console.log(
+      chalk.dim(`  Large change: analyzing all ${changedFiles.length} files in bounded chunks.`),
+    );
+  }
+  if (truncated && !large) {
     warnings.push('The diff was condensed to fit the configured provider input limit.');
     console.log(
       chalk.dim(
@@ -575,8 +612,35 @@ async function runMain() {
         machineOutput,
         cancelMessage: 'Commit cancelled.',
         failureMessage: 'API call failed',
-        task: (stream) =>
-          generateCommitMessage(config, modelDiff, regenerateCount, message, stream),
+        task: async (stream) => {
+          if (large && !analysis) {
+            analyzedFacts ||= await analyzeChanges(
+              generationConfig,
+              captured,
+              protectAnalysis,
+              null,
+              ({ completedChunks }) =>
+                console.error(`  Analysis: ${completedChunks} chunks completed`),
+            );
+            modelDiff = await summarizeChanges(generationConfig, analyzedFacts.facts);
+            analysis = analyzedFacts;
+            console.error(
+              `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
+            );
+          }
+          const result = await generateCommitMessage(
+            generationConfig,
+            modelDiff,
+            regenerateCount,
+            message,
+            stream,
+          );
+          if (large) {
+            result.usage = generationConfig.analysisBudget.snapshot().usage;
+            result.elapsed = generationConfig.analysisBudget.snapshot().elapsedMs;
+          }
+          return result;
+        },
         successMessage(result) {
           let done = `Generated in ${chalk.bold(formatMs(result.elapsed))}`;
           if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
@@ -697,6 +761,13 @@ async function runMain() {
       usage,
       warnings,
       exitReason: 'dry_run',
+      ...(analysis
+        ? {
+            data: {
+              analysis: { ...analysis.coverage, ...generationConfig.analysisBudget.snapshot() },
+            },
+          }
+        : {}),
       committed: false,
       edited: wasEdited,
       rewrites: regenerateCount + automaticCorrectionCount,
@@ -736,6 +807,13 @@ async function runMain() {
       usage,
       warnings,
       exitReason: 'success',
+      ...(analysis
+        ? {
+            data: {
+              analysis: { ...analysis.coverage, ...generationConfig.analysisBudget.snapshot() },
+            },
+          }
+        : {}),
       committed: true,
       edited: wasEdited,
       rewrites: regenerateCount + automaticCorrectionCount,
@@ -767,5 +845,7 @@ export async function main() {
       edited: false,
       rewrites: 0,
     };
+  } finally {
+    cleanupGitSpools();
   }
 }

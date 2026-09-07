@@ -19,9 +19,15 @@
     "error"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
-    "ok": { "type": "boolean" },
-    "message": { "type": ["string", "null"] },
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": ["string", "null"]
+    },
     "plan": {
       "type": ["array", "null"],
       "items": {
@@ -29,8 +35,15 @@
         "additionalProperties": false,
         "required": ["message", "files"],
         "properties": {
-          "message": { "type": "string" },
-          "files": { "type": "array", "items": { "type": "string" } },
+          "message": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "hunks": {
             "type": "array",
             "items": {
@@ -38,29 +51,62 @@
               "additionalProperties": false,
               "required": ["path", "ids"],
               "properties": {
-                "path": { "type": "string" },
-                "ids": { "type": "array", "items": { "type": "string" } }
+                "path": {
+                  "type": "string"
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
         }
       }
     },
-    "provider": { "type": ["string", "null"] },
-    "model": { "type": ["string", "null"] },
-    "latencyMs": { "type": ["number", "null"], "minimum": 0 },
+    "provider": {
+      "type": ["string", "null"]
+    },
+    "model": {
+      "type": ["string", "null"]
+    },
+    "latencyMs": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
     "usage": {
       "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
-        "inputTokens": { "type": "number", "minimum": 0 },
-        "outputTokens": { "type": "number", "minimum": 0 },
-        "totalTokens": { "type": "number", "minimum": 0 }
+        "inputTokens": {
+          "type": "number",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "number",
+          "minimum": 0
+        },
+        "totalTokens": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
-    "warnings": { "type": "array", "items": { "type": "string" } },
-    "exitReason": { "type": "string", "minLength": 1 },
-    "committed": { "type": "boolean" },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "exitReason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "committed": {
+      "type": "boolean"
+    },
     "error": {
       "type": ["object", "null"],
       "additionalProperties": false,
@@ -78,9 +124,57 @@
             "internal"
           ]
         },
-        "message": { "type": "string" }
+        "message": {
+          "type": "string"
+        }
       }
     },
-    "data": { "type": "object" }
+    "data": {
+      "type": "object",
+      "properties": {
+        "analysis": {
+          "type": "object",
+          "description": "Large-change coverage and shared request budget; never contains diff or intermediate summaries.",
+          "properties": {
+            "totalFiles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "analyzedFiles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "metadataOnlyFiles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "failedFiles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "completedChunks": {
+              "type": "number",
+              "minimum": 0
+            },
+            "requests": {
+              "type": "number",
+              "minimum": 0
+            },
+            "budgetedTokens": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxTotalTokens": {
+              "type": "number",
+              "minimum": 0
+            },
+            "elapsedMs": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
   }
 }

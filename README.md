@@ -193,10 +193,10 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `timeoutMs`          | Per-request timeout in milliseconds (default: `120000`)                                                                                                                                                                      |
 | `retry`              | Transient retry limits: `maxAttempts`, `baseDelayMs`, and `maxDelayMs` (defaults: `3`, `500`, and `5000`)                                                                                                                    |
 | `credentialHelper`   | Opt in to `git credential fill` with `enabled` and `username` (defaults: `false` and `aicommit`)                                                                                                                             |
-| `maxDiffChars`       | Diff chars sent to the model per call; oversized diffs become a `--stat` summary + truncated hunks (default: `30000`)                                                                                                        |
-| `maxFileDiffChars`   | Cap on a single file's diff section; bigger sections are truncated to their leading hunks so one huge file can't crowd out the rest (default: `3000`)                                                                        |
-| `splitMaxDiffChars`  | Diff chars sent to the split-planning call; split mode needs less hunk detail than final message generation (default: `16000`)                                                                                               |
-| `splitMaxPlanFiles`  | Number of changed files shown to the split planner before extra files are swept into a catch-all commit (default: `100`)                                                                                                     |
+| `maxDiffChars`       | Per-analysis diff character budget; larger changes use chunked summaries (default: `30000`)                                                                                                                                  |
+| `maxFileDiffChars`   | Target per-file fragment size; remaining content is analyzed in subsequent chunks (default: `3000`)                                                                                                                          |
+| `splitMaxDiffChars`  | Context character budget for each split-planning request (default: `16000`)                                                                                                                                                  |
+| `splitMaxPlanFiles`  | Files or candidate groups per planning request; larger changes use hierarchical planning (default: `100`)                                                                                                                    |
 | `diffContextLines`   | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `1`)                                                                                                                |
 | `stripFiles`         | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper                                                       |
@@ -471,3 +471,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request ch
 ## License
 
 [MIT](LICENSE)
+
+### Automatic large-change analysis
+
+Single-commit mode still creates one commit; split mode still groups logical changes. When input exceeds its budget, AICommit reads, analyzes and reduces chunks automatically, reporting text-analyzed and metadata-only files separately. Passing 100 files no longer creates an automatic catch-all commit. Small changes keep the existing request path.
+
+Personal configuration accepts `largeChange`: `chunkInputTokens: 12000`, `maxTotalTokens: 200000`, `concurrency: 2`, `timeoutMs: 180000`, and `strategy: "auto"`. Repository configuration cannot raise this spending budget. Tokens use a conservative estimate; missing usage retains the reservation. Retries, reduction, planning and final generation share the budget. Budget exhaustion or invalid groups stop execution without automatically committing incomplete results.
+
+Complete patches and larger untracked text are captured in local temporary files, cleaned on normal exit or cancellation; crashes may leave temporary files behind. Content reads are bounded. Lines exceeding 1 MiB, independent groups that cannot fit a global planning budget, and experimental hunk planning for large changes fail explicitly.

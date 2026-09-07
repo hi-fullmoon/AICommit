@@ -1174,3 +1174,87 @@ test('doctor checks runtime, config, capabilities, credentials, and connectivity
   assert.doesNotMatch(result.stdout + result.stderr, /doctor-url-secret|doctor-fragment-secret/);
   assert.match(result.stderr, /api-version=1/);
 });
+
+for (const split of [false, true]) {
+  test(
+    'large-change CLI preserves mode and complete coverage: ' + (split ? 'split' : 'single'),
+    async (t) => {
+      const root = mkdtempSync(join(tmpdir(), 'aicommit-large-cli-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      const home = join(root, 'home');
+      mkdirSync(join(home, '.aicommit'), { recursive: true });
+      const repo = makeRepo(root);
+      git(repo, ['config', 'core.autocrlf', 'false']);
+      for (let i = 0; i < 110; i++)
+        writeFileSync(
+          join(repo, 'fixture-' + i + '.js'),
+          'export const fixture = true;\n'.repeat(40),
+        );
+      git(repo, ['add', '-A']);
+      let requests = 0;
+      const server = createServer((req, res) => {
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', (chunk) => {
+          body += chunk;
+        });
+        req.on('end', () => {
+          requests++;
+          const payload = JSON.parse(body);
+          let content = 'feat: add fixture behavior';
+          const user = payload.messages.at(-1).content;
+          if (user.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON')) {
+            const items = JSON.parse(JSON.parse(user.split('\n')[1]).content);
+            content = JSON.stringify([
+              {
+                ids: items.map((item) => item.id),
+                summary: 'Add fixture behavior and update its implementation',
+                subject: 'feat: add fixture behavior',
+              },
+            ]);
+            if (payload.messages[0].content.includes('one entry per input ID'))
+              content = JSON.stringify(
+                items.map((item) => ({
+                  ids: [item.id],
+                  summary: 'Add fixture behavior and update implementation',
+                })),
+              );
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              choices: [{ message: { content }, finish_reason: 'stop' }],
+              usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+            }),
+          );
+        });
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      t.after(() => server.close());
+      writeFileSync(
+        join(home, '.aicommit', 'config.json'),
+        stringifyUserConfig({
+          apiUrl: 'http://127.0.0.1:' + server.address().port + '/v1/chat/completions',
+          apiKey: '',
+          modelId: 'local-test-model',
+          language: 'en',
+          reasoning: { mode: 'off' },
+        }),
+      );
+      const args = split
+        ? ['split', '--scope=staged', '--yes', '--output=json']
+        : ['--yes', '--output=json'];
+      const result = await runCli(repo, home, args);
+      assert.equal(result.code, 0, result.stdout + result.stderr);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.data.analysis.totalFiles, 111);
+      assert.equal(output.data.analysis.analyzedFiles, 111);
+      assert.equal(output.data.analysis.requests, requests);
+      assert.equal(output.usage.totalTokens, requests * 15);
+      assert.ok(requests > 1);
+      assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
+      assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
+      if (split) assert.equal(new Set(output.plan.flatMap((group) => group.files)).size, 111);
+    },
+  );
+}

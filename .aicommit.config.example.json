@@ -10,7 +10,10 @@
       "models": {
         "default": {
           "modelId": "MiniMax-M3",
-          "reasoning": { "mode": "on", "effort": "medium" }
+          "reasoning": {
+            "mode": "on",
+            "effort": "medium"
+          }
         }
       }
     },
@@ -22,7 +25,10 @@
       "models": {
         "chat": {
           "modelId": "deepseek-v4-flash",
-          "reasoning": { "mode": "on", "effort": "high" }
+          "reasoning": {
+            "mode": "on",
+            "effort": "high"
+          }
         }
       }
     },
@@ -32,8 +38,12 @@
       "apiKeyEnv": "OPENROUTER_API_KEY",
       "defaultModel": "fast",
       "models": {
-        "fast": { "modelId": "openai/gpt-4o-mini" },
-        "quality": { "modelId": "openai/gpt-4o" }
+        "fast": {
+          "modelId": "openai/gpt-4o-mini"
+        },
+        "quality": {
+          "modelId": "openai/gpt-4o"
+        }
       }
     },
     "kimi-code": {
@@ -42,7 +52,9 @@
       "apiKeyEnv": "KIMI_API_KEY",
       "defaultModel": "default",
       "models": {
-        "default": { "modelId": "kimi-for-coding" }
+        "default": {
+          "modelId": "kimi-for-coding"
+        }
       }
     },
     "ollama": {
@@ -50,8 +62,12 @@
       "apiUrl": "http://127.0.0.1:11434/api/chat",
       "defaultModel": "qwen",
       "models": {
-        "qwen": { "modelId": "qwen3:8b" },
-        "deepseek": { "modelId": "deepseek-r1:14b" }
+        "qwen": {
+          "modelId": "qwen3:8b"
+        },
+        "deepseek": {
+          "modelId": "deepseek-r1:14b"
+        }
       }
     }
   },
@@ -122,5 +138,12 @@
     "maxTokens": 4096,
     "maxDisplayChars": 12000
   },
-  "stripFiles": ["*.min.js", "*.map", "*.snap"]
+  "stripFiles": ["*.min.js", "*.map", "*.snap"],
+  "largeChange": {
+    "strategy": "auto",
+    "chunkInputTokens": 12000,
+    "maxTotalTokens": 200000,
+    "concurrency": 2,
+    "timeoutMs": 180000
+  }
 }

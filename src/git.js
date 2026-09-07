@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync 
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { updateGitHash } from './git-spool.js';
 
 // Big repos can produce multi-MB diffs; raise the default 1MB child-process
 // buffer and surface a contextual error if the explicit limit is exceeded.
@@ -73,8 +74,11 @@ export function getStagedDiff(cwd, contextLines) {
 // ids) so a long-running AI/review step cannot silently commit a different
 // index from the one used to generate the message.
 export function getIndexFingerprint(cwd) {
-  const patch = readGit(['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'], cwd);
-  return createHash('sha256').update(patch).digest('hex');
+  return updateGitHash(
+    createHash('sha256'),
+    ['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'],
+    cwd,
+  ).digest('hex');
 }
 
 function hashFileOrMissing(path) {
@@ -428,7 +432,7 @@ export function protectSensitiveDiff(diff) {
   return { diff: out.join(''), findings: [...new Set(findings)] };
 }
 
-export function runGit(args, projectRoot, inherit = false) {
+export function runGit(args, projectRoot, inherit = false, input = undefined) {
   try {
     const stdio =
       inherit === 'stderr'
@@ -436,13 +440,30 @@ export function runGit(args, projectRoot, inherit = false) {
         : inherit
           ? 'inherit'
           : 'pipe';
-    execFileSync('git', args, { cwd: projectRoot, stdio });
+    execFileSync('git', args, { cwd: projectRoot, stdio, input });
   } catch (err) {
     const detail =
       typeof err.stderr === 'string' ? err.stderr.trim() : err.stderr?.toString('utf-8').trim();
     const suffix = detail ? `: ${detail}` : '';
     throw new Error(`git ${args.join(' ')} failed${suffix}`, { cause: err });
   }
+}
+
+export function pathBatches(paths, limit = 6000) {
+  const batches = [];
+  let batch = [];
+  let size = 0;
+  for (const path of paths) {
+    if (batch.length && size + path.length * 2 + 4 > limit) {
+      batches.push(batch);
+      batch = [];
+      size = 0;
+    }
+    batch.push(path);
+    size += path.length * 2 + 4;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
 }
 
 export function hasHead(projectRoot) {
