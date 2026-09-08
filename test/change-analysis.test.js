@@ -21,6 +21,8 @@ import {
 import { createAnalysisBudget } from '../src/analysis-budget.js';
 import { requestGeneration } from '../src/model-client.js';
 import { decodeUntrustedData } from '../src/trust.js';
+import { generateCommitMessage } from '../src/api.js';
+import { localInputBytes } from '../src/local-analysis.js';
 
 function repo(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'aicommit-analysis-test-'));
@@ -44,6 +46,7 @@ function config(overrides = {}) {
     modelId: 'test-model',
     apiKey: '',
     reasoning: { ...DEFAULT_CONFIG.reasoning, mode: 'off' },
+    largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'deep' },
     ...overrides,
   };
 }
@@ -54,6 +57,15 @@ function mockModel(t, transform = null) {
   globalThis.fetch = async (_url, init) => {
     const payload = JSON.parse(init.body);
     calls.push(payload);
+    if (!payload.messages.at(-1).content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'))
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: 'chore: update generated assets' }, finish_reason: 'stop' },
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
+        }),
+      );
     const items = JSON.parse(decodeUntrustedData(payload.messages.at(-1).content).content);
     let result;
     if (payload.messages[0].content.includes('Group related changes')) {
@@ -243,18 +255,27 @@ test('extreme single lines fail explicitly rather than silently truncating', (t)
   assert.throws(() => [...source.lines()], /line exceeds/);
 });
 
-test('ten thousand generated files retain complete metadata without provider calls', async (t) => {
+test('ten thousand generated files finish local reduction and generation with one provider call', async (t) => {
   const { cwd, git } = repo(t);
   for (let i = 0; i < 10000; i++) writeFileSync(join(cwd, `${i}.map`), '{}\n');
   git('add', '-A');
-  const cfg = analysisConfig(config({ stripFiles: ['*.map'] }));
+  const cfg = analysisConfig(
+    config({ language: 'en', stripFiles: ['*.map'], largeChange: { strategy: 'auto' } }),
+  );
   const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
   const calls = mockModel(t);
   const result = await analyzeChanges(cfg, capture);
   assert.equal(result.coverage.totalFiles, 10000);
   assert.equal(result.coverage.metadataOnlyFiles, 10000);
-  assert.equal(new Set(result.facts.map((fact) => fact.id)).size, 10000);
+  assert.equal(new Set(result.facts.flatMap((fact) => fact.files)).size, 10000);
   assert.equal(calls.length, 0);
+  const summary = await summarizeChanges(cfg, result.facts);
+  assert.ok(Buffer.byteLength(summary) <= localInputBytes(cfg));
+  assert.equal(JSON.parse(summary).totalFiles, 10000);
+  assert.equal(calls.length, 0);
+  const generated = await generateCommitMessage(cfg, summary);
+  assert.equal(generated.message, 'chore: update generated assets');
+  assert.equal(calls.length, 1);
 });
 
 test('largeChange configuration rejects unknown, invalid and contradictory limits', () => {
@@ -265,4 +286,9 @@ test('largeChange configuration rejects unknown, invalid and contradictory limit
     /must cover/,
   );
   validateConfig(config({ largeChange: { concurrency: 1 } }));
+  validateConfig(config({ largeChange: { strategy: 'deep' } }));
+  assert.throws(
+    () => validateConfig(config({ largeChange: { strategy: 'recursive' } })),
+    /strategy/,
+  );
 });

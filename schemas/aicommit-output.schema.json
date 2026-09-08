@@ -144,6 +144,14 @@
               "type": "number",
               "minimum": 0
             },
+            "sampledFiles": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Files represented by partial excerpts; not fully analyzed files."
+            },
+            "strategy": {
+              "enum": ["auto", "deep"]
+            },
             "metadataOnlyFiles": {
               "type": "number",
               "minimum": 0

@@ -474,8 +474,26 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request ch
 
 ### Automatic large-change analysis
 
-Single-commit mode still creates one commit; split mode still groups logical changes. When input exceeds its budget, AICommit reads, analyzes and reduces chunks automatically, reporting text-analyzed and metadata-only files separately. Passing 100 files no longer creates an automatic catch-all commit. Small changes keep the existing request path.
+The default `largeChange.strategy: "auto"` inventories every file locally, groups identical textual edits within a module, and selects representative excerpts under a fixed input budget. Lockfiles, generated files (such as `dist/`, `build/`, `*.map`, and `*.snap`), and `stripFiles` matches contribute metadata only. Complete content still undergoes local secret scanning; these selection rules do not change which files Git commits.
 
-Personal configuration accepts `largeChange`: `chunkInputTokens: 12000`, `maxTotalTokens: 200000`, `concurrency: 2`, `timeoutMs: 180000`, and `strategy: "auto"`. Repository configuration cannot raise this spending budget. Tokens use a conservative estimate; missing usage retains the reservation. Retries, reduction, planning and final generation share the budget. Budget exhaustion or invalid groups stop execution without automatically committing incomplete results.
+A normal commit typically needs one model request, with no per-file AI calls or recursive model reduction. The inventory contains at most 16 representative groups under a UTF-8 byte budget, prioritizing coverage across code, configuration, tests, and other categories. It explicitly describes sampling limits. Both terminal and JSON output distinguish fully analyzed files, representative excerpts, and metadata-only files. Provider retries, response recovery, policy correction, and user-requested regeneration can still add requests.
 
-Complete patches and larger untracked text are captured in local temporary files, cleaned on normal exit or cancellation; crashes may leave temporary files behind. Content reads are bounded. Lines exceeding 1 MiB, independent groups that cannot fit a global planning budget, and experimental hunk planning for large changes fail explicitly.
+Split mode builds local candidates and plans them in one model request. The complete candidate inventory must fit `splitMaxPlanFiles` and the input budget; otherwise it stops before calling the provider and suggests staging a smaller logical change or explicitly selecting deep analysis. File membership is still validated completely, with no automatic catch-all commits. Small changes keep the existing request path.
+
+For exhaustive chunk-by-chunk model analysis, opt in through personal configuration:
+
+```json
+{
+  "largeChange": {
+    "strategy": "deep",
+    "chunkInputTokens": 12000,
+    "maxTotalTokens": 200000,
+    "concurrency": 2,
+    "timeoutMs": 180000
+  }
+}
+```
+
+`deep` spends more requests and tokens, with a maximum of 256 requests. Repository configuration cannot change this personal strategy or raise the spending budget. Both strategies use conservative token estimates; missing usage retains the reservation. Retries, reduction, planning, and final generation share the budget. Budget exhaustion or invalid groups stop execution without automatically committing incomplete results.
+
+Complete patches and larger untracked text are captured in local temporary files, with descriptors opened only during reads and writes. Files are cleaned on normal exit or cancellation; crashes may leave them behind. Content reads are bounded. Lines exceeding 1 MiB, independent groups that cannot fit a global planning budget, and experimental hunk planning for large changes fail explicitly.

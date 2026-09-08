@@ -57,6 +57,6 @@ Use `aicommit config show` to inspect effective local state without revealing cr
 
 ## Large-change snapshots / 大变更快照
 
-Large-change analysis sends protected diff fragments and intermediate factual summaries to the configured provider. Intermediate summaries remain untrusted input. Full Git patches and larger untracked text are captured in private local temporary files, with bounded memory reads. Normal completion and Ctrl+C clean them up; an abnormal crash can leave snapshots in the system temporary directory. Summaries are reused only within the current run and are not added to JSON output or split checkpoints.
+Default large-change analysis sends a bounded local inventory and selected protected excerpts to the configured provider, without per-file model requests. Explicit `deep` analysis sends protected fragments and intermediate factual summaries. Both local inventories and model summaries remain untrusted input. Full Git patches and larger untracked text are captured in private local temporary files, with bounded memory reads. Normal completion and Ctrl+C clean them up; an abnormal crash can leave snapshots in the system temporary directory. Summaries are reused only within the current run and are not added to JSON output or split checkpoints.
 
-大变更分析会向已配置 Provider 发送受保护的 diff 片段和中间事实摘要，摘要仍视为不可信输入。完整 Git 补丁和较大未跟踪文本保存在本地私有临时文件中，按块读取；正常结束及 Ctrl+C 会清理，异常崩溃可能在系统临时目录留下快照。摘要仅在本次运行中复用，不加入 JSON 输出或 split checkpoint。
+默认大变更分析向已配置 Provider 发送受限本地清单和选定的保护后片段，不逐文件调用模型。明确选择 `deep` 时才发送分块片段和中间事实摘要。本地清单和模型摘要均视为不可信输入。完整 Git 补丁和较大未跟踪文本保存在本地私有临时文件中，按块读取；正常结束及 Ctrl+C 会清理，异常崩溃可能在系统临时目录留下快照。摘要仅在本次运行中复用，不加入 JSON 输出或 split checkpoint。

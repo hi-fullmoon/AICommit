@@ -7,6 +7,13 @@ import { ERROR_CATEGORIES, fail } from './errors.js';
 import { normalizeCommitPolicy } from './policy.js';
 import { getProviderAdapter } from './providers.js';
 import { createHash } from 'node:crypto';
+import {
+  analyzeLocally,
+  isDeepAnalysis,
+  isGeneratedFile,
+  localOverview,
+  localPlanItems,
+} from './local-analysis.js';
 
 function gitQuote(path) {
   if (!/[\x00-\x1f"\\]/.test(path)) return path;
@@ -85,10 +92,16 @@ export function captureChanges(commands, cwd, files, config) {
         checked.findings.some((f) => f.startsWith('private-key') || f.startsWith('sensitive file:'))
       )
         current.privateKey = true;
-      if (line.startsWith('+') && !line.startsWith('+++')) file.additions++;
-      if (line.startsWith('-') && !line.startsWith('---')) file.deletions++;
+      if (line.startsWith('@@')) current.inHunk = true;
+      if (current.inHunk && line.startsWith('+')) file.additions++;
+      if (current.inHunk && line.startsWith('-')) file.deletions++;
+      const mode = line.match(/^(old mode|new mode|new file mode|deleted file mode) (\d+)\r?\n?$/);
+      if (mode) {
+        if (mode[1] === 'old mode' || mode[1] === 'deleted file mode') file.oldMode = mode[2];
+        else file.newMode = mode[2];
+      }
       if (line.startsWith('Binary files ') || line.startsWith('GIT binary patch'))
-        file.metadataOnly = true;
+        file.binary = file.metadataOnly = true;
     }
     return {
       source,
@@ -130,6 +143,7 @@ export function captureChanges(commands, cwd, files, config) {
           const omitted =
             file.metadataOnly ||
             isLockFile(file.path) ||
+            (!isDeepAnalysis(config) && isGeneratedFile(file.path)) ||
             matchStripPattern(file.path, config.stripFiles) ||
             (protect && section.privateKey);
           if (omitted) {
@@ -148,8 +162,12 @@ export function captureChanges(commands, cwd, files, config) {
         if (body) yield unit();
         for (const file of manifest) {
           if (!file.sections.length || file.metadataOnly) {
+            const omitContent =
+              isLockFile(file.path) ||
+              matchStripPattern(file.path, config.stripFiles) ||
+              (!isDeepAnalysis(config) && isGeneratedFile(file.path));
             const full = previews?.sources?.get(file.addPaths?.[0] || file.path);
-            if (full && !full.binary && !(protect && full.privateKey)) {
+            if (!omitContent && full && !full.binary && !(protect && full.privateKey)) {
               let part = '';
               let number = 0;
               for (const line of full.source.lines()) {
@@ -178,10 +196,7 @@ export function captureChanges(commands, cwd, files, config) {
             }
             const preview = previews?.get(file.addPaths?.[0] || file.path);
             const text =
-              !full &&
-              preview &&
-              !isLockFile(file.path) &&
-              !matchStripPattern(file.path, config.stripFiles)
+              !full && preview && !omitContent
                 ? protect
                   ? protectSensitiveText(preview, file.path).text
                   : preview
@@ -295,6 +310,7 @@ export async function analyzeChanges(
   previews = null,
   onProgress = null,
 ) {
+  if (!isDeepAnalysis(config)) return analyzeLocally(config, capture, protect, previews);
   const budget = config.analysisBudget;
   const maxChars = Math.min(
     config.maxDiffChars || 30000,
@@ -445,6 +461,7 @@ export async function analyzeChanges(
 }
 
 export async function summarizeChanges(config, facts) {
+  if (!isDeepAnalysis(config)) return localOverview(config, facts).text;
   let items = facts.map(({ id, path, summary }) => ({ id, path, summary }));
   const cap = Math.min(
     config.maxDiffChars || 30000,
@@ -473,7 +490,7 @@ export async function summarizeChanges(config, facts) {
   return `Structured change summaries (not raw diff):\n${JSON.stringify(items)}`;
 }
 
-export async function planAnalyzedChanges(config, facts) {
+export async function planAnalyzedChanges(config, facts, coverage = null) {
   let candidates = facts;
   const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
   const cap = Math.min(
@@ -482,11 +499,17 @@ export async function planAnalyzedChanges(config, facts) {
   );
   for (let level = 0; level < 8; level++) {
     const byId = new Map(candidates.map((x) => [x.id, x]));
-    const batches = packItems(
-      candidates.map(({ id, path, summary }) => ({ id, path, summary })),
-      cap,
-      config.splitMaxPlanFiles || 100,
-    );
+    const batches = !isDeepAnalysis(config)
+      ? [localPlanItems(config, candidates, cap)]
+      : packItems(
+          candidates.map(({ id, path, summary }) => ({ id, path, summary })),
+          cap,
+          config.splitMaxPlanFiles || 100,
+        );
+    if (!isDeepAnalysis(config) && coverage) {
+      coverage.sampledFiles = batches[0].filter((item) => item.representativeExcerpt).length;
+      coverage.metadataOnlyFiles = coverage.totalFiles - coverage.sampledFiles;
+    }
     const next = [];
     for (const batch of batches) {
       const groups = await jsonCall(

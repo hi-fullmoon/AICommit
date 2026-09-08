@@ -36,9 +36,9 @@ If a failure remains, capture `aicommit doctor --output=json`, Node/Git versions
 
 ## Large-change limits / 大变更限制
 
-If analysis reaches its token, request (256), depth (8), or time limit, no incomplete plan is committed. Increase the personal `largeChange` budget or stage a smaller logical change. Unknown model token counts use conservative estimates; a request exceeding the input estimate fails before dispatch. An oversized provider-context response is not blindly replayed.
+Default `auto` analysis builds a local inventory and selects bounded excerpts without model reduction calls. If a complete split candidate inventory cannot fit one request, stage a smaller logical change or explicitly choose personal `largeChange.strategy: "deep"`. Deep analysis can reach its fixed request (256) or depth (8) limits; increasing token or time budgets does not raise those limits. Token/time limits remain configurable in personal settings. Unknown model token counts use conservative estimates; an oversized request fails before dispatch, and provider-context errors are not blindly replayed.
 
-分析达到 token、请求数（256）、汇总层级（8）或时间上限时，不会提交不完整计划。可提高个人 `largeChange` 预算或缩小暂存范围。未知模型采用保守 token 估算，输入估算超限会在发送前失败；Provider 上下文超限不会盲目重试。
+默认 `auto` 在本地建立清单并选择受限片段，不调用模型递归汇总。完整拆分候选清单放不进一次请求时，请暂存更小的逻辑变更，或明确在个人配置中选择 `largeChange.strategy: "deep"`。深度分析的请求数（256）和汇总层级（8）上限固定，提高 token 或时间预算不会改变它们；token 和时间预算可在个人配置中调整。未知模型采用保守 token 估算，输入估算超限会在发送前失败；Provider 上下文超限不会盲目重试。
 
 Text lines over 1 MiB fail explicitly. Large-change hunk plans are unsupported; use file-level split. Metadata-only files remain in the complete plan. Invalid, duplicate, or missing IDs are response-format errors, not automatic catch-all groups.
 

@@ -558,26 +558,29 @@ async function runMain() {
     if (sensitiveAction === 'original') protectAnalysis = false;
   }
 
-  // Prepare the diff the model sees (computed once — it doesn't change across
-  // regenerations): lock-file and stripFiles contents are stubbed (they carry
-  // no commit intent) and oversized diffs are condensed to a --stat summary
-  // plus truncated hunks, so token spend stays proportional to what the
-  // model needs.
-  const strippedDiff = stripLockFileContent(diffForModel, config.stripFiles);
-  let { diff: modelDiff, truncated } = condenseDiff(
-    strippedDiff,
-    config.maxDiffChars,
-    getDiffStat(projectRoot),
-    config.maxFileDiffChars,
-  );
+  // Small changes keep the existing prompt. Large changes use a local
+  // inventory by default; exhaustive model analysis is an explicit opt-in.
   const large = needsAnalysis(captured, config);
+  const strippedDiff = stripLockFileContent(diffForModel, config.stripFiles);
+  let { diff: modelDiff, truncated } = large
+    ? { diff: '', truncated: false }
+    : condenseDiff(
+        strippedDiff,
+        config.maxDiffChars,
+        getDiffStat(projectRoot),
+        config.maxFileDiffChars,
+      );
   let analysis;
   let analyzedFacts;
   let generationConfig = config;
   if (large) {
     generationConfig = analysisConfig(config);
     console.log(
-      chalk.dim(`  Large change: analyzing all ${changedFiles.length} files in bounded chunks.`),
+      chalk.dim(
+        generationConfig.largeChange?.strategy === 'deep'
+          ? `  Large change: analyzing all ${changedFiles.length} files in bounded chunks.`
+          : `  Large change: building a local inventory of ${changedFiles.length} files with bounded excerpts.`,
+      ),
     );
   }
   if (truncated && !large) {
@@ -622,11 +625,17 @@ async function runMain() {
               ({ completedChunks }) =>
                 console.error(`  Analysis: ${completedChunks} chunks completed`),
             );
-            modelDiff = await summarizeChanges(generationConfig, analyzedFacts.facts);
+            modelDiff =
+              analyzedFacts.summary ||
+              (await summarizeChanges(generationConfig, analyzedFacts.facts));
             analysis = analyzedFacts;
             console.error(
-              `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
+              `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.sampledFiles || 0} representative excerpts; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
             );
+            if (analysis.coverage.strategy === 'auto')
+              warnings.push(
+                'Large changes were summarized locally with selected excerpts; content was not fully analyzed.',
+              );
           }
           const result = await generateCommitMessage(
             generationConfig,

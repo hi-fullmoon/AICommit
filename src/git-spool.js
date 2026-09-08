@@ -26,24 +26,36 @@ export function spoolGit(commands, cwd) {
       });
     }
     let size = fstatSync(fd).size;
+    closeSync(fd);
+    fd = undefined;
     const source = {
       get size() {
         return size;
       },
       append(buffer) {
-        let written = 0;
-        while (written < buffer.length)
-          written += writeSync(fd, buffer, written, buffer.length - written, size + written);
-        size += written;
+        const output = openSync(path, 'r+');
+        try {
+          let written = 0;
+          while (written < buffer.length)
+            written += writeSync(output, buffer, written, buffer.length - written, size + written);
+          size += written;
+        } finally {
+          closeSync(output);
+        }
       },
       *buffers() {
+        const input = openSync(path, 'r');
         const buffer = Buffer.alloc(64 * 1024);
         let offset = 0;
-        while (offset < size) {
-          const count = readSync(fd, buffer, 0, buffer.length, offset);
-          if (!count) throw new Error('Captured Git patch was truncated.');
-          offset += count;
-          yield buffer.subarray(0, count);
+        try {
+          while (offset < size) {
+            const count = readSync(input, buffer, 0, buffer.length, offset);
+            if (!count) throw new Error('Captured Git patch was truncated.');
+            offset += count;
+            yield buffer.subarray(0, count);
+          }
+        } finally {
+          closeSync(input);
         }
       },
       *lines(maxLineBytes = 1024 * 1024) {
@@ -73,7 +85,6 @@ export function spoolGit(commands, cwd) {
       },
       dispose() {
         if (!active.delete(source)) return;
-        closeSync(fd);
         rmSync(dir, { recursive: true, force: true });
       },
     };

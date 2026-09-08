@@ -441,8 +441,8 @@ export function validateConfig(config) {
     if (!object(value)) throw new Error('Invalid config "largeChange": expected an object.');
     assertKnownKeys(value, new Set(Object.keys(DEFAULT_LARGE_CHANGE)), 'largeChange');
     const settings = { ...DEFAULT_LARGE_CHANGE, ...value };
-    if (settings.strategy !== 'auto')
-      throw new Error('Invalid config "largeChange.strategy": expected auto.');
+    if (!['auto', 'deep'].includes(settings.strategy))
+      throw new Error('Invalid config "largeChange.strategy": expected auto or deep.');
     for (const key of ['chunkInputTokens', 'maxTotalTokens', 'timeoutMs']) {
       assertNumber(settings, key, { integer: true, min: 1024 });
     }

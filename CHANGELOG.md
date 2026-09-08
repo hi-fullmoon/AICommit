@@ -6,6 +6,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ### Changed
 
+- Large changes now default to a local inventory, repeated-edit deduplication, and bounded representative excerpts, typically using one model request. Exhaustive model analysis is available through personal `largeChange.strategy: "deep"`.
+- Large split plans must fit a complete local candidate inventory in one request by default; oversized plans stop before spending tokens. Coverage distinguishes sampled content from complete analysis.
+- Temporary diff and untracked-file snapshots open descriptors only while reading or writing, preventing large file sets from exhausting the process descriptor limit.
+
 - Moved model requests and streamed response decoding to Pi AI, using its bundled model metadata for reasoning capabilities while retaining existing Provider/Model configuration, custom endpoints, and native Ollama compatibility.
 - Raised the minimum Node.js version to 22.19.0 for Pi AI; startup now reports unsupported runtimes before loading the model SDK.
 - Streamed responses require an explicit provider finish reason. Token-limit aliases remain recoverable, mixed reasoning fields retain their text, and endpoints that only support complete JSON can use `extraBody.stream: false` without streaming-only parameters.

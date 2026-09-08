@@ -1636,7 +1636,11 @@ export async function splitFlow(
       );
     planningConfig = analysisConfig(planningConfig);
     console.log(
-      chalk.dim(`  Large change: analyzing all ${allFiles.length} files in bounded chunks.`),
+      chalk.dim(
+        planningConfig.largeChange?.strategy === 'deep'
+          ? `  Large change: analyzing all ${allFiles.length} files in bounded chunks.`
+          : `  Large change: building local split candidates for ${allFiles.length} files.`,
+      ),
     );
   }
   try {
@@ -1661,7 +1665,11 @@ export async function splitFlow(
             ({ completedChunks }) =>
               console.error(`  Analysis: ${completedChunks} chunks completed`),
           );
-          const plan = await planAnalyzedChanges(planningConfig, analysis.facts);
+          const plan = await planAnalyzedChanges(planningConfig, analysis.facts, analysis.coverage);
+          if (analysis.coverage.strategy === 'auto')
+            warnings.push(
+              'Split candidates used local metadata and selected excerpts; review the grouping because content was not fully analyzed.',
+            );
           const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
           if (plan.some((group) => !groupMessage(group, policy))) {
             throw fail(
@@ -1670,7 +1678,7 @@ export async function splitFlow(
             );
           }
           console.error(
-            `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
+            `  Coverage: ${analysis.coverage.analyzedFiles} files analyzed; ${analysis.coverage.sampledFiles || 0} representative excerpts; ${analysis.coverage.metadataOnlyFiles} metadata only.`,
           );
           return {
             raw: JSON.stringify(plan),
