@@ -4,6 +4,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-09
+
 ### Changed
 
 - Large changes now default to a local inventory, repeated-edit deduplication, and bounded representative excerpts, typically using one model request. Exhaustive model analysis is available through personal `largeChange.strategy: "deep"`.
@@ -198,7 +200,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.0
 [2.3.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.3.0
 [2.2.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.3
 [2.2.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.2
