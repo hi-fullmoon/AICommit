@@ -29,6 +29,7 @@ import {
   summarizeChanges,
 } from './change-analysis.js';
 import { cleanupGitSpools } from './git-spool.js';
+import { createAnalysisCache } from './analysis-cache.js';
 import { generateCommitMessage } from './api.js';
 import {
   statusColor,
@@ -110,6 +111,7 @@ async function runMain() {
     splitPlanFile,
     dryRun,
     yes,
+    allowSingleFallback,
     setup,
     update,
     doctor,
@@ -291,6 +293,7 @@ async function runMain() {
     console.log(chalk.dim(`  split:        ${split}`));
     console.log(chalk.dim(`  dryRun:       ${dryRun}`));
     console.log(chalk.dim(`  yes:          ${yes}`));
+    console.log(chalk.dim(`  singleFallback: ${allowSingleFallback}`));
     console.log(chalk.dim('  final config:'));
     for (const [key, value] of Object.entries(config)) {
       const display =
@@ -321,6 +324,7 @@ async function runMain() {
       scope: split,
       dryRun,
       yes,
+      allowSingleFallback,
       machineOutput,
       provider: selectedProvider,
       exportPlanPath: splitCommand === 'plan' ? splitPlanFile : null,
@@ -572,9 +576,25 @@ async function runMain() {
       );
   let analysis;
   let analyzedFacts;
+  let persistentAnalysisCache = null;
   let generationConfig = config;
   if (large) {
     generationConfig = analysisConfig(config);
+    persistentAnalysisCache = createAnalysisCache({
+      projectRoot,
+      snapshotFingerprint: plannedIndexFingerprint,
+      config: generationConfig,
+      protect: protectAnalysis,
+    });
+    if (
+      generationConfig.largeChange?.strategy === 'deep' &&
+      generationConfig.largeChange.cache?.enabled &&
+      !protectAnalysis &&
+      !generationConfig.largeChange.cache.allowUnprotected
+    ) {
+      warnings.push('Deep-analysis recovery cache was disabled for unprotected input.');
+      console.log(chalk.dim('  Recovery cache: disabled for unprotected input.'));
+    }
     console.log(
       chalk.dim(
         generationConfig.largeChange?.strategy === 'deep'
@@ -622,8 +642,11 @@ async function runMain() {
               captured,
               protectAnalysis,
               null,
-              ({ completedChunks }) =>
-                console.error(`  Analysis: ${completedChunks} chunks completed`),
+              ({ completedChunks, cachedChunks }) =>
+                console.error(
+                  `  Analysis: ${completedChunks} chunks completed${cachedChunks ? ` (${cachedChunks} cached)` : ''}`,
+                ),
+              persistentAnalysisCache,
             );
             modelDiff =
               analyzedFacts.summary ||
@@ -691,6 +714,8 @@ async function runMain() {
         reported: true,
       });
     }
+    persistentAnalysisCache?.clear();
+    persistentAnalysisCache = null;
 
     // ── 4. User action ─────────────────────────────────────────────────
 

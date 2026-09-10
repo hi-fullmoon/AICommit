@@ -420,7 +420,11 @@ function assertUrl(config, key) {
   }
 }
 
-function assertNumber(config, key, { integer = false, min = -Infinity, max = Infinity } = {}) {
+function assertNumber(
+  config,
+  key,
+  { integer = false, min = -Infinity, max = Infinity, label = key } = {},
+) {
   const value = config[key];
   const ok =
     typeof value === 'number' &&
@@ -431,7 +435,7 @@ function assertNumber(config, key, { integer = false, min = -Infinity, max = Inf
   if (!ok) {
     const kind = integer ? 'integer' : 'number';
     const range = Number.isFinite(max) ? ` between ${min} and ${max}` : ` >= ${min}`;
-    throw new Error(`Invalid config "${key}": expected a ${kind}${range}.`);
+    throw new Error(`Invalid config "${label}": expected a ${kind}${range}.`);
   }
 }
 
@@ -449,6 +453,30 @@ export function validateConfig(config) {
     assertNumber(settings, 'concurrency', { integer: true, min: 1, max: 4 });
     if (settings.maxTotalTokens < settings.chunkInputTokens)
       throw new Error('largeChange.maxTotalTokens must cover one input request.');
+    if (!object(settings.cache))
+      throw new Error('Invalid config "largeChange.cache": expected an object.');
+    assertKnownKeys(
+      settings.cache,
+      new Set(Object.keys(DEFAULT_LARGE_CHANGE.cache)),
+      'largeChange.cache',
+    );
+    const cache = { ...DEFAULT_LARGE_CHANGE.cache, ...settings.cache };
+    for (const key of ['enabled', 'allowUnprotected']) {
+      if (typeof cache[key] !== 'boolean')
+        throw new Error(`Invalid config "largeChange.cache.${key}": expected a boolean.`);
+    }
+    assertNumber(cache, 'ttlMs', {
+      integer: true,
+      min: 60_000,
+      max: 7 * 24 * 60 * 60 * 1000,
+      label: 'largeChange.cache.ttlMs',
+    });
+    assertNumber(cache, 'maxBytes', {
+      integer: true,
+      min: 1024 * 1024,
+      max: 256 * 1024 * 1024,
+      label: 'largeChange.cache.maxBytes',
+    });
   }
   assertUrl(config, 'apiUrl');
   assertString(config, 'modelId');

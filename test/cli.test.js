@@ -90,6 +90,21 @@ test('parseArgs recognizes explicit non-interactive confirmation', () => {
   assert.equal(parseArgs([]).yes, false);
 });
 
+test('parseArgs restricts conservative single-commit fallback to non-interactive split runs', () => {
+  const parsed = parseArgs(['split', 'run', '--scope=all', '--yes', '--allow-single-fallback']);
+  assert.equal(parsed.allowSingleFallback, true);
+  assert.throws(
+    () => parseArgs(['split', 'run', '--scope=all', '--allow-single-fallback']),
+    /requires non-dry-run/,
+  );
+  assert.throws(
+    () =>
+      parseArgs(['split', 'run', '--scope=all', '--yes', '--dry-run', '--allow-single-fallback']),
+    /requires non-dry-run/,
+  );
+  assert.throws(() => parseArgs(['--yes', '--allow-single-fallback']), /requires non-dry-run/);
+});
+
 test('parseArgs accepts named model selection with a provider', () => {
   const selected = parseArgs(['-p', 'openai', '-m', 'quality']);
   assert.equal(selected.cliProvider, 'openai');

@@ -12,7 +12,7 @@ import {
   isDeepAnalysis,
   isGeneratedFile,
   localOverview,
-  localPlanItems,
+  localPlanBatches,
 } from './local-analysis.js';
 
 function gitQuote(path) {
@@ -230,16 +230,17 @@ const ANALYSIS_SYSTEM =
 export function analysisConfig(config) {
   if (config.analysisBudget) return config;
   const settings = { ...DEFAULT_LARGE_CHANGE, ...config.largeChange };
+  settings.cache = { ...DEFAULT_LARGE_CHANGE.cache, ...config.largeChange?.cache };
   const model = getProviderAdapter(config).model;
-  const output = Math.max(
-    config.maxTokens || 1024,
-    config.reasoning?.mode === 'on' ? config.reasoning.maxTokens || 4096 : 0,
-  );
+  const output =
+    config.reasoning?.mode === 'off'
+      ? config.maxTokens || 1024
+      : Math.max(config.maxTokens || 1024, config.reasoning?.maxTokens || 4096);
   settings.chunkInputTokens = Math.min(
     settings.chunkInputTokens,
     Math.max(256, model.contextWindow - output - 1024),
   );
-  return { ...config, analysisBudget: createAnalysisBudget(settings) };
+  return { ...config, largeChange: settings, analysisBudget: createAnalysisBudget(settings) };
 }
 
 export function packItems(items, maxChars, maxItems = 24) {
@@ -372,63 +373,201 @@ export function validatePartition(groups, ids) {
     throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Analysis left input IDs unassigned.');
 }
 
+function fragmentCacheKey(config, input, protect, persistentCache) {
+  return persistentCache
+    ? persistentCache.keyFor('fragment-analysis', input)
+    : createHash('sha256')
+        .update(
+          JSON.stringify({
+            version: 1,
+            input,
+            protect,
+            model: config.modelId,
+            endpoint: config.apiUrl,
+            context: config.repositoryContextText,
+          }),
+        )
+        .digest('hex');
+}
+
+function validateFragmentGroups(candidate, inputIds) {
+  validatePartition(candidate, inputIds);
+  if (candidate.some((group) => group.ids.length !== 1))
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      'Fragment analysis combined unrelated source IDs.',
+    );
+}
+
+function estimateInitialDeepCost(
+  config,
+  capture,
+  protect,
+  previews,
+  maxBatchTokens,
+  persistentCache,
+) {
+  const batchSizes = [];
+  let batch = [];
+  let batchTokens = 0;
+  let chunks = 0;
+  let cachedChunks = 0;
+  let oversizedInput = false;
+  const fragmentsByFile = new Map();
+  const flush = () => {
+    if (!batch.length) return;
+    chunks++;
+    const inputIds = batch.map((item) => item.id);
+    const cacheKey = fragmentCacheKey(config, batch, protect, persistentCache);
+    const cached =
+      capture.analysisCache?.get(cacheKey) ||
+      persistentCache?.read(cacheKey, inputIds, (candidate) =>
+        validateFragmentGroups(candidate, inputIds),
+      );
+    if (cached) cachedChunks++;
+    else batchSizes.push(batchTokens);
+    batch = [];
+    batchTokens = 0;
+  };
+  for (const unit of capture.units(protect, previews)) {
+    if (unit.metadataOnly) continue;
+    fragmentsByFile.set(unit.fileId, (fragmentsByFile.get(unit.fileId) || 0) + 1);
+    const size = estimateTokens(JSON.stringify(unit));
+    if (size + 768 > config.analysisBudget.limits.chunkInputTokens) oversizedInput = true;
+    if (batch.length && (batchTokens + size > maxBatchTokens || batch.length >= 16)) flush();
+    batch.push(unit);
+    batchTokens += size;
+  }
+  flush();
+  const output = Math.min(2048, config.maxTokens || 1024);
+  let reductionRequests = 0;
+  if (config.analysisTask === 'split') {
+    for (const fragments of fragmentsByFile.values()) {
+      let summaries = fragments;
+      while (summaries * 160 > 2000) {
+        const batches = Math.ceil(summaries / 24);
+        reductionRequests += batches;
+        summaries = batches;
+      }
+    }
+  }
+  let planningRequests = 1;
+  if (config.analysisTask === 'split') {
+    planningRequests = 0;
+    let candidates = Math.max(1, capture.manifest.length);
+    for (let level = 0; level < 8; level++) {
+      const batches = Math.ceil(candidates / (config.splitMaxPlanFiles || 100));
+      planningRequests += batches;
+      if (batches === 1) break;
+      candidates = batches;
+    }
+  }
+  const downstreamRequests = reductionRequests + planningRequests;
+  const downstreamReserve =
+    downstreamRequests * (config.analysisBudget.limits.chunkInputTokens + output);
+  const estimatedTokens =
+    batchSizes.reduce(
+      (total, input) =>
+        total + Math.min(config.analysisBudget.limits.chunkInputTokens, input + 768) + output,
+      0,
+    ) + downstreamReserve;
+  return {
+    chunks,
+    cachedChunks,
+    requestedChunks: batchSizes.length,
+    estimatedTokens,
+    oversizedInput,
+    reductionRequests,
+    planningRequests,
+    downstreamReserve,
+  };
+}
+
 export async function analyzeChanges(
   config,
   capture,
   protect = true,
   previews = null,
   onProgress = null,
+  persistentCache = null,
 ) {
   if (!isDeepAnalysis(config)) return analyzeLocally(config, capture, protect, previews);
   const budget = config.analysisBudget;
+  const maxBatchTokens = Math.min(
+    estimateTokens('x'.repeat(config.maxDiffChars || 30000)),
+    Math.floor(budget.limits.chunkInputTokens * 0.65),
+  );
+  // chunkInputTokens is a token budget, while String#length counts UTF-16 code
+  // units. Track the same conservative UTF-8 estimate used at dispatch time so
+  // ASCII-heavy repositories do not produce roughly twice as many requests and
+  // multibyte input still stays within the configured ceiling.
   const maxChars = Math.min(
     config.maxDiffChars || 30000,
     Math.floor(budget.limits.chunkInputTokens * 0.65),
   );
-  budget.reserveFinal(
-    budget.limits.chunkInputTokens +
-      Math.max(config.maxTokens || 1024, config.reasoning?.maxTokens || 4096),
+  const estimate = estimateInitialDeepCost(
+    config,
+    capture,
+    protect,
+    previews,
+    maxBatchTokens,
+    persistentCache,
   );
+  if (estimate.oversizedInput || estimate.estimatedTokens > budget.limits.maxTotalTokens) {
+    const fallbackConfig = {
+      ...config,
+      largeChange: { ...config.largeChange, strategy: 'auto' },
+    };
+    const local = analyzeLocally(fallbackConfig, capture, protect, previews);
+    local.coverage = {
+      ...local.coverage,
+      degradedFrom: 'deep',
+      fallbackReason: estimate.oversizedInput ? 'preflight_input' : 'preflight_tokens',
+      estimatedDeepChunks: estimate.chunks,
+      estimatedCachedChunks: estimate.cachedChunks,
+      estimatedRequestedChunks: estimate.requestedChunks,
+      estimatedReductionRequests: estimate.reductionRequests,
+      estimatedPlanningRequests: estimate.planningRequests,
+      estimatedDeepTokens: estimate.estimatedTokens,
+    };
+    return local;
+  }
+  budget.reserveFinal(estimate.downstreamReserve);
   const fileFacts = new Map(capture.manifest.map((f) => [f.id, []]));
   let batch = [];
-  let length = 0;
+  let batchTokens = 0;
   let done = 0;
   let analyzed = 0;
+  let cachedChunks = 0;
+  let requestedChunks = 0;
   const pending = [];
   const cache = (capture.analysisCache ||= new Map());
   async function flush() {
     if (!batch.length) return;
     const input = batch;
     batch = [];
-    length = 0;
-    const cacheKey = createHash('sha256')
-      .update(
-        JSON.stringify({
-          version: 1,
-          input,
-          protect,
-          model: config.modelId,
-          endpoint: config.apiUrl,
-          context: config.repositoryContextText,
-        }),
-      )
-      .digest('hex');
+    batchTokens = 0;
+    const cacheKey = fragmentCacheKey(config, input, protect, persistentCache);
     const inputIds = input.map((x) => x.id);
-    const groups =
-      cache.get(cacheKey) ||
-      (await jsonCall(
+    const validateGroups = (candidate) => validateFragmentGroups(candidate, inputIds);
+    let groups = cache.get(cacheKey);
+    let cacheHit = Boolean(groups);
+    if (!groups && persistentCache) {
+      groups = persistentCache.read(cacheKey, inputIds, validateGroups);
+      cacheHit = Boolean(groups);
+    }
+    if (!groups) {
+      groups = await jsonCall(
         config,
         'Return one entry per input ID: [{"ids":["input ID"],"summary":"concise factual changes and uncertainties"}]. Each input ID must appear exactly once. Never combine different IDs. Summaries must be at most 160 characters.',
         input,
-        (candidate) => {
-          validatePartition(candidate, inputIds);
-          if (candidate.some((group) => group.ids.length !== 1))
-            throw fail(
-              ERROR_CATEGORIES.RESPONSE_FORMAT,
-              'Fragment analysis combined unrelated source IDs.',
-            );
-        },
-      ));
+        validateGroups,
+      );
+      requestedChunks++;
+      persistentCache?.write(cacheKey, inputIds, groups);
+    } else {
+      cachedChunks++;
+    }
     const byId = new Map(input.map((x) => [x.id, x.fileId]));
     cache.set(cacheKey, groups);
     for (const group of groups) {
@@ -436,7 +575,13 @@ export async function analyzeChanges(
         fileFacts.get(id).push(group.summary);
     }
     analyzed += input.filter((x) => !x.metadataOnly).length;
-    onProgress?.({ completedChunks: ++done, analyzedFragments: analyzed });
+    onProgress?.({
+      completedChunks: ++done,
+      analyzedFragments: analyzed,
+      cachedChunks,
+      requestedChunks,
+      cacheHit,
+    });
   }
   async function schedule() {
     pending.push(
@@ -456,10 +601,11 @@ export async function analyzeChanges(
         fileFacts.get(unit.fileId).push(unit.text);
         continue;
       }
-      const size = JSON.stringify(unit).length;
-      if (batch.length && (length + size > maxChars || batch.length >= 16)) await schedule();
+      const size = estimateTokens(JSON.stringify(unit));
+      if (batch.length && (batchTokens + size > maxBatchTokens || batch.length >= 16))
+        await schedule();
       batch.push(unit);
-      length += size;
+      batchTokens += size;
     }
     await schedule();
     for (const err of await Promise.all(pending)) if (err) throw err;
@@ -510,15 +656,22 @@ export async function analyzeChanges(
         metadataOnlyFiles: capture.manifest.filter((f) => f.metadataOnly).length,
         failedFiles: 0,
         completedChunks: done,
+        cachedChunks,
+        requestedChunks,
       },
     };
   } catch (err) {
+    const exhausted = err.data?.analysis?.exhausted || (!budget.remainingMs() ? 'time' : undefined);
     err.data = {
       ...err.data,
       analysis: {
         ...budget.snapshot(),
+        ...err.data?.analysis,
+        ...(exhausted ? { exhausted } : {}),
         totalFiles: capture.manifest.length,
         completedChunks: done,
+        cachedChunks,
+        requestedChunks,
         complete: false,
       },
     };
@@ -561,6 +714,7 @@ export async function summarizeChanges(config, facts) {
 
 export async function planAnalyzedChanges(config, facts, coverage = null) {
   let candidates = facts;
+  const deep = isDeepAnalysis(config) && coverage?.strategy !== 'auto';
   const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
   const cap = Math.min(
     config.splitMaxDiffChars || 16000,
@@ -568,15 +722,16 @@ export async function planAnalyzedChanges(config, facts, coverage = null) {
   );
   for (let level = 0; level < 8; level++) {
     const byId = new Map(candidates.map((x) => [x.id, x]));
-    const batches = !isDeepAnalysis(config)
-      ? [localPlanItems(config, candidates, cap)]
-      : packItems(
-          candidates.map(({ id, path, summary }) => ({ id, path, summary })),
-          cap,
-          config.splitMaxPlanFiles || 100,
-        );
-    if (!isDeepAnalysis(config) && coverage) {
-      coverage.sampledFiles = batches[0].filter((item) => item.representativeExcerpt).length;
+    const batches =
+      !deep && level === 0
+        ? localPlanBatches(config, candidates, cap)
+        : packItems(
+            candidates.map(({ id, path, summary }) => ({ id, path, summary })),
+            cap,
+            config.splitMaxPlanFiles || 100,
+          );
+    if (!deep && level === 0 && coverage) {
+      coverage.sampledFiles = batches.flat().filter((item) => item.representativeExcerpt).length;
       coverage.metadataOnlyFiles = coverage.totalFiles - coverage.sampledFiles;
     }
     const next = [];
@@ -605,14 +760,11 @@ export async function planAnalyzedChanges(config, facts, coverage = null) {
     }
     if (batches.length === 1)
       return next.map(({ subject, body, files }) => ({ subject, body, files }));
-    if (next.length >= candidates.length)
-      throw fail(
-        ERROR_CATEGORIES.PROVIDER,
-        'Too many independent change groups for a complete global plan. Stage a smaller logical change or increase planning limits.',
-      );
     candidates = next;
   }
-  throw fail(ERROR_CATEGORIES.PROVIDER, 'Split planning exceeded the maximum summary depth.');
+  throw fail(ERROR_CATEGORIES.PROVIDER, 'Split planning exceeded the maximum summary depth.', {
+    data: { fallbackPlan: true },
+  });
 }
 
 export function needsAnalysis(capture, config, split = false) {

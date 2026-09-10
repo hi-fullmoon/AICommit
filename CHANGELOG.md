@@ -4,6 +4,15 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Added
+
+- Added short-lived, content-addressed recovery caching for validated `deep` analysis chunks so identical snapshots resume after failures without repeating completed provider requests.
+
+### Fixed
+
+- Packed `deep` analysis fragments using the configured token estimate instead of character counts, avoiding unnecessary requests and premature aggregate-budget failures for ASCII-heavy diffs.
+- Large split plans now preflight deep-analysis and downstream planning cost, batch local candidates hierarchically, and offer one complete conservative plan when the bounded budget cannot finish. Non-interactive committing requires the explicit `--allow-single-fallback` opt-in.
+
 ## [2.4.1] - 2026-09-10
 
 ### Fixed

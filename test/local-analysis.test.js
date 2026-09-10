@@ -9,12 +9,11 @@ import {
   analysisConfig,
   analyzeChanges,
   captureChanges,
-  planAnalyzedChanges,
   summarizeChanges,
 } from '../src/change-analysis.js';
 import { getStagedChangedFiles } from '../src/split.js';
 import { cleanupGitSpools } from '../src/git-spool.js';
-import { localInputBytes } from '../src/local-analysis.js';
+import { localInputBytes, localPlanBatches } from '../src/local-analysis.js';
 
 function config() {
   return analysisConfig({
@@ -133,7 +132,7 @@ test(
   },
 );
 
-test('ten thousand independent edits have bounded UTF-8 input and split refuses before spending tokens', async (t) => {
+test('ten thousand independent edits produce bounded local planning batches without spending tokens', async (t) => {
   const cfg = config();
   const manifest = Array.from({ length: 10000 }, (_, i) => ({
     id: `F${i}`,
@@ -166,12 +165,15 @@ test('ten thousand independent edits have bounded UTF-8 input and split refuses 
   assert.ok(data.samples.some((sample) => sample.kind === 'test'));
   assert.ok(Buffer.byteLength(summary) <= localInputBytes(cfg));
   assert.doesNotMatch(summary, /\uFFFD/);
-  await assert.rejects(planAnalyzedChanges(cfg, result.facts), /does not fit one request/);
-  // A smaller candidate count can still overflow the byte budget (long paths).
-  await assert.rejects(
-    planAnalyzedChanges(cfg, result.facts.slice(0, 90)),
-    /does not fit one request/,
+  const cap = Math.min(
+    cfg.splitMaxDiffChars,
+    Math.floor(cfg.analysisBudget.limits.chunkInputTokens * 0.6),
   );
+  const batches = localPlanBatches(cfg, result.facts, cap);
+  assert.ok(batches.length > 1);
+  assert.equal(batches.flat().length, result.facts.length);
+  assert.ok(batches.every((batch) => batch.length <= cfg.splitMaxPlanFiles));
+  assert.ok(batches.every((batch) => Buffer.byteLength(JSON.stringify(batch)) <= cap));
   assert.equal(calls(), 0);
   assert.equal(cfg.analysisBudget.snapshot().requests, 0);
 });

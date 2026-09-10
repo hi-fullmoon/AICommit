@@ -52,6 +52,7 @@ function showHelp() {
     --no-reasoning        Explicitly disable reasoning when supported
     --dry-run             Generate and review without creating commits
     -y, --yes             Non-interactive: accept the generated message/plan
+    --allow-single-fallback  Let non-interactive split commit one complete group if planning exhausts its budget
     --output=<text|json>  Output mode; JSON requires --yes for commit flows
     --debug               Print debug info (parsed args, final config, etc.)
 
@@ -93,6 +94,7 @@ function parsedDefaults(overrides = {}) {
     splitPlanFile: null,
     dryRun: false,
     yes: false,
+    allowSingleFallback: false,
     setup: false,
     update: false,
     doctor: false,
@@ -201,6 +203,7 @@ export function parseArgs(args = process.argv.slice(2)) {
   let splitScopeOption = false;
   let dryRun = false;
   let yes = false;
+  let allowSingleFallback = false;
   const setup = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -287,6 +290,11 @@ export function parseArgs(args = process.argv.slice(2)) {
 
     if (arg === '-y' || arg === '--yes') {
       yes = true;
+      continue;
+    }
+
+    if (arg === '--allow-single-fallback') {
+      allowSingleFallback = true;
       continue;
     }
 
@@ -428,6 +436,12 @@ export function parseArgs(args = process.argv.slice(2)) {
   if (splitPlanFile && !['plan', 'apply'].includes(splitCommand)) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--file is only valid with split plan or split apply.');
   }
+  if (allowSingleFallback && (splitCommand !== 'run' || !yes || dryRun)) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      '--allow-single-fallback requires non-dry-run "aicommit split run --yes".',
+    );
+  }
   if (
     configAction &&
     (cliLang || cliReasoning || split || splitCommand || splitPlanFile || dryRun || yes)
@@ -497,6 +511,7 @@ export function parseArgs(args = process.argv.slice(2)) {
     splitPlanFile,
     dryRun,
     yes,
+    allowSingleFallback,
     setup,
     update,
     doctor,

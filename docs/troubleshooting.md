@@ -36,10 +36,14 @@ If a failure remains, capture `aicommit doctor --output=json`, Node/Git versions
 
 ## Large-change limits / 大变更限制
 
-Default `auto` analysis builds a local inventory and selects bounded excerpts without model reduction calls. If a complete split candidate inventory cannot fit one request, stage a smaller logical change or explicitly choose personal `largeChange.strategy: "deep"`. Deep analysis can reach its fixed request (256) or depth (8) limits; increasing token or time budgets does not raise those limits. Token/time limits remain configurable in personal settings. Unknown model token counts use conservative estimates; an oversized request fails before dispatch, and provider-context errors are not blindly replayed.
+Default `auto` analysis builds a local inventory and selects bounded excerpts, then batches oversized split inventories and merges their plans hierarchically. Deep analysis still has fixed request (256) and depth (8) limits. If its aggregate token/time budget is exhausted or hierarchical planning cannot converge, split mode emits an explicit warning and can fall back to one complete all-files plan; it never uses a partial model plan. Interactive and dry-run flows show that plan, while non-interactive committing requires the explicit `--allow-single-fallback` option. Token/time limits remain configurable in personal settings. Unknown model token counts use conservative estimates; an oversized request is not dispatched, and provider-context errors are not blindly replayed.
 
-默认 `auto` 在本地建立清单并选择受限片段，不调用模型递归汇总。完整拆分候选清单放不进一次请求时，请暂存更小的逻辑变更，或明确在个人配置中选择 `largeChange.strategy: "deep"`。深度分析的请求数（256）和汇总层级（8）上限固定，提高 token 或时间预算不会改变它们；token 和时间预算可在个人配置中调整。未知模型采用保守 token 估算，输入估算超限会在发送前失败；Provider 上下文超限不会盲目重试。
+默认 `auto` 在本地建立清单并选择受限片段；拆分候选过多时会分批请求，再分层合并计划。深度分析仍有固定的请求数（256）和汇总层级（8）上限。如果总 token/时间预算耗尽，或分层规划无法收敛，拆分模式会明确警告，并可降级为一个覆盖全部文件的计划，绝不会采用模型返回的半份计划。交互和 dry-run 流程会展示该计划；非交互提交必须显式传入 `--allow-single-fallback`。token 和时间预算仍可在个人配置中调整。未知模型采用保守 token 估算，单次输入超限时不会发送该请求；Provider 上下文超限不会盲目重试。
 
-Text lines over 1 MiB fail explicitly. Large-change hunk plans are unsupported; use file-level split. Metadata-only files remain in the complete plan. Invalid, duplicate, or missing IDs are response-format errors, not automatic catch-all groups.
+Validated initial `deep` chunks are cached under private Git metadata after a failed or interrupted run. A retry of the identical snapshot and model settings reports cached chunks and requests only the remainder. Any input/model/protection change causes a miss. Successful generation clears the active cache; stale entries expire after 24 hours. Unprotected input is not cached unless personal `largeChange.cache.allowUnprotected` is explicitly enabled.
+
+失败或中断后，已经通过校验的初始 `deep` 分块会缓存在私有 Git 元数据中。使用相同快照和模型设置重试时会报告缓存命中，并只请求剩余分块；输入、模型或保护模式发生任何变化都会失效。完整生成成功后清理当前缓存，遗留项 24 小时后过期。未保护内容只有在个人配置显式启用 `largeChange.cache.allowUnprotected` 时才缓存。
+
+Text lines over 1 MiB fail explicitly. Large-change hunk plans are unsupported; use file-level split. Metadata-only files remain in the complete plan. Invalid provider output remains a response-format error; only deterministic budget/capacity exhaustion activates the complete all-files fallback.
 
 单行超过 1 MiB 会明确报错。大变更暂不支持 hunk 规划，请使用文件级拆分。仅统计的文件仍纳入完整计划。无效、重复或遗漏 ID 会报响应格式错误，不会自动归入兜底组。

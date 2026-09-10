@@ -245,27 +245,57 @@ export function analyzeLocally(config, capture, protect, previews) {
       metadataOnlyFiles: capture.manifest.length - overview.sampledFiles,
       failedFiles: 0,
       completedChunks: 0,
+      cachedChunks: 0,
+      requestedChunks: 0,
     },
   };
 }
 
-export function localPlanItems(config, facts, cap) {
+export function localPlanBatches(config, facts, cap) {
   const error = () =>
-    fail(
-      ERROR_CATEGORIES.CONFIG,
-      'The complete split candidate inventory does not fit one request. Stage a smaller logical change or explicitly set personal largeChange.strategy to deep. No planning request was sent.',
-    );
-  if (facts.length > (config.splitMaxPlanFiles || 100)) throw error();
-  const items = facts.map((fact) => ({
-    ...summaryOf(fact, false),
-    summary: 'Local candidate only; verify grouping. Content not fully analyzed.',
-  }));
-  if (Buffer.byteLength(JSON.stringify(items)) > cap) throw error();
-  for (const fact of ranked(facts)) {
-    if (!fact.evidence) continue;
-    const item = items.find((item) => item.id === fact.id);
-    item.representativeExcerpt = fact.evidence;
-    if (Buffer.byteLength(JSON.stringify(items)) > cap) delete item.representativeExcerpt;
+    fail(ERROR_CATEGORIES.CONFIG, 'A split candidate is too large for one planning request.', {
+      data: { fallbackPlan: true },
+    });
+  const maxItems = config.splitMaxPlanFiles || 100;
+  const batches = [];
+  let batch = [];
+  for (const fact of facts) {
+    const item = {
+      ...summaryOf(fact, false),
+      summary: 'Local candidate only; verify grouping. Content not fully analyzed.',
+    };
+    if (Buffer.byteLength(JSON.stringify([item])) > cap) throw error();
+    const candidate = [...batch, item];
+    if (
+      batch.length &&
+      (candidate.length > maxItems || Buffer.byteLength(JSON.stringify(candidate)) > cap)
+    ) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(item);
   }
-  return items;
+  if (batch.length) batches.push(batch);
+
+  const factsById = new Map(facts.map((fact) => [fact.id, fact]));
+  for (const items of batches) {
+    for (const item of items) {
+      const evidence = factsById.get(item.id)?.evidence;
+      if (!evidence) continue;
+      item.representativeExcerpt = evidence;
+      if (Buffer.byteLength(JSON.stringify(items)) > cap) delete item.representativeExcerpt;
+    }
+  }
+  return batches;
+}
+
+export function localPlanItems(config, facts, cap) {
+  const batches = localPlanBatches(config, facts, cap);
+  if (batches.length !== 1)
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      'The complete split candidate inventory requires multiple planning requests.',
+      { data: { fallbackPlan: true } },
+    );
+  return batches[0];
 }

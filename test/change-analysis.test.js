@@ -23,6 +23,7 @@ import { requestGeneration } from '../src/model-client.js';
 import { decodeUntrustedData } from '../src/trust.js';
 import { generateCommitMessage } from '../src/api.js';
 import { localInputBytes } from '../src/local-analysis.js';
+import { createAnalysisCache } from '../src/analysis-cache.js';
 
 function repo(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'aicommit-analysis-test-'));
@@ -158,6 +159,154 @@ test('large source is analyzed in chunks, then produces one summary or complete 
   assert.equal(cfg.analysisBudget.snapshot().usage.totalTokens, calls.length * 140);
 });
 
+test('deep analysis packs ASCII fragments by estimated tokens instead of character count', async (t) => {
+  const { cwd, git } = repo(t);
+  for (let i = 0; i < 8; i++)
+    writeFileSync(join(cwd, `part-${i}.js`), 'export const fixture = true;\n'.repeat(80));
+  git('add', '-A');
+  const cfg = analysisConfig(
+    config({
+      maxDiffChars: 30000,
+      maxFileDiffChars: 3000,
+      largeChange: {
+        ...DEFAULT_CONFIG.largeChange,
+        strategy: 'deep',
+        chunkInputTokens: 4000,
+        concurrency: 1,
+      },
+    }),
+  );
+  const capture = captureChanges(
+    [['diff', '--staged', '--unified=1']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    cfg,
+  );
+  const calls = mockModel(t);
+
+  const analyzed = await analyzeChanges(cfg, capture);
+
+  assert.equal(analyzed.coverage.analyzedFiles, 8);
+  assert.ok(analyzed.coverage.completedChunks <= 4);
+  assert.equal(calls.length, analyzed.coverage.requestedChunks);
+});
+
+test('local split candidates are planned in bounded batches and merged globally', async (t) => {
+  const cfg = analysisConfig(
+    config({
+      splitMaxPlanFiles: 10,
+      largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'auto' },
+    }),
+  );
+  const facts = Array.from({ length: 25 }, (_, index) => ({
+    id: `F${index}`,
+    kind: 'source',
+    module: `src/module-${index}`,
+    status: 'M',
+    files: [`src/module-${index}/index.js`],
+    additions: 1,
+    deletions: 1,
+    evidence: `+export const value${index} = true;`,
+  }));
+  const calls = mockModel(t);
+
+  const groups = await planAnalyzedChanges(cfg, facts, {
+    totalFiles: facts.length,
+    sampledFiles: 0,
+    metadataOnlyFiles: facts.length,
+  });
+
+  assert.equal(new Set(groups.flatMap((group) => group.files)).size, facts.length);
+  assert.ok(calls.length > 1);
+  assert.ok(
+    calls.every((call) => {
+      const data = call.messages.find((message) =>
+        message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+      );
+      return JSON.parse(decodeUntrustedData(data.content).content).length <= 10;
+    }),
+  );
+});
+
+test('deep analysis preflight degrades to local inventory before an impossible token run', async (t) => {
+  const cfg = analysisConfig(
+    config({
+      largeChange: {
+        ...DEFAULT_CONFIG.largeChange,
+        strategy: 'deep',
+        chunkInputTokens: 1024,
+        maxTotalTokens: 7168,
+      },
+    }),
+  );
+  const manifest = Array.from({ length: 20 }, (_, index) => ({
+    id: `F${index}`,
+    path: `src/module-${index}.js`,
+    status: 'M',
+    additions: 1,
+    deletions: 1,
+  }));
+  const capture = {
+    manifest,
+    *units() {
+      for (const file of manifest)
+        yield {
+          id: `${file.id}S0P1`,
+          fileId: file.id,
+          path: file.path,
+          metadataOnly: false,
+          text: `+${'const value = true;'.repeat(6)}`,
+        };
+    },
+  };
+  const calls = mockModel(t);
+
+  const result = await analyzeChanges(cfg, capture);
+
+  assert.equal(result.coverage.strategy, 'auto');
+  assert.equal(result.coverage.degradedFrom, 'deep');
+  assert.equal(result.coverage.fallbackReason, 'preflight_tokens');
+  assert.ok(result.coverage.estimatedDeepChunks > 1);
+  assert.ok(result.coverage.estimatedDeepTokens > cfg.largeChange.maxTotalTokens);
+  assert.equal(calls.length, 0);
+});
+
+test('deep analysis preflight does not reserve reasoning tokens when reasoning is off', async (t) => {
+  const cfg = analysisConfig(
+    config({
+      maxTokens: 1024,
+      reasoning: { ...DEFAULT_CONFIG.reasoning, mode: 'off', maxTokens: 4096 },
+      largeChange: {
+        ...DEFAULT_CONFIG.largeChange,
+        strategy: 'deep',
+        chunkInputTokens: 2048,
+        maxTotalTokens: 7000,
+        concurrency: 1,
+      },
+    }),
+  );
+  const manifest = [{ id: 'F1', path: 'src/index.js', status: 'M', additions: 1, deletions: 1 }];
+  const capture = {
+    manifest,
+    *units() {
+      yield {
+        id: 'F1S0P1',
+        fileId: 'F1',
+        path: 'src/index.js',
+        metadataOnly: false,
+        text: `+${'const value = true;'.repeat(10)}`,
+      };
+    },
+  };
+  const calls = mockModel(t);
+
+  const result = await analyzeChanges(cfg, capture);
+
+  assert.equal(result.coverage.degradedFrom, undefined);
+  assert.equal(result.coverage.analyzedFiles, 1);
+  assert.equal(calls.length, 1);
+});
+
 test('private key material found late in a large section prevents every fragment from being sent', async (t) => {
   const { cwd, git } = repo(t);
   writeFileSync(
@@ -236,6 +385,61 @@ test('large-change analysis accepts a complete JSON array surrounded by provider
   assert.equal(calls.length, 1);
 });
 
+test('deep analysis resumes validated chunks from a persistent snapshot cache', async (t) => {
+  const { cwd, git } = repo(t);
+  for (let index = 0; index < 8; index++)
+    writeFileSync(join(cwd, `part-${index}.js`), `export const part${index} = true;\n`.repeat(200));
+  git('add', '-A');
+  const settings = {
+    ...DEFAULT_CONFIG.largeChange,
+    strategy: 'deep',
+    concurrency: 1,
+  };
+  let phase = 'fail';
+  const calls = mockModel(t, (groups, callCount) =>
+    phase === 'fail' && callCount >= 2 ? 'malformed response' : groups,
+  );
+  const snapshotFingerprint = getIndexFingerprint(cwd);
+
+  const firstConfig = analysisConfig(config({ maxFileDiffChars: 1000, largeChange: settings }));
+  const firstCapture = captureChanges(
+    [['diff', '--staged']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    firstConfig,
+  );
+  const firstCache = createAnalysisCache({
+    projectRoot: cwd,
+    snapshotFingerprint,
+    config: firstConfig,
+  });
+  await assert.rejects(
+    analyzeChanges(firstConfig, firstCapture, true, null, null, firstCache),
+    /invalid JSON/,
+  );
+
+  phase = 'resume';
+  const callsBeforeResume = calls.length;
+  const secondConfig = analysisConfig(config({ maxFileDiffChars: 1000, largeChange: settings }));
+  const secondCapture = captureChanges(
+    [['diff', '--staged']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    secondConfig,
+  );
+  const secondCache = createAnalysisCache({
+    projectRoot: cwd,
+    snapshotFingerprint,
+    config: secondConfig,
+  });
+  const result = await analyzeChanges(secondConfig, secondCapture, true, null, null, secondCache);
+
+  assert.ok(result.coverage.cachedChunks > 0);
+  assert.ok(result.coverage.requestedChunks > 0);
+  assert.equal(calls.length - callsBeforeResume, result.coverage.requestedChunks);
+  secondCache.clear();
+});
+
 test('partitions reject omissions, duplicate IDs, and malformed summaries', () => {
   assert.throws(() => validatePartition([{ ids: ['a'], summary: 'x' }], ['a', 'b']), /unassigned/);
   assert.throws(() => validatePartition([{ ids: ['a', 'a'], summary: 'x' }], ['a']), /duplicate/);
@@ -273,7 +477,14 @@ test('unknown token usage keeps the reservation and oversized requests are rejec
   const ticket = budget.reserve(50, 100);
   budget.settle(ticket, null);
   assert.equal(budget.snapshot().budgetedTokens, 150);
-  assert.throws(() => budget.reserve(101, 0), /chunkInputTokens/);
+  assert.throws(
+    () => budget.reserve(101, 0),
+    (err) => err.data.analysis.exhausted === 'input' && /chunkInputTokens/.test(err.message),
+  );
+  assert.throws(
+    () => budget.reserve(50, 101),
+    (err) => err.data.analysis.exhausted === 'tokens' && /token.*budget/.test(err.message),
+  );
 });
 
 test('Git spools handle output beyond the former buffer ceiling without returning full text', (t) => {
@@ -331,6 +542,19 @@ test('largeChange configuration rejects unknown, invalid and contradictory limit
   );
   validateConfig(config({ largeChange: { concurrency: 1 } }));
   validateConfig(config({ largeChange: { strategy: 'deep' } }));
+  validateConfig(config({ largeChange: { cache: { enabled: false } } }));
+  assert.throws(
+    () => validateConfig(config({ largeChange: { cache: { enabled: 'yes' } } })),
+    /cache.enabled/,
+  );
+  assert.throws(
+    () => validateConfig(config({ largeChange: { cache: { ttlMs: 1000 } } })),
+    /cache.ttlMs/,
+  );
+  assert.throws(
+    () => validateConfig(config({ largeChange: { cache: { unknown: true } } })),
+    /unknown/,
+  );
   assert.throws(
     () => validateConfig(config({ largeChange: { strategy: 'recursive' } })),
     /strategy/,

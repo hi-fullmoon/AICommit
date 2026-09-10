@@ -2,9 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderTeamPolicyTemplate } from '../src/team-policy.js';
@@ -1265,7 +1274,207 @@ for (const strategy of ['auto', 'deep'])
         else assert.equal(requests, 1);
         assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
         assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
+        const cacheRoot = git(repo, [
+          'rev-parse',
+          '--git-path',
+          'aicommit/analysis-cache/v1',
+        ]).trim();
+        const resolvedCacheRoot = resolve(repo, cacheRoot);
+        assert.deepEqual(existsSync(resolvedCacheRoot) ? readdirSync(resolvedCacheRoot) : [], []);
         if (split) assert.equal(new Set(output.plan.flatMap((group) => group.files)).size, 111);
       },
     );
   }
+
+test('split falls back to one complete commit when deep-analysis budget is exhausted', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-large-fallback-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.aicommit'), { recursive: true });
+  const repo = makeRepo(root);
+  for (let index = 0; index < 8; index++)
+    writeFileSync(
+      join(repo, `part-${index}.js`),
+      `export const part${index} = true;\n`.repeat(100),
+    );
+  git(repo, ['add', '-A']);
+
+  let requests = 0;
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      requests++;
+      const payload = JSON.parse(body);
+      const system = payload.messages[0]?.content || '';
+      const dataMessage = payload.messages.find((message) =>
+        message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+      );
+      const items = JSON.parse(JSON.parse(dataMessage.content.split('\n')[1]).content);
+      const content = system.includes('Group related changes')
+        ? JSON.stringify([
+            {
+              ids: items.map((item) => item.id),
+              summary: 'Update related source files.',
+              subject: 'chore: update source files',
+            },
+          ])
+        : JSON.stringify(
+            items.map((item) => ({ ids: [item.id], summary: 'Update one source file.' })),
+          );
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: { content },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 30000, completion_tokens: 30000, total_tokens: 60000 },
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  writeFileSync(
+    join(home, '.aicommit', 'config.json'),
+    stringifyUserConfig({
+      apiUrl: `http://127.0.0.1:${server.address().port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      language: 'en',
+      maxFileDiffChars: 400,
+      reasoning: { mode: 'off' },
+      largeChange: {
+        strategy: 'deep',
+        chunkInputTokens: 2048,
+        maxTotalTokens: 100000,
+        concurrency: 1,
+        timeoutMs: 30000,
+        cache: { enabled: false },
+      },
+    }),
+  );
+
+  const refused = await runCli(repo, home, ['split', '--scope=staged', '--yes', '--output=json']);
+  assert.equal(refused.code, 5, refused.stdout + refused.stderr);
+  assert.match(JSON.parse(refused.stdout).error.message, /--allow-single-fallback/);
+  assert.notEqual(git(repo, ['status', '--porcelain']).trim(), '');
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '1');
+
+  const result = await runCli(repo, home, [
+    'split',
+    '--scope=staged',
+    '--yes',
+    '--allow-single-fallback',
+    '--output=json',
+  ]);
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.data.analysis.strategy, 'fallback');
+  assert.equal(output.data.analysis.fallbackReason, 'tokens');
+  assert.equal(output.plan.length, 1);
+  assert.equal(new Set(output.plan[0].files).size, 9);
+  assert.ok(output.warnings.some((warning) => warning.includes('conservative all-files')));
+  assert.ok(requests > 0);
+  assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
+});
+
+test('deep-analysis CLI resumes cached chunks across failed process runs', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-large-resume-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.aicommit'), { recursive: true });
+  const repo = makeRepo(root);
+  git(repo, ['config', 'core.autocrlf', 'false']);
+  for (let index = 0; index < 8; index++)
+    writeFileSync(
+      join(repo, `part-${index}.js`),
+      `export const part${index} = true;\n`.repeat(200),
+    );
+  git(repo, ['add', '-A']);
+
+  let phase = 'fail';
+  let fragmentRequests = 0;
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      const payload = JSON.parse(body);
+      const system = payload.messages[0]?.content || '';
+      const dataMessage = payload.messages.find(
+        (message) =>
+          message.role === 'user' && message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+      );
+      let content = 'feat: add resumable analysis cache';
+      if (dataMessage) {
+        const items = JSON.parse(JSON.parse(dataMessage.content.split('\n')[1]).content);
+        if (system.includes('one entry per input ID')) {
+          fragmentRequests++;
+          content =
+            phase === 'fail' && fragmentRequests >= 2
+              ? 'malformed fragment response'
+              : JSON.stringify(
+                  items.map((item) => ({
+                    ids: [item.id],
+                    summary: 'Add resumable analysis behavior.',
+                  })),
+                );
+        } else if (system.includes('one factual summary') || system.includes('one summary')) {
+          content = JSON.stringify([
+            { ids: items.map((item) => item.id), summary: 'Add resumable analysis behavior.' },
+          ]);
+        }
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  writeFileSync(
+    join(home, '.aicommit', 'config.json'),
+    stringifyUserConfig({
+      apiUrl: `http://127.0.0.1:${server.address().port}/v1/chat/completions`,
+      apiKey: '',
+      modelId: 'local-test-model',
+      language: 'en',
+      maxFileDiffChars: 1000,
+      reasoning: { mode: 'off' },
+      largeChange: { strategy: 'deep', concurrency: 1 },
+    }),
+  );
+
+  const failed = await runCli(repo, home, ['--yes', '--output=json']);
+  assert.equal(failed.code, 6, failed.stdout + failed.stderr);
+  const cacheRoot = resolve(
+    repo,
+    git(repo, ['rev-parse', '--git-path', 'aicommit/analysis-cache/v1']).trim(),
+  );
+  assert.ok(readdirSync(cacheRoot).length > 0);
+
+  phase = 'resume';
+  fragmentRequests = 0;
+  const resumed = await runCli(repo, home, ['--yes', '--output=json']);
+  assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
+  const output = JSON.parse(resumed.stdout);
+  assert.ok(output.data.analysis.cachedChunks > 0);
+  assert.ok(output.data.analysis.requestedChunks > 0);
+  assert.match(resumed.stderr, /cached/);
+  assert.deepEqual(existsSync(cacheRoot) ? readdirSync(cacheRoot) : [], []);
+});

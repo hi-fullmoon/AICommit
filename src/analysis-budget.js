@@ -6,6 +6,12 @@ export const DEFAULT_LARGE_CHANGE = Object.freeze({
   maxTotalTokens: 200000,
   concurrency: 2,
   timeoutMs: 180000,
+  cache: Object.freeze({
+    enabled: true,
+    ttlMs: 24 * 60 * 60 * 1000,
+    maxBytes: 32 * 1024 * 1024,
+    allowUnprotected: false,
+  }),
 });
 
 export function estimateTokens(text) {
@@ -40,21 +46,25 @@ export function createAnalysisBudget(settings = {}) {
       };
     },
     reserve(input, output) {
-      if (
-        !this.remainingMs() ||
-        charged + input + output + reserveFinal > limits.maxTotalTokens ||
-        requests >= 256
-      ) {
+      const exhausted = !this.remainingMs()
+        ? 'time'
+        : requests >= 256
+          ? 'requests'
+          : charged + input + output + reserveFinal > limits.maxTotalTokens
+            ? 'tokens'
+            : null;
+      if (exhausted) {
         throw fail(
           ERROR_CATEGORIES.PROVIDER,
-          'Large-change analysis reached its token, request, or time budget. No incomplete plan will be committed. Increase the personal largeChange budget or stage a smaller change.',
-          { data: { analysis: this.snapshot() } },
+          `Large-change analysis reached its ${exhausted} budget.`,
+          { data: { analysis: { ...this.snapshot(), exhausted } } },
         );
       }
       if (input > limits.chunkInputTokens) {
         throw fail(
           ERROR_CATEGORIES.PROVIDER,
           'Analysis request exceeds largeChange.chunkInputTokens; shorten repository context or increase the personal input budget.',
+          { data: { analysis: { ...this.snapshot(), exhausted: 'input' } } },
         );
       }
       charged += input + output;

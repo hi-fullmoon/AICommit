@@ -102,6 +102,25 @@ test('normalizePlan sweeps leftover files into a catch-all group', () => {
   assert.match(result[1].message, /update remaining files/);
 });
 
+test('fallback plan obeys required scope, body, breaking marker, type, and language', () => {
+  const result = normalizePlan([], [M('a.js')], 'en', {
+    types: ['fix'],
+    scope: {
+      mode: 'required',
+      values: [],
+      disallowedValues: ['changes', 'repository', 'all'],
+    },
+    body: { mode: 'required', maxLines: 1 },
+    breakingChange: 'require',
+    language: 'en',
+  });
+
+  assert.equal(
+    result[0].message,
+    'fix(fallback-1)!: update remaining files\n\n- Include all reviewed file changes',
+  );
+});
+
 test('normalizePlan drops unknown, duplicate, and empty groups', () => {
   const allFiles = [M('a.js')];
   const groups = [

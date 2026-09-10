@@ -199,6 +199,7 @@ aicommit -p deepseek -m reasoner
 | `maxFileDiffChars`   | 单文件正文分块参考大小；剩余内容继续分析（默认：`3000`）                                                                              |
 | `splitMaxDiffChars`  | 每次批次规划的上下文字符预算（默认：`16000`）                                                                                         |
 | `splitMaxPlanFiles`  | 每次规划的文件或候选组数量上限；超限分层规划（默认：`100`）                                                                           |
+| `largeChange`        | 大变更策略、预算和短期分块恢复缓存；缓存只接受个人配置，默认保留受保护摘要 24 小时、最多 32 MiB                                       |
 | `diffContextLines`   | 每个 diff hunk 周围的上下文行数（`git diff --unified=<n>`）；越小越节省 token（默认：`1`）                                            |
 | `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖） |
 | `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                 |
@@ -313,6 +314,7 @@ aicommit split --dry-run # 审阅拆分计划，但不创建提交
 aicommit --yes           # 非交互提交已明确暂存的变更
 aicommit --yes --dry-run # 非交互预览所有变更；退出时恢复暂存状态
 aicommit split --scope=all --yes # 非交互规划并提交所有工作区变更
+aicommit split --scope=all --yes --allow-single-fallback # 明确允许规划预算耗尽后的保守提交
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # 恢复中断的拆分事务
@@ -326,20 +328,21 @@ aicommit --yes --output=json # 向 stdout 输出一个通过 schema 校验的 JS
 aicommit -h              # 帮助
 ```
 
-| 选项               | 说明                                                                |
-| ------------------ | ------------------------------------------------------------------- |
-| `-l`, `--lang`     | 提交信息语言：`zh` 或 `en`                                          |
-| `-p`, `--provider` | 使用 `providers` 中的命名 Provider                                  |
-| `-m`, `--model`    | 使用所选 Provider 下的命名模型配置                                  |
-| `--scope`          | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
-| `--file`           | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
-| `--dry-run`        | 生成并审阅消息或拆分计划，但不创建提交                              |
-| `-y`, `--yes`      | 不提示直接接受；普通模式要求变更已明确暂存                          |
-| `--reasoning`      | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`       |
-| `--no-reasoning`   | 所选 Provider / 模型支持时显式关闭推理                              |
-| `--output`         | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes` |
-| `-v`, `--version`  | 显示版本                                                            |
-| `-h`, `--help`     | 显示帮助                                                            |
+| 选项                      | 说明                                                                |
+| ------------------------- | ------------------------------------------------------------------- |
+| `-l`, `--lang`            | 提交信息语言：`zh` 或 `en`                                          |
+| `-p`, `--provider`        | 使用 `providers` 中的命名 Provider                                  |
+| `-m`, `--model`           | 使用所选 Provider 下的命名模型配置                                  |
+| `--scope`                 | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
+| `--file`                  | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
+| `--dry-run`               | 生成并审阅消息或拆分计划，但不创建提交                              |
+| `-y`, `--yes`             | 不提示直接接受；普通模式要求变更已明确暂存                          |
+| `--allow-single-fallback` | 明确允许非交互拆分创建一个覆盖完整变更的保守提交                    |
+| `--reasoning`             | 启用推理，可选强度：`low`、`medium`、`high`、`xhigh` 或 `max`       |
+| `--no-reasoning`          | 所选 Provider / 模型支持时显式关闭推理                              |
+| `--output`                | `text`（默认）或单个 JSON 对象；提交 / 拆分的 JSON 流程要求 `--yes` |
+| `-v`, `--version`         | 显示版本                                                            |
+| `-h`, `--help`            | 显示帮助                                                            |
 
 ### 配置检查
 
@@ -480,7 +483,7 @@ exec zsh
 
 普通提交通常只需要一次模型请求，不会为每个文件调用 AI，也不会递归调用模型汇总。摘要最多包含 16 个代表组，并受 UTF-8 字节预算约束；优先覆盖代码、配置和测试等不同类别。摘要明确说明抽样范围，界面和 JSON 分别报告全文分析、代表片段和仅元数据的文件数，不把抽样视为完整理解。提供方重试、响应恢复、格式修正和用户重新生成仍可能增加请求。
 
-批次提交先在本地建立候选组，再用一次模型请求规划。只有完整候选清单能放入 `splitMaxPlanFiles` 和输入预算时才请求模型；否则在请求前停止，提示暂存更小的逻辑变更或显式选择深度分析。所有文件的归属仍进行完整性校验，不会因数量过多生成兜底提交。小变更保持原有请求路径。
+批次提交先在本地建立候选组，再按每批最多 `splitMaxPlanFiles` 个候选发送，并分层合并各批计划；完整候选清单放不进一次请求时，仍会保留每个文件。如果 `deep` 分析耗尽总预算，或分层规划无法收敛，交互和 dry-run 流程会明确警告并生成一个覆盖全部文件的保守计划，而不会采用不完整的模型结果；非交互提交默认停止，只有显式传入 `--allow-single-fallback` 才允许该降级。小变更保持原有请求路径。
 
 确实需要逐块 AI 分析时，在个人配置中设置：
 
@@ -491,11 +494,17 @@ exec zsh
     "chunkInputTokens": 12000,
     "maxTotalTokens": 200000,
     "concurrency": 2,
-    "timeoutMs": 180000
+    "timeoutMs": 180000,
+    "cache": {
+      "enabled": true,
+      "ttlMs": 86400000,
+      "maxBytes": 33554432,
+      "allowUnprotected": false
+    }
   }
 }
 ```
 
-`deep` 会增加请求和 token 消耗，最多 256 次请求。仓库配置不能切换这项个人策略或提高费用预算。两种策略均使用保守 token 估算，未知 usage 按预留额度计入；重试、汇总、规划和消息生成共用预算。超限或无效分组会停止，不自动提交不完整结果。
+`deep` 会增加请求和 token 消耗，最多 256 次请求。请求前会预估初始分块、必要归并和最小分层规划树的成本；确定无法装入总预算时直接切换到本地清单路径，已验证的缓存命中不计入这次预估。通过完整校验的初始事实分块会短期写入 Git 元数据目录；同一快照失败或中断后重试时直接复用，完整生成成功后清理。缓存不直接保存捕获的 diff、推理、凭据或完整 Provider 响应，只保存可能包含代码派生细节的模型摘要；选择发送未保护的原始内容时默认不落盘，只有个人配置显式设置 `allowUnprotected: true` 才允许。仓库配置不能切换策略、启用未保护缓存或提高费用与缓存上限。两种策略均使用保守 token 估算，未知 usage 按预留额度计入；缓存命中不计请求或 token。模型的不完整输出永远不会被提交：预算或容量降级会重新生成一个包含全部已审核文件的完整计划；交互模式先展示确认，非交互提交则要求 `--allow-single-fallback`。
 
-完整补丁及较大未跟踪文本暂存到本地临时文件，只在读写时打开文件句柄，正常结束或取消时清理；异常崩溃可能遗留临时文件。正文读取有界。单行超过 1 MiB、无法在预算内合并的独立分组，以及大变更的实验性 hunk 规划会明确报错。
+完整补丁及较大未跟踪文本暂存到本地临时文件，只在读写时打开文件句柄，正常结束或取消时清理；异常崩溃可能遗留临时文件。正文读取有界。单行超过 1 MiB 和大变更的实验性 hunk 规划会明确报错；文件级规划容量不足时使用覆盖完整变更的保守回退。

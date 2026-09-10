@@ -74,6 +74,7 @@ import {
   summarizeChanges,
 } from './change-analysis.js';
 import { updateGitHash, spoolGit } from './git-spool.js';
+import { createAnalysisCache } from './analysis-cache.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Split mode: group changes into multiple logical commits
@@ -468,6 +469,51 @@ function groupMessage(g, policy) {
   return validateCommitCandidate(message, { policy }).valid ? message : '';
 }
 
+function fallbackCommitMessage(policy) {
+  const type = policy.types.includes('chore') ? 'chore' : policy.types[0];
+  let scope = '';
+  if (policy.scope.mode === 'required') {
+    if (policy.scope.values.length) scope = policy.scope.values[0];
+    else {
+      const disallowed = new Set(policy.scope.disallowedValues || []);
+      const preferred = ['changes', 'repository', 'all'];
+      scope = preferred.find((candidate) => !disallowed.has(candidate)) || '';
+      for (let index = 1; !scope; index++) {
+        const candidate = `fallback-${index}`;
+        if (!disallowed.has(candidate)) scope = candidate;
+      }
+    }
+  }
+  const breaking = policy.breakingChange === 'require' ? '!' : '';
+  const prefix = `${type}${scope ? `(${scope})` : ''}${breaking}: `;
+  const preferred = policy.effectiveLanguage === 'zh' ? '更新其余文件' : 'update remaining files';
+  const available = Math.max(
+    1,
+    Math.min(
+      policy.subject.maxLength,
+      policy.subject.headerMaxLength
+        ? policy.subject.headerMaxLength - [...prefix].length
+        : policy.subject.maxLength,
+    ),
+  );
+  const subject = [...preferred].slice(0, available).join('');
+  const body =
+    policy.body.mode === 'required'
+      ? policy.effectiveLanguage === 'zh'
+        ? '- 包含本次已审核的全部文件变更'
+        : '- Include all reviewed file changes'
+      : '';
+  const message = cleanCommitMessage(`${prefix}${subject}${body ? `\n\n${body}` : ''}`);
+  const validation = validateCommitCandidate(message, { policy });
+  if (!validation.valid) {
+    throw fail(
+      ERROR_CATEGORIES.CONFIG,
+      `Cannot construct a conservative fallback message under commitPolicy: ${validation.errors.map((item) => item.message).join(' ')}`,
+    );
+  }
+  return message;
+}
+
 // Clean up the model's plan: drop unknown/duplicate files, drop empty
 // groups, and sweep any file the model forgot into a final catch-all group.
 export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
@@ -531,12 +577,8 @@ export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
     if (ids.length) leftoverHunks.push({ path: change.path, ids });
   }
   if (leftoverFiles.length || leftoverHunks.length) {
-    const type = policy.types.includes('chore') ? 'chore' : policy.types[0];
     result.push({
-      message:
-        policy.effectiveLanguage === 'zh'
-          ? `${type}: 更新其余文件`
-          : `${type}: update remaining files`,
+      message: fallbackCommitMessage(policy),
       files: leftoverFiles,
       ...(leftoverHunks.length ? { hunks: leftoverHunks } : {}),
     });
@@ -1421,6 +1463,7 @@ export async function splitFlow(
     scope = 'prompt',
     dryRun = false,
     yes = false,
+    allowSingleFallback = false,
     machineOutput = false,
     provider = null,
     exportPlanPath = null,
@@ -1621,6 +1664,7 @@ export async function splitFlow(
 
   let raw, reasoningText, elapsed, usage;
   let analysis;
+  let persistentAnalysisCache = null;
   const large =
     needsAnalysis(captured, config, true) ||
     untrackedSnapshot.previews.sources?.size > 0 ||
@@ -1634,7 +1678,22 @@ export async function splitFlow(
         ERROR_CATEGORIES.CONFIG,
         'Large-change analysis does not support experimental hunk plans; use file-level split.',
       );
-    planningConfig = analysisConfig(planningConfig);
+    planningConfig = analysisConfig({ ...planningConfig, analysisTask: 'split' });
+    persistentAnalysisCache = createAnalysisCache({
+      projectRoot,
+      snapshotFingerprint: plannedStateFingerprint,
+      config: planningConfig,
+      protect: protectModelInput,
+    });
+    if (
+      planningConfig.largeChange?.strategy === 'deep' &&
+      planningConfig.largeChange.cache?.enabled &&
+      !protectModelInput &&
+      !planningConfig.largeChange.cache.allowUnprotected
+    ) {
+      warnings.push('Deep-analysis recovery cache was disabled for unprotected input.');
+      console.log(chalk.dim('  Recovery cache: disabled for unprotected input.'));
+    }
     console.log(
       chalk.dim(
         planningConfig.largeChange?.strategy === 'deep'
@@ -1657,15 +1716,53 @@ export async function splitFlow(
       failureMessage: 'API call failed',
       task: async (stream) => {
         if (large) {
-          analysis = await analyzeChanges(
-            planningConfig,
-            captured,
-            protectModelInput,
-            untrackedSnapshot.previews,
-            ({ completedChunks }) =>
-              console.error(`  Analysis: ${completedChunks} chunks completed`),
-          );
-          const plan = await planAnalyzedChanges(planningConfig, analysis.facts, analysis.coverage);
+          let plan;
+          try {
+            analysis = await analyzeChanges(
+              planningConfig,
+              captured,
+              protectModelInput,
+              untrackedSnapshot.previews,
+              ({ completedChunks, cachedChunks }) =>
+                console.error(
+                  `  Analysis: ${completedChunks} chunks completed${cachedChunks ? ` (${cachedChunks} cached)` : ''}`,
+                ),
+              persistentAnalysisCache,
+            );
+            plan = await planAnalyzedChanges(planningConfig, analysis.facts, analysis.coverage);
+          } catch (err) {
+            const exhausted =
+              err.data?.analysis?.exhausted ||
+              (!planningConfig.analysisBudget.remainingMs() ? 'time' : null);
+            if (!exhausted && !err.data?.fallbackPlan) throw err;
+            if (yes && !dryRun && !allowSingleFallback) {
+              throw fail(
+                err.category || ERROR_CATEGORIES.PROVIDER,
+                'Large-change planning requires a conservative single-commit fallback. No commit was created; review interactively or rerun with --allow-single-fallback.',
+                { cause: err, data: err.data },
+              );
+            }
+            const fallbackConfig = {
+              ...planningConfig,
+              largeChange: { ...planningConfig.largeChange, strategy: 'auto' },
+            };
+            analysis = await analyzeChanges(
+              fallbackConfig,
+              captured,
+              protectModelInput,
+              untrackedSnapshot.previews,
+            );
+            analysis.coverage = {
+              ...analysis.coverage,
+              strategy: 'fallback',
+              degradedFrom: planningConfig.largeChange.strategy,
+              fallbackReason: exhausted || 'planning_capacity',
+            };
+            plan = normalizePlan([], allFiles, config.language, config.commitPolicy);
+            const warning = `Large-change planning used one conservative all-files commit after ${exhausted || 'planning capacity'} exhaustion; review the fallback message and grouping.`;
+            warnings.push(warning);
+            console.error(`  Fallback: ${warning}`);
+          }
           if (analysis.coverage.strategy === 'auto')
             warnings.push(
               'Split candidates used local metadata and selected excerpts; review the grouping because content was not fully analyzed.',
@@ -1736,6 +1833,8 @@ export async function splitFlow(
       reported: true,
     });
   }
+  persistentAnalysisCache?.clear();
+  persistentAnalysisCache = null;
 
   // Review / edit / regenerate loop
   let regenCounts = groups.map(() => 0);

@@ -11,7 +11,7 @@ test('completion generators cover stable commands and shell-specific registratio
       assert.match(script, new RegExp(`\\b${command}\\b`), `${shell} omits ${command}`);
     }
     const longOptionPrefix = shell === 'fish' ? '-l ' : '--';
-    for (const option of ['provider', 'model', 'output']) {
+    for (const option of ['provider', 'model', 'output', 'allow-single-fallback']) {
       const renderedOption = `${longOptionPrefix}${option}`;
       assert.match(script, new RegExp(renderedOption), `${shell} omits ${renderedOption}`);
     }

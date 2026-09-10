@@ -144,6 +144,12 @@
     "chunkInputTokens": 12000,
     "maxTotalTokens": 200000,
     "concurrency": 2,
-    "timeoutMs": 180000
+    "timeoutMs": 180000,
+    "cache": {
+      "enabled": true,
+      "ttlMs": 86400000,
+      "maxBytes": 33554432,
+      "allowUnprotected": false
+    }
   }
 }

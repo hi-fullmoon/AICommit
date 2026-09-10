@@ -16,6 +16,7 @@ const TOP_LEVEL = [
   '--no-reasoning',
   '--dry-run',
   '--yes',
+  '--allow-single-fallback',
   '--output',
   '--debug',
 ];
@@ -32,7 +33,7 @@ _aicommit() {
     config) COMPREPLY=( $(compgen -W "show validate path --provider --model --output --debug" -- "$cur") ); return ;;
     policy) COMPREPLY=( $(compgen -W "template check --file --range --output --debug" -- "$cur") ); return ;;
     completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return ;;
-    split) COMPREPLY=( $(compgen -W "run plan apply resume abort --scope --file --yes --output --debug" -- "$cur") ); return ;;
+    split) COMPREPLY=( $(compgen -W "run plan apply resume abort --scope --file --yes --allow-single-fallback --output --debug" -- "$cur") ); return ;;
   esac
   case "$prev" in
     --lang|-l) COMPREPLY=( $(compgen -W "zh en" -- "$cur") ); return ;;
@@ -72,6 +73,7 @@ _aicommit() {
     '--no-reasoning[disable reasoning]'
     '--dry-run[review without committing]'
     '--yes[accept without prompts]'
+    '--allow-single-fallback[allow non-interactive split to commit one conservative group]'
     '--output=[output mode]:output:(text json)'
     '--debug[show debug details]'
   )
@@ -118,6 +120,7 @@ complete -c aicommit -l reasoning -x -a 'low medium high xhigh max' -d 'Reasonin
 complete -c aicommit -l no-reasoning -d 'Disable reasoning'
 complete -c aicommit -l dry-run -d 'Review without committing'
 complete -c aicommit -s y -l yes -d 'Accept without prompts'
+complete -c aicommit -l allow-single-fallback -d 'Allow non-interactive split to commit one conservative group'
 complete -c aicommit -l output -x -a 'text json' -d 'Output mode'
 complete -c aicommit -l debug -d 'Show debug details'
 `;

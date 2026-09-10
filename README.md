@@ -197,6 +197,7 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `maxFileDiffChars`   | Target per-file fragment size; remaining content is analyzed in subsequent chunks (default: `3000`)                                                                                                                          |
 | `splitMaxDiffChars`  | Context character budget for each split-planning request (default: `16000`)                                                                                                                                                  |
 | `splitMaxPlanFiles`  | Files or candidate groups per planning request; larger changes use hierarchical planning (default: `100`)                                                                                                                    |
+| `largeChange`        | Large-change strategy, budgets, and short-lived chunk recovery cache; personal config only, retaining protected summaries for 24 hours up to 32 MiB by default                                                               |
 | `diffContextLines`   | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `1`)                                                                                                                |
 | `stripFiles`         | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
 | `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper                                                       |
@@ -311,6 +312,7 @@ aicommit split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
 aicommit --yes --dry-run # non-interactively preview all changes; restores staging
 aicommit split --scope=all --yes # non-interactively plan and commit all working-tree changes
+aicommit split --scope=all --yes --allow-single-fallback # explicitly permit a conservative fallback commit
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # resume an interrupted split transaction
@@ -324,20 +326,21 @@ aicommit --yes --output=json # emit one schema-validated JSON result on stdout
 aicommit -h              # help
 ```
 
-| Option             | Description                                                                  |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `-l`, `--lang`     | Commit message language (`zh` or `en`)                                       |
-| `-p`, `--provider` | Use the named provider from `providers`                                      |
-| `-m`, `--model`    | Use a named model profile from the selected provider                         |
-| `--scope`          | `staged` or `all` scope for `aicommit split` and `aicommit split plan`       |
-| `--file`           | JSON plan path for `aicommit split plan` and `aicommit split apply`          |
-| `--dry-run`        | Generate and review a message or split plan without creating commits         |
-| `-y`, `--yes`      | Accept without prompts; normal mode requires explicitly staged changes       |
-| `--reasoning`      | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort      |
-| `--no-reasoning`   | Explicitly disable reasoning when the selected provider/model supports it    |
-| `--output`         | `text` (default) or one JSON object; commit/split JSON flows require `--yes` |
-| `-v`, `--version`  | Show version                                                                 |
-| `-h`, `--help`     | Show help                                                                    |
+| Option                    | Description                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `-l`, `--lang`            | Commit message language (`zh` or `en`)                                         |
+| `-p`, `--provider`        | Use the named provider from `providers`                                        |
+| `-m`, `--model`           | Use a named model profile from the selected provider                           |
+| `--scope`                 | `staged` or `all` scope for `aicommit split` and `aicommit split plan`         |
+| `--file`                  | JSON plan path for `aicommit split plan` and `aicommit split apply`            |
+| `--dry-run`               | Generate and review a message or split plan without creating commits           |
+| `-y`, `--yes`             | Accept without prompts; normal mode requires explicitly staged changes         |
+| `--allow-single-fallback` | Explicitly permit non-interactive split to create one complete fallback commit |
+| `--reasoning`             | Enable reasoning with `low`, `medium`, `high`, `xhigh`, or `max` effort        |
+| `--no-reasoning`          | Explicitly disable reasoning when the selected provider/model supports it      |
+| `--output`                | `text` (default) or one JSON object; commit/split JSON flows require `--yes`   |
+| `-v`, `--version`         | Show version                                                                   |
+| `-h`, `--help`            | Show help                                                                      |
 
 ### Configuration inspection
 
@@ -478,7 +481,7 @@ The default `largeChange.strategy: "auto"` inventories every file locally, group
 
 A normal commit typically needs one model request, with no per-file AI calls or recursive model reduction. The inventory contains at most 16 representative groups under a UTF-8 byte budget, prioritizing coverage across code, configuration, tests, and other categories. It explicitly describes sampling limits. Both terminal and JSON output distinguish fully analyzed files, representative excerpts, and metadata-only files. Provider retries, response recovery, policy correction, and user-requested regeneration can still add requests.
 
-Split mode builds local candidates and plans them in one model request. The complete candidate inventory must fit `splitMaxPlanFiles` and the input budget; otherwise it stops before calling the provider and suggests staging a smaller logical change or explicitly selecting deep analysis. File membership is still validated completely, with no automatic catch-all commits. Small changes keep the existing request path.
+Split mode builds local candidates and sends them in bounded batches of at most `splitMaxPlanFiles`, then merges the batch plans hierarchically. Every file remains represented even when the complete candidate inventory cannot fit one request. If `deep` analysis exhausts its aggregate budget or the hierarchy cannot converge, interactive and dry-run flows produce one conservative all-files plan with an explicit warning instead of using incomplete model output. Non-interactive committing stops unless `--allow-single-fallback` explicitly authorizes that degradation. Small changes keep the existing request path.
 
 For exhaustive chunk-by-chunk model analysis, opt in through personal configuration:
 
@@ -489,11 +492,17 @@ For exhaustive chunk-by-chunk model analysis, opt in through personal configurat
     "chunkInputTokens": 12000,
     "maxTotalTokens": 200000,
     "concurrency": 2,
-    "timeoutMs": 180000
+    "timeoutMs": 180000,
+    "cache": {
+      "enabled": true,
+      "ttlMs": 86400000,
+      "maxBytes": 33554432,
+      "allowUnprotected": false
+    }
   }
 }
 ```
 
-`deep` spends more requests and tokens, with a maximum of 256 requests. Repository configuration cannot change this personal strategy or raise the spending budget. Both strategies use conservative token estimates; missing usage retains the reservation. Retries, reduction, planning, and final generation share the budget. Budget exhaustion or invalid groups stop execution without automatically committing incomplete results.
+`deep` spends more requests and tokens, with a maximum of 256 requests. Before dispatch, a preflight estimate covers initial chunks, required reductions, and the minimum hierarchical planning tree; an impossible deep run switches to the local inventory path, and validated cache hits are excluded from that estimate. Validated initial fact chunks are stored briefly under Git metadata, reused when the same snapshot is retried after failure or interruption, and removed after complete generation succeeds. The cache does not directly store captured diffs, reasoning, credentials, or complete provider responses; it stores model summaries that may contain code-derived details. Unprotected original input is not persisted unless personal configuration explicitly enables `allowUnprotected`. Repository configuration cannot change this personal strategy, enable unprotected caching, or raise spending/cache ceilings. Both strategies use conservative token estimates; cache hits consume no request or token budget. Incomplete model output is never committed: budget/capacity fallback is a new complete plan containing every reviewed file; interactive runs show it for review, while non-interactive committing requires `--allow-single-fallback`.
 
-Complete patches and larger untracked text are captured in local temporary files, with descriptors opened only during reads and writes. Files are cleaned on normal exit or cancellation; crashes may leave them behind. Content reads are bounded. Lines exceeding 1 MiB, independent groups that cannot fit a global planning budget, and experimental hunk planning for large changes fail explicitly.
+Complete patches and larger untracked text are captured in local temporary files, with descriptors opened only during reads and writes. Files are cleaned on normal exit or cancellation; crashes may leave them behind. Content reads are bounded. Lines exceeding 1 MiB and experimental hunk planning for large changes fail explicitly; file-level planning capacity uses the complete conservative fallback.
