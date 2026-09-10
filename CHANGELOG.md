@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-09-10
+
+### Fixed
+
+- Recovered malformed large-change JSON responses once and accepted complete JSON arrays wrapped in provider reasoning, code fences, or explanatory prose while preserving strict ID coverage validation.
+
 ## [2.4.0] - 2026-09-09
 
 ### Changed
@@ -200,7 +206,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.4.1...HEAD
+[2.4.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.1
 [2.4.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.0
 [2.3.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.3.0
 [2.2.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.2.3
