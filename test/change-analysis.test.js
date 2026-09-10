@@ -57,7 +57,11 @@ function mockModel(t, transform = null) {
   globalThis.fetch = async (_url, init) => {
     const payload = JSON.parse(init.body);
     calls.push(payload);
-    if (!payload.messages.at(-1).content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'))
+    const dataMessage = payload.messages.find(
+      (message) =>
+        message.role === 'user' && message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+    );
+    if (!dataMessage)
       return new Response(
         JSON.stringify({
           choices: [
@@ -66,7 +70,7 @@ function mockModel(t, transform = null) {
           usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 },
         }),
       );
-    const items = JSON.parse(decodeUntrustedData(payload.messages.at(-1).content).content);
+    const items = JSON.parse(decodeUntrustedData(dataMessage.content).content);
     let result;
     if (payload.messages[0].content.includes('Group related changes')) {
       result = [
@@ -92,7 +96,12 @@ function mockModel(t, transform = null) {
     if (transform) result = transform(result, calls.length);
     return new Response(
       JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(result) }, finish_reason: 'stop' }],
+        choices: [
+          {
+            message: { content: typeof result === 'string' ? result : JSON.stringify(result) },
+            finish_reason: 'stop',
+          },
+        ],
         usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 },
       }),
     );
@@ -190,6 +199,41 @@ test('invalid model membership never produces a usable analysis', async (t) => {
   const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
   mockModel(t, (groups) => [{ ...groups[0], ids: ['unknown-id'] }]);
   await assert.rejects(analyzeChanges(cfg, capture), /duplicate or unknown/);
+});
+
+test('large-change analysis repairs malformed JSON with one corrective request', async (t) => {
+  const { cwd, git } = repo(t);
+  writeFileSync(join(cwd, 'a.js'), 'const x = 1;\n'.repeat(300));
+  git('add', '-A');
+  const cfg = analysisConfig(config());
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  const calls = mockModel(t, (groups, callCount) =>
+    callCount === 1 ? 'I analyzed the change, but this is not JSON.' : groups,
+  );
+
+  const result = await analyzeChanges(cfg, capture);
+
+  assert.equal(result.coverage.analyzedFiles, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.at(-1).content, /incomplete or malformed/);
+  assert.match(calls[1].messages.at(-1).content, /Required IDs/);
+});
+
+test('large-change analysis accepts a complete JSON array surrounded by provider prose', async (t) => {
+  const { cwd, git } = repo(t);
+  writeFileSync(join(cwd, 'a.js'), 'const x = 1;\n'.repeat(300));
+  git('add', '-A');
+  const cfg = analysisConfig(config());
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  const calls = mockModel(
+    t,
+    (groups) => `Here is the requested result:\n${JSON.stringify(groups)}\nDone.`,
+  );
+
+  const result = await analyzeChanges(cfg, capture);
+
+  assert.equal(result.coverage.analyzedFiles, 1);
+  assert.equal(calls.length, 1);
 });
 
 test('partitions reject omissions, duplicate IDs, and malformed summaries', () => {

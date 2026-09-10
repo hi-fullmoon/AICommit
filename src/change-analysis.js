@@ -260,7 +260,64 @@ export function packItems(items, maxChars, maxItems = 24) {
   return batches;
 }
 
-async function jsonCall(config, instruction, items) {
+function parseAnalysisJson(raw) {
+  const text = String(raw || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+  const fence = text.match(/^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/);
+  const candidates = fence ? [fence[1].trim(), text] : [text];
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Fall through to the balanced-array extractor below. Some providers
+      // wrap otherwise valid JSON in a short explanation or an outer object.
+    }
+
+    for (
+      let start = candidate.indexOf('[');
+      start !== -1;
+      start = candidate.indexOf('[', start + 1)
+    ) {
+      let depth = 0;
+      let quoted = false;
+      let escaped = false;
+      for (let index = start; index < candidate.length; index++) {
+        const char = candidate[index];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === '"') quoted = false;
+          continue;
+        }
+        if (char === '"') {
+          quoted = true;
+          continue;
+        }
+        if (char === '[') depth++;
+        if (char !== ']') continue;
+        depth--;
+        if (depth !== 0) continue;
+        try {
+          const parsed = JSON.parse(candidate.slice(start, index + 1));
+          if (Array.isArray(parsed)) return parsed;
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+  throw new SyntaxError('Response contains no complete JSON array.');
+}
+
+async function jsonCall(config, instruction, items, validate = null) {
+  const parseAndValidate = (raw) => {
+    const parsed = parseAnalysisJson(raw);
+    validate?.(parsed);
+    return parsed;
+  };
   const result = await getResponseText(
     config,
     [
@@ -269,13 +326,25 @@ async function jsonCall(config, instruction, items) {
     ],
     0,
     Math.min(2048, config.maxTokens || 1024),
-    'Return the complete requested JSON, preserving all input IDs.',
+    'Return the complete requested JSON array, preserving every required input ID exactly once. ' +
+      `Required IDs: ${JSON.stringify(items.map((item) => item.id))}`,
     null,
+    (response) => {
+      try {
+        parseAndValidate(response);
+        return true;
+      } catch {
+        return false;
+      }
+    },
   );
   try {
-    return JSON.parse(result.text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-  } catch {
-    throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Large-change analysis returned invalid JSON.');
+    return parseAndValidate(result.text);
+  } catch (cause) {
+    if (cause?.category === ERROR_CATEGORIES.RESPONSE_FORMAT) throw cause;
+    throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Large-change analysis returned invalid JSON.', {
+      cause,
+    });
   }
 }
 
@@ -344,23 +413,23 @@ export async function analyzeChanges(
         }),
       )
       .digest('hex');
+    const inputIds = input.map((x) => x.id);
     const groups =
       cache.get(cacheKey) ||
       (await jsonCall(
         config,
         'Return one entry per input ID: [{"ids":["input ID"],"summary":"concise factual changes and uncertainties"}]. Each input ID must appear exactly once. Never combine different IDs. Summaries must be at most 160 characters.',
         input,
+        (candidate) => {
+          validatePartition(candidate, inputIds);
+          if (candidate.some((group) => group.ids.length !== 1))
+            throw fail(
+              ERROR_CATEGORIES.RESPONSE_FORMAT,
+              'Fragment analysis combined unrelated source IDs.',
+            );
+        },
       ));
-    validatePartition(
-      groups,
-      input.map((x) => x.id),
-    );
     const byId = new Map(input.map((x) => [x.id, x.fileId]));
-    if (groups.some((group) => group.ids.length !== 1))
-      throw fail(
-        ERROR_CATEGORIES.RESPONSE_FORMAT,
-        'Fragment analysis combined unrelated source IDs.',
-      );
     cache.set(cacheKey, groups);
     for (const group of groups) {
       for (const id of new Set(group.ids.map((x) => byId.get(x))))
@@ -411,17 +480,17 @@ export async function analyzeChanges(
           summaries.map((summary, i) => ({ id: `S${i}`, summary })),
           maxChars,
         )) {
+          const ids = group.map((x) => x.id);
           const reduced = await jsonCall(
             config,
             'Return [{"ids":[all input IDs],"summary":"one factual summary, at most 400 characters"}]. Preserve important behavior and uncertainty.',
             group,
+            (candidate) => {
+              validatePartition(candidate, ids);
+              if (candidate.length !== 1)
+                throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Expected one reduced summary.');
+            },
           );
-          validatePartition(
-            reduced,
-            group.map((x) => x.id),
-          );
-          if (reduced.length !== 1)
-            throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Expected one reduced summary.');
           next.push(reduced[0].summary);
         }
         summaries = next;
@@ -472,17 +541,17 @@ export async function summarizeChanges(config, facts) {
       throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Change summary did not converge.');
     const next = [];
     for (const batch of packItems(items, cap)) {
+      const ids = batch.map((x) => x.id);
       const groups = await jsonCall(
         config,
         'Return [{"ids":[all input IDs],"summary":"one summary of supported behavior changes and uncertainty, at most 400 characters"}].',
         batch,
+        (candidate) => {
+          validatePartition(candidate, ids);
+          if (candidate.length !== 1)
+            throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Expected one reduced summary.');
+        },
       );
-      validatePartition(
-        groups,
-        batch.map((x) => x.id),
-      );
-      if (groups.length !== 1)
-        throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Expected one reduced summary.');
       next.push({ id: `L${level}N${next.length}`, summary: groups[0].summary });
     }
     items = next;
@@ -512,21 +581,21 @@ export async function planAnalyzedChanges(config, facts, coverage = null) {
     }
     const next = [];
     for (const batch of batches) {
+      const ids = batch.map((x) => x.id);
       const groups = await jsonCall(
         config,
         `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.`,
         batch,
-      );
-      validatePartition(
-        groups,
-        batch.map((x) => x.id),
+        (candidate) => {
+          validatePartition(candidate, ids);
+          if (candidate.some((group) => typeof group.subject !== 'string' || !group.subject.trim()))
+            throw fail(
+              ERROR_CATEGORIES.RESPONSE_FORMAT,
+              'Analysis plan is missing a commit subject.',
+            );
+        },
       );
       for (const group of groups) {
-        if (typeof group.subject !== 'string' || !group.subject.trim())
-          throw fail(
-            ERROR_CATEGORIES.RESPONSE_FORMAT,
-            'Analysis plan is missing a commit subject.',
-          );
         next.push({
           ...group,
           id: `L${level}G${next.length}`,
