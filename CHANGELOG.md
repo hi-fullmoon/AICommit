@@ -4,6 +4,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-10
+
 ### Added
 
 - Added short-lived, content-addressed recovery caching for validated `deep` analysis chunks so identical snapshots resume after failures without repeating completed provider requests.
@@ -215,7 +217,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.4.1...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.5.0
 [2.4.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.1
 [2.4.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.0
 [2.3.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.3.0
