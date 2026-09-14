@@ -38,8 +38,13 @@ export class AicommitError extends Error {
     super(message);
     this.name = 'AicommitError';
     this.category = category;
+    this.code = options.code || category;
     this.exitCode = EXIT_CODES[category] ?? EXIT_CODES.internal;
     this.reported = Boolean(options.reported);
+    this.retryable = Boolean(options.retryable);
+    this.nextAction = options.nextAction || null;
+    this.committed = Boolean(options.committed);
+    this.commitState = options.commitState || 'none';
     if (options.data && typeof options.data === 'object' && !Array.isArray(options.data)) {
       this.data = options.data;
     }
@@ -62,11 +67,10 @@ export function classifyError(err) {
   const lower = message.toLowerCase();
   const code = errorCode(err);
   if (
-    err instanceof TypeError ||
     NETWORK_CODES.has(code) ||
     /timed out|fetch failed|socket|network|dns|econn|enotfound/.test(lower)
   ) {
-    return fail(ERROR_CATEGORIES.NETWORK, message, { cause: err });
+    return fail(ERROR_CATEGORIES.NETWORK, message, { cause: err, retryable: true });
   }
   if (/^http \d{3}:|streaming api error|rate limit|provider request/.test(lower)) {
     return fail(ERROR_CATEGORIES.PROVIDER, message, { cause: err });

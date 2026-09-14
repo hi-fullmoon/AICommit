@@ -920,12 +920,149 @@ test('--output=json emits one decoration-free success object and keeps diagnosti
   assert.equal(output.model, 'local-test-model');
   assert.equal(output.exitReason, 'success');
   assert.equal(output.committed, true);
+  assert.equal(output.commitSha, git(repo, ['rev-parse', 'HEAD']).trim());
+  assert.equal(output.scope, 'staged');
+  assert.equal(output.changeCount, 1);
   assert.deepEqual(output.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
   assert.ok(!Object.hasOwn(output, 'reasoning'));
   assert.ok(!Object.hasOwn(output, 'diff'));
   assert.doesNotMatch(result.stdout, /private reasoning|AI-powered|Calling/);
   assert.match(result.stderr, /AI-powered commit message generator/);
   assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'fix: expose stable machine output');
+});
+
+test('generate exports a one-commit plan that apply validates against the same snapshot', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-generate-plan-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
+  const repo = makeRepo(root);
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: 'fix: update app value' } }] }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  writeFileSync(
+    join(home, '.aicommit', 'config.json'),
+    stringifyUserConfig({
+      apiUrl: `http://127.0.0.1:${server.address().port}/v1/chat/completions`,
+      apiKey: '',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+
+  const planPath = join(root, 'commit-plan.json');
+  const generated = await runCli(repo, home, [
+    'generate',
+    '--scope=staged',
+    `--file=${planPath}`,
+    '--yes',
+    '--output=json',
+  ]);
+  assert.equal(generated.code, 0, generated.stdout + generated.stderr);
+  const output = JSON.parse(generated.stdout);
+  assert.equal(output.planFile, planPath);
+  assert.equal(output.scope, 'staged');
+  assert.equal(output.changeCount, 1);
+  assert.deepEqual(output.plan, [{ message: 'fix: update app value', files: ['app.js'] }]);
+  assert.equal(output.committed, false);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
+
+  writeFileSync(join(repo, 'app.js'), 'export const value = 3;\n');
+  git(repo, ['add', 'app.js']);
+  const stale = await runCli(repo, home, ['apply', `--file=${planPath}`, '--yes', '--output=json']);
+  assert.equal(stale.code, 8, stale.stdout + stale.stderr);
+  assert.equal(JSON.parse(stale.stdout).error.category, 'concurrent_modification');
+
+  writeFileSync(join(repo, 'app.js'), 'export const value = 2;\n');
+  git(repo, ['add', 'app.js']);
+  const applied = await runCli(repo, home, [
+    'apply',
+    `--file=${planPath}`,
+    '--yes',
+    '--output=json',
+  ]);
+  assert.equal(applied.code, 0, applied.stdout + applied.stderr);
+  const appliedOutput = JSON.parse(applied.stdout);
+  assert.equal(appliedOutput.commitSha, git(repo, ['rev-parse', 'HEAD']).trim());
+  assert.equal(appliedOutput.planFile, planPath);
+  assert.equal(appliedOutput.commitState, 'complete');
+});
+
+test('generate all scopes the full worktree and restores the original index', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-generate-all-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home');
+  mkdirSync(home);
+  mkdirSync(join(home, '.aicommit'));
+  const repo = makeRepo(root);
+  writeFileSync(join(repo, 'extra.js'), 'export const extra = true;\n');
+  const before = git(repo, ['status', '--porcelain']);
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ choices: [{ message: { content: 'feat: include extra module' } }] }),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  writeFileSync(
+    join(home, '.aicommit', 'config.json'),
+    stringifyUserConfig({
+      apiUrl: `http://127.0.0.1:${server.address().port}/v1/chat/completions`,
+      apiKey: '',
+      language: 'en',
+      reasoning: { mode: 'off' },
+    }),
+  );
+  const planPath = join(root, 'all-plan.json');
+  const generated = await runCli(repo, home, [
+    'generate',
+    '--scope=all',
+    `--file=${planPath}`,
+    '--yes',
+    '--output=json',
+  ]);
+  assert.equal(generated.code, 0, generated.stdout + generated.stderr);
+  const output = JSON.parse(generated.stdout);
+  assert.equal(output.scope, 'all');
+  assert.deepEqual(output.plan[0].files, ['app.js', 'extra.js']);
+  assert.equal(git(repo, ['status', '--porcelain']), before);
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'init');
+
+  const applied = await runCli(repo, home, [
+    'apply',
+    `--file=${planPath}`,
+    '--yes',
+    '--output=json',
+  ]);
+  assert.equal(applied.code, 0, applied.stdout + applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).commitState, 'complete');
+  assert.equal(git(repo, ['log', '-1', '--pretty=%s']).trim(), 'feat: include extra module');
+  assert.equal(git(repo, ['status', '--porcelain']), '');
+
+  writeFileSync(join(repo, '.env'), 'API_KEY=very-secret-value\n');
+  const sensitivePlan = join(root, 'sensitive-plan.json');
+  const blocked = await runCli(repo, home, [
+    'generate',
+    '--scope=all',
+    `--file=${sensitivePlan}`,
+    '--yes',
+    '--output=json',
+  ]);
+  assert.equal(blocked.code, 7, blocked.stdout + blocked.stderr);
+  assert.equal(JSON.parse(blocked.stdout).error.code, 'sensitive_all_scope');
+  assert.equal(existsSync(sensitivePlan), false);
+  assert.equal(git(repo, ['status', '--porcelain']).trim(), '?? .env');
 });
 
 test('automatic policy correction retries once before committing', async (t) => {

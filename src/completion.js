@@ -5,6 +5,8 @@ const TOP_LEVEL = [
   'config',
   'policy',
   'completion',
+  'generate',
+  'apply',
   'split',
   '--help',
   '--version',
@@ -33,7 +35,7 @@ _aicommit() {
     config) COMPREPLY=( $(compgen -W "show validate path --provider --model --output --debug" -- "$cur") ); return ;;
     policy) COMPREPLY=( $(compgen -W "template check --file --range --output --debug" -- "$cur") ); return ;;
     completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ); return ;;
-    split) COMPREPLY=( $(compgen -W "run plan apply resume abort --scope --file --yes --allow-single-fallback --output --debug" -- "$cur") ); return ;;
+    split) COMPREPLY=( $(compgen -W "run plan apply resume abort status --scope --file --yes --allow-single-fallback --output --debug" -- "$cur") ); return ;;
   esac
   case "$prev" in
     --lang|-l) COMPREPLY=( $(compgen -W "zh en" -- "$cur") ); return ;;
@@ -58,7 +60,9 @@ _aicommit() {
     'config:inspect or validate configuration'
     'policy:print or enforce a repository team policy'
     'completion:generate shell completion'
-    'split:run, plan, apply, resume, or abort split commits'
+    'generate:export one commit plan'
+    'apply:apply a validated commit plan'
+    'split:run, plan, apply, resume, abort, or inspect split commits'
   )
   options=(
     '--help[show help]'
@@ -66,8 +70,8 @@ _aicommit() {
     '--lang=[commit language]:language:(zh en)'
     '--provider=[provider name]:provider:'
     '--model=[model name]:model:'
-    '--scope=[split scope]:scope:(staged all)'
-    '--file=[split plan or commit-message file]:path:_files'
+    '--scope=[change scope]:scope:(staged all)'
+    '--file=[commit plan or commit-message file]:path:_files'
     '--range=[Git range for policy check]:revision:'
     '--reasoning=[reasoning effort]:effort:(low medium high xhigh max)'
     '--no-reasoning[disable reasoning]'
@@ -87,7 +91,7 @@ _aicommit() {
         config) _values 'config action' show validate path ;;
         policy) _values 'policy action' template check ;;
         completion) _values 'shell' bash zsh fish ;;
-        split) _values 'split action' run plan apply resume abort ;;
+        split) _values 'split action' run plan apply resume abort status ;;
       esac
       ;;
   esac
@@ -103,18 +107,20 @@ complete -c aicommit -n '__fish_use_subcommand' -a doctor -d 'Diagnose configura
 complete -c aicommit -n '__fish_use_subcommand' -a config -d 'Inspect or validate configuration'
 complete -c aicommit -n '__fish_use_subcommand' -a policy -d 'Print or enforce a repository team policy'
 complete -c aicommit -n '__fish_use_subcommand' -a completion -d 'Generate shell completion'
+complete -c aicommit -n '__fish_use_subcommand' -a generate -d 'Export one commit plan'
+complete -c aicommit -n '__fish_use_subcommand' -a apply -d 'Apply a validated commit plan'
 complete -c aicommit -n '__fish_use_subcommand' -a split -d 'Run, plan, apply, resume, or abort split commits'
 complete -c aicommit -n '__fish_seen_subcommand_from config' -a 'show validate path'
 complete -c aicommit -n '__fish_seen_subcommand_from policy' -a 'template check'
 complete -c aicommit -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c aicommit -n '__fish_seen_subcommand_from split' -a 'run plan apply resume abort'
+complete -c aicommit -n '__fish_seen_subcommand_from split' -a 'run plan apply resume abort status'
 complete -c aicommit -s h -l help -d 'Show help'
 complete -c aicommit -s v -l version -d 'Show version'
 complete -c aicommit -s l -l lang -x -a 'zh en' -d 'Commit language'
 complete -c aicommit -s p -l provider -x -d 'Provider name'
 complete -c aicommit -s m -l model -x -d 'Model name'
-complete -c aicommit -l scope -x -a 'staged all' -d 'Split plan scope'
-complete -c aicommit -l file -r -d 'Split plan file'
+complete -c aicommit -l scope -x -a 'staged all' -d 'Change scope'
+complete -c aicommit -l file -r -d 'Commit plan file'
 complete -c aicommit -l range -r -d 'Git range for policy check'
 complete -c aicommit -l reasoning -x -a 'low medium high xhigh max' -d 'Reasoning effort'
 complete -c aicommit -l no-reasoning -d 'Disable reasoning'

@@ -1,6 +1,10 @@
 import { classifyError, EXIT_CODES } from './errors.js';
 
-export const OUTPUT_SCHEMA_VERSION = '1.0';
+export const OUTPUT_SCHEMA_VERSION = '1.1';
+
+function safeString(value) {
+  return typeof value === 'string' && value ? value : null;
+}
 
 function normalizedUsage(usage) {
   if (!usage) return null;
@@ -43,6 +47,11 @@ export function successOutput(result = {}) {
     warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [],
     exitReason: result.exitReason || 'success',
     committed: Boolean(result.committed),
+    commitState: result.commitState || (result.committed ? 'complete' : 'none'),
+    commitSha: safeString(result.commitSha),
+    planFile: safeString(result.planFile),
+    scope: safeString(result.scope),
+    changeCount: Number.isInteger(result.changeCount) ? result.changeCount : null,
     error: null,
   };
   if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
@@ -64,10 +73,18 @@ export function errorOutput(err) {
     usage: null,
     warnings: [],
     exitReason: classified.category,
-    committed: false,
+    committed: classified.committed,
+    commitState: classified.commitState,
+    commitSha: null,
+    planFile: null,
+    scope: null,
+    changeCount: null,
     error: {
       category: classified.category,
+      code: classified.code,
       message: classified.message,
+      retryable: classified.retryable,
+      nextAction: classified.nextAction,
     },
   };
   if (classified.data && typeof classified.data === 'object' && !Array.isArray(classified.data)) {

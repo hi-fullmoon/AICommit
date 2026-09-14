@@ -62,9 +62,23 @@ test('parseArgs recognizes split plan/apply artifact commands', () => {
   assert.throws(() => parseArgs(['split', 'apply', '--file=x', '--scope=all']), /reads its scope/);
   assert.throws(
     () => parseArgs(['split', 'unknown', '--file=x']),
-    /run, plan, apply, resume, or abort/,
+    /run, plan, apply, resume, abort, or status/,
   );
-  assert.throws(() => parseArgs(['--scope=all']), /only valid/);
+  assert.throws(() => parseArgs(['--scope=all']), /requires --dry-run/);
+  assert.equal(parseArgs(['--dry-run', '--scope=staged', '--yes']).previewScope, 'staged');
+
+  const generate = parseArgs([
+    'generate',
+    '--scope=staged',
+    '--file=/tmp/commit-plan.json',
+    '--yes',
+  ]);
+  assert.equal(generate.generate, true);
+  assert.equal(generate.generateScope, 'staged');
+  assert.equal(generate.dryRun, true);
+  assert.equal(parseArgs(['apply', '--file=/tmp/commit-plan.json', '--yes']).splitCommand, 'apply');
+  assert.equal(parseArgs(['split', 'status', '--output=json']).splitCommand, 'status');
+  assert.throws(() => parseArgs(['generate', '--scope=staged']), /requires --scope/);
 
   const resume = parseArgs(['split', 'resume', '--yes']);
   assert.equal(resume.splitCommand, 'resume');

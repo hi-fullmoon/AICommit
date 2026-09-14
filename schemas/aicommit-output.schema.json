@@ -16,11 +16,16 @@
     "warnings",
     "exitReason",
     "committed",
+    "commitState",
+    "commitSha",
+    "planFile",
+    "scope",
+    "changeCount",
     "error"
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.0"
+      "const": "1.1"
     },
     "ok": {
       "type": "boolean"
@@ -107,10 +112,26 @@
     "committed": {
       "type": "boolean"
     },
+    "commitState": {
+      "enum": ["none", "partial", "complete", "unknown"]
+    },
+    "commitSha": {
+      "type": ["string", "null"]
+    },
+    "planFile": {
+      "type": ["string", "null"]
+    },
+    "scope": {
+      "type": ["string", "null"]
+    },
+    "changeCount": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
     "error": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "required": ["category", "message"],
+      "required": ["category", "code", "message", "retryable", "nextAction"],
       "properties": {
         "category": {
           "enum": [
@@ -126,6 +147,16 @@
         },
         "message": {
           "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "nextAction": {
+          "type": ["string", "null"]
         }
       }
     },
@@ -150,7 +181,7 @@
               "description": "Files represented by partial excerpts; not fully analyzed files."
             },
             "strategy": {
-              "enum": ["auto", "deep"]
+              "enum": ["auto", "deep", "fallback"]
             },
             "metadataOnlyFiles": {
               "type": "number",
@@ -180,6 +211,33 @@
               "type": "number",
               "minimum": 0
             }
+          }
+        },
+        "split": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": {
+            "state": { "enum": ["idle", "pending"] },
+            "transactionId": { "type": "string" },
+            "checkpointPath": { "type": "string" },
+            "scope": { "enum": ["staged", "all"] },
+            "totalGroups": { "type": "integer", "minimum": 0 },
+            "completedGroups": { "type": "integer", "minimum": 0 },
+            "pendingGroups": { "type": "integer", "minimum": 0 },
+            "completedCommits": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" }
+            },
+            "inFlight": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "properties": {
+                "group": { "type": "integer", "minimum": 1 },
+                "state": { "enum": ["pending", "committed", "unknown"] }
+              }
+            },
+            "nextAction": { "type": "string" }
           }
         }
       }

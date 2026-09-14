@@ -311,11 +311,15 @@ aicommit --dry-run       # generate and review without creating a commit
 aicommit split --dry-run # review a split plan without creating commits
 aicommit --yes           # non-interactively commit already staged changes
 aicommit --yes --dry-run # non-interactively preview all changes; restores staging
+aicommit --yes --dry-run --scope=staged --output=json # preview only the index
+aicommit generate --scope=staged --file=/tmp/commit-plan.json --yes --output=json
+aicommit apply --file=/tmp/commit-plan.json --yes --output=json
 aicommit split --scope=all --yes # non-interactively plan and commit all working-tree changes
 aicommit split --scope=all --yes --allow-single-fallback # explicitly permit a conservative fallback commit
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # resume an interrupted split transaction
+aicommit split status --output=json # inspect recovery state without changing Git
 aicommit split abort --yes # discard a stale checkpoint; keep commits and changes
 aicommit --reasoning=low # stream low-effort reasoning; Ctrl+O expands/collapses it
 aicommit --no-reasoning # explicitly disable reasoning when supported
@@ -331,8 +335,8 @@ aicommit -h              # help
 | `-l`, `--lang`            | Commit message language (`zh` or `en`)                                         |
 | `-p`, `--provider`        | Use the named provider from `providers`                                        |
 | `-m`, `--model`           | Use a named model profile from the selected provider                           |
-| `--scope`                 | `staged` or `all` scope for `aicommit split` and `aicommit split plan`         |
-| `--file`                  | JSON plan path for `aicommit split plan` and `aicommit split apply`            |
+| `--scope`                 | `staged` or `all` scope for dry-run, generate, and split planning              |
+| `--file`                  | JSON plan path for generate/apply and split plan/apply                         |
 | `--dry-run`               | Generate and review a message or split plan without creating commits           |
 | `-y`, `--yes`             | Accept without prompts; normal mode requires explicitly staged changes         |
 | `--allow-single-fallback` | Explicitly permit non-interactive split to create one complete fallback commit |
@@ -388,11 +392,13 @@ Verify the registration with `whence -w _aicommit`; it should print `_aicommit: 
 
 ### Machine-readable output
 
-Use `--output=json` for scripts and CI. Commit and split flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `doctor --output=json` and `update --output=json` do not require `--yes`.
+Use `--output=json` for scripts and CI. Commit, generate, apply, and split execution flows also require `--yes`, preventing a machine consumer from hanging on an interactive prompt. stdout contains exactly one JSON object; progress, debug details, and diagnostics go to stderr. `split status`, `doctor`, and `update` in JSON mode do not require `--yes`.
+
+For an agent-reviewed single commit, run `generate --scope=staged|all --file=<path> --yes --output=json`, inspect the returned message and plan, then run `apply --file=<path> --yes --output=json`. The plan is a validated one-group artifact; apply checks its base HEAD, change list, and content fingerprint before committing. Keep the file outside the worktree or in `.git/aicommit/`. `generate --scope=all` includes staged, unstaged, and untracked changes, restores its temporary staging, and refuses detected sensitive content in non-interactive mode. For a quick preview without an artifact, use `--dry-run --scope=staged|all --yes --output=json`; an omitted scope retains the older automatic staging behavior when the index is empty.
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "ok": true,
   "message": "fix: handle provider retry limits",
   "plan": null,
@@ -407,11 +413,16 @@ Use `--output=json` for scripts and CI. Commit and split flows also require `--y
   "warnings": [],
   "exitReason": "dry_run",
   "committed": false,
+  "commitState": "none",
+  "commitSha": null,
+  "planFile": null,
+  "scope": "staged",
+  "changeCount": 1,
   "error": null
 }
 ```
 
-The published [JSON schema](schemas/aicommit-output.schema.json) covers success, split-plan, doctor/check, and error results. Machine output never includes the diff or model reasoning. Split output exposes only each group message and its assigned paths.
+The published [JSON schema](schemas/aicommit-output.schema.json) covers success, plans, status, doctor/check, and error results. Machine output never includes the diff or model reasoning. Plans expose only each group message and its assigned paths. `committed` reports whether this invocation created a commit; `commitState` describes `none`, `partial`, `complete`, or `unknown` transaction state. A split failure can return `committed: true` with `error.code: "split_partial_failure"`, completed commit IDs in `data.split`, and `error.nextAction`. After a crash that emits no JSON, use `split status --output=json` before retrying.
 
 Stable process exits are shared by text and JSON modes:
 

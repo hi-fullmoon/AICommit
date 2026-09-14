@@ -264,10 +264,12 @@ async function main() {
     assert.equal(jsonResult.signal, null);
     assert.equal(jsonResult.code, 0, jsonResult.stdout + jsonResult.stderr);
     const machineOutput = JSON.parse(jsonResult.stdout);
-    assert.equal(machineOutput.schemaVersion, '1.0');
+    assert.equal(machineOutput.schemaVersion, '1.1');
     assert.equal(machineOutput.ok, true);
     assert.equal(machineOutput.message, 'test: verify installed package dry run');
     assert.equal(machineOutput.committed, false);
+    assert.equal(machineOutput.commitState, 'none');
+    assert.equal(machineOutput.scope, 'staged');
     assert.equal(machineOutput.exitReason, 'dry_run');
     assert.ok(!Object.hasOwn(machineOutput, 'diff'));
     assert.ok(!Object.hasOwn(machineOutput, 'reasoning'));

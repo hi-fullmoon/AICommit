@@ -11,6 +11,7 @@ const schema = JSON.parse(
 
 function matchesType(value, type) {
   if (type === 'null') return value === null;
+  if (type === 'integer') return Number.isInteger(value);
   if (type === 'array') return Array.isArray(value);
   if (type === 'object')
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -72,6 +73,10 @@ test('success and error machine outputs validate against the published JSON sche
   assert.equal(success.error, null);
   assert.deepEqual(success.data, { configValid: true });
   assert.equal(error.exitReason, 'network');
+  assert.equal(success.schemaVersion, '1.1');
+  assert.equal(success.commitState, 'complete');
+  assert.equal(error.error.code, 'network');
+  assert.equal(error.error.retryable, false);
   assert.ok(!Object.hasOwn(success, 'reasoning'));
   assert.ok(!Object.hasOwn(success, 'diff'));
 });
@@ -140,4 +145,31 @@ test('controlled command errors may expose structured non-secret validation data
   const output = errorOutput(error);
   validate(output, schema);
   assert.deepEqual(output.data, { valid: false, issues: ['scope_required'] });
+});
+
+test('machine output preserves plan location, commit identity, and partial recovery state', () => {
+  const success = successOutput({
+    planFile: '/tmp/commit-plan.json',
+    commitSha: 'a'.repeat(40),
+    scope: 'staged',
+    changeCount: 2,
+    committed: true,
+  });
+  validate(success, schema);
+  assert.equal(success.planFile, '/tmp/commit-plan.json');
+  assert.equal(success.commitSha, 'a'.repeat(40));
+
+  const failed = errorOutput(
+    new AicommitError(ERROR_CATEGORIES.GIT_STATE, 'split interrupted', {
+      code: 'split_partial_failure',
+      committed: true,
+      commitState: 'partial',
+      nextAction: 'aicommit split resume --yes',
+      data: { split: { state: 'pending', completedCommits: ['a'.repeat(40)] } },
+    }),
+  );
+  validate(failed, schema);
+  assert.equal(failed.committed, true);
+  assert.equal(failed.commitState, 'partial');
+  assert.equal(failed.error.nextAction, 'aicommit split resume --yes');
 });

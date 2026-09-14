@@ -138,8 +138,16 @@ test('fault matrix resumes SIGINT and post-commit crash windows without duplicat
       assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), scenario.commitsAfterFault);
       assert.equal(existsSync(splitCheckpointPath(repo)), true);
 
-      const resumed = await runCli(repo, home, ['split', 'resume', '--yes']);
+      const status = await runCli(repo, home, ['split', 'status', '--output=json']);
+      assert.equal(status.code, 0, status.stdout + status.stderr);
+      const summary = JSON.parse(status.stdout).data.split;
+      assert.equal(summary.inFlight.state, index === 0 ? 'pending' : 'committed');
+
+      const resumed = await runCli(repo, home, ['split', 'resume', '--yes', '--output=json']);
       assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
+      const resumedOutput = JSON.parse(resumed.stdout);
+      assert.equal(resumedOutput.commitState, 'complete');
+      assert.equal(resumedOutput.committed, true);
       assert.equal(
         git(repo, ['log', '--reverse', '--format=%s']).trim(),
         'init\nfix: commit a snapshot\nfeat: commit b snapshot',
@@ -169,8 +177,28 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
   );
   chmodSync(hook, 0o755);
 
-  const interrupted = await runCli(repo, home, ['split', 'apply', `--file=${planPath}`, '--yes']);
+  const interrupted = await runCli(repo, home, [
+    'split',
+    'apply',
+    `--file=${planPath}`,
+    '--yes',
+    '--output=json',
+  ]);
   assert.equal(interrupted.code, 3, interrupted.stdout + interrupted.stderr);
+  const failed = JSON.parse(interrupted.stdout);
+  assert.equal(failed.committed, true);
+  assert.equal(failed.commitState, 'partial');
+  assert.equal(failed.error.code, 'split_partial_failure');
+  assert.equal(failed.error.nextAction, 'aicommit split resume --yes');
+  assert.equal(failed.data.split.completedCommits.length, 1);
+  assert.equal(failed.data.split.pendingGroups, 1);
+
+  const status = await runCli(repo, home, ['split', 'status', '--output=json']);
+  assert.equal(status.code, 0, status.stdout + status.stderr);
+  const current = JSON.parse(status.stdout);
+  assert.equal(current.data.split.state, 'pending');
+  assert.equal(current.data.split.completedCommits.length, 1);
+  assert.equal(current.commitState, 'partial');
   rmSync(hook);
   writeFileSync(join(repo, 'b.txt'), 'concurrent b edit\n');
   git(repo, ['add', 'b.txt']);
@@ -189,6 +217,9 @@ test('fault matrix rejects a concurrent pending edit and resumes after exact res
     'init\nfix: commit a before interruption\nfeat: commit b after interruption',
   );
   assert.equal(git(repo, ['status', '--porcelain']), '');
+  const idle = await runCli(repo, home, ['split', 'status', '--output=json']);
+  assert.equal(idle.code, 0, idle.stdout + idle.stderr);
+  assert.equal(JSON.parse(idle.stdout).data.split.state, 'idle');
 });
 
 test('split abort clears stale recovery metadata without rewriting replacement work', async (t) => {

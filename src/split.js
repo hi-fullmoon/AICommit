@@ -1163,6 +1163,83 @@ function currentHeadParent(projectRoot) {
   return fields[1] || null;
 }
 
+function splitCheckpointSummary(projectRoot, loaded) {
+  const { path, checkpoint } = loaded;
+  const knownCommits = checkpoint.completed.map((record) => record.commit);
+  let inFlight = null;
+  if (checkpoint.inFlight) {
+    const record = checkpoint.inFlight;
+    const head = currentHead(projectRoot);
+    const state =
+      head === record.parent
+        ? 'pending'
+        : currentHeadParent(projectRoot) === record.parent &&
+            currentHeadTree(projectRoot) === record.tree
+          ? 'committed'
+          : 'unknown';
+    if (state === 'committed') knownCommits.push(head);
+    inFlight = { group: record.index + 1, state };
+  }
+  const totalGroups = checkpoint.plan.groups.length;
+  return {
+    state: 'pending',
+    transactionId: checkpoint.transactionId,
+    checkpointPath: path,
+    scope: checkpoint.plan.scope,
+    totalGroups,
+    completedGroups: knownCommits.length,
+    pendingGroups: totalGroups - knownCommits.length,
+    completedCommits: knownCommits,
+    inFlight,
+    nextAction: 'aicommit split resume --yes',
+  };
+}
+
+export function splitStatus(projectRoot) {
+  let summary;
+  try {
+    summary = splitCheckpointSummary(projectRoot, readSplitCheckpoint(projectRoot));
+  } catch (err) {
+    if (!/No split checkpoint found:/.test(err.message)) {
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `Cannot inspect split checkpoint: ${err.message}`, {
+        code: 'split_checkpoint_invalid',
+        cause: err,
+      });
+    }
+    summary = { state: 'idle' };
+  }
+  const known = summary.completedCommits || [];
+  const commitState =
+    summary.inFlight?.state === 'unknown'
+      ? 'unknown'
+      : !known.length
+        ? 'none'
+        : summary.pendingGroups
+          ? 'partial'
+          : 'complete';
+  return {
+    exitReason: 'split_status',
+    committed: false,
+    commitState,
+    commitSha: known.at(-1) || null,
+    scope: summary.scope || null,
+    data: { split: summary },
+  };
+}
+
+function splitCommitFailure(projectRoot, message) {
+  const status = splitStatus(projectRoot);
+  const knownCommits = status.data.split.completedCommits || [];
+  throw fail(ERROR_CATEGORIES.GIT_STATE, message, {
+    code: knownCommits.length ? 'split_partial_failure' : 'split_commit_failed',
+    reported: true,
+    committed: knownCommits.length > 0,
+    commitState: status.commitState,
+    nextAction: 'aicommit split resume --yes',
+    data: status.data,
+  });
+}
+
 function readHeadEntries(projectRoot, paths) {
   const entries = new Map();
   if (!hasHead(projectRoot) || !paths.length) return entries;
@@ -2013,6 +2090,8 @@ export async function splitFlow(
     return {
       plan: groups,
       planFile: writtenPlanPath,
+      scope,
+      changeCount: allFiles.length,
       provider,
       model: config.modelId,
       latencyMs: elapsed,
@@ -2054,12 +2133,13 @@ export async function splitFlow(
   if (ok) {
     console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${groups.length} commits.\n`));
   } else {
-    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more split commits failed.', {
-      reported: true,
-    });
+    splitCommitFailure(projectRoot, 'One or more split commits failed.');
   }
   return {
     plan: groups,
+    commitSha: currentHead(projectRoot),
+    scope,
+    changeCount: allFiles.length,
     provider,
     model: config.modelId,
     latencyMs: elapsed,
@@ -2168,9 +2248,13 @@ export async function resumeSplit(projectRoot, { yes = false, machineOutput = fa
     );
     return {
       plan: checkpoint.plan.groups,
+      commitSha: currentHead(projectRoot),
+      scope: checkpoint.plan.scope,
+      changeCount: checkpoint.plan.changes.length,
       warnings: [],
       exitReason: 'success',
-      committed: true,
+      committed: false,
+      commitState: 'complete',
       edited: false,
       rewrites: 0,
     };
@@ -2225,9 +2309,7 @@ export async function resumeSplit(projectRoot, { yes = false, machineOutput = fa
     { transaction: { path: transaction.path, checkpoint } },
   );
   if (!ok) {
-    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more resumed split commits failed.', {
-      reported: true,
-    });
+    splitCommitFailure(projectRoot, 'One or more resumed split commits failed.');
   }
   console.log(
     '\n  ' +
@@ -2237,6 +2319,9 @@ export async function resumeSplit(projectRoot, { yes = false, machineOutput = fa
   );
   return {
     plan: checkpoint.plan.groups,
+    commitSha: currentHead(projectRoot),
+    scope: checkpoint.plan.scope,
+    changeCount: checkpoint.plan.changes.length,
     provider: null,
     model: null,
     latencyMs: null,
@@ -2443,13 +2528,15 @@ export async function applySplitPlan(
     { planArtifact: artifact },
   );
   if (!ok) {
-    throw fail(ERROR_CATEGORIES.GIT_STATE, 'One or more split commits failed.', {
-      reported: true,
-    });
+    splitCommitFailure(projectRoot, 'One or more split commits failed.');
   }
   console.log('\n  ' + chalk.green.bold(`✓ Done! Created ${artifact.groups.length} commits.\n`));
   return {
     plan: artifact.groups,
+    planFile: loaded.path,
+    commitSha: readGit(['rev-parse', 'HEAD'], projectRoot).trim(),
+    scope: artifact.scope,
+    changeCount: artifact.changes.length,
     provider: null,
     model: null,
     latencyMs: null,

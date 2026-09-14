@@ -17,6 +17,8 @@ import {
   runGit,
   isGitRepo,
   getIndexFingerprint,
+  hasHead,
+  readGit,
   createIndexTransaction,
   protectSensitiveDiff,
   unifiedArg,
@@ -54,8 +56,13 @@ import {
   applySplitPlan,
   resumeSplit,
   splitFlow,
+  splitStatus,
   getStagedChangedFiles,
+  getAllChangedFiles,
+  getSplitStateFingerprint,
+  safeExportPlanPath,
 } from './split.js';
+import { createSplitPlanArtifact, writeSplitPlanArtifact } from './split-plan.js';
 import { runModelTask } from './generation-ui.js';
 import { runSetup } from './setup.js';
 import { detectProviderType } from './providers.js';
@@ -108,6 +115,9 @@ async function runMain() {
     debug,
     split,
     splitCommand,
+    generate,
+    generateScope,
+    previewScope,
     splitPlanFile,
     dryRun,
     yes,
@@ -130,7 +140,15 @@ async function runMain() {
     return { exitReason: 'completion' };
   }
   const machineOutput = output === 'json';
-  if (machineOutput && !yes && !doctor && !configAction && !policyAction && !update) {
+  if (
+    machineOutput &&
+    !yes &&
+    !doctor &&
+    !configAction &&
+    !policyAction &&
+    !update &&
+    splitCommand !== 'status'
+  ) {
     throw fail(ERROR_CATEGORIES.CONFIG, '--output=json requires --yes for commit and split flows.');
   }
 
@@ -178,13 +196,14 @@ async function runMain() {
   console.log('  ' + chalk.dim('─'.repeat(45)));
   console.log('  ' + chalk.dim(`Working directory: ${sanitizeTerminalText(process.cwd())}`));
 
-  if (['apply', 'resume', 'abort'].includes(splitCommand)) {
+  if (['apply', 'resume', 'abort', 'status'].includes(splitCommand)) {
     const projectRoot = getProjectRoot();
     if (!isGitRepo(projectRoot)) {
       throw fail(ERROR_CATEGORIES.GIT_STATE, `Not a git repository: ${process.cwd()}`);
     }
     if (splitCommand === 'resume') return resumeSplit(projectRoot, { yes, machineOutput });
     if (splitCommand === 'abort') return abortSplit(projectRoot, { yes, machineOutput });
+    if (splitCommand === 'status') return splitStatus(projectRoot);
     return applySplitPlan(projectRoot, splitPlanFile, { yes, machineOutput });
   }
 
@@ -340,6 +359,35 @@ async function runMain() {
   // All git commands run at the repo root (projectRoot), even when aicommit
   // is invoked from a subdirectory.
   let indexTransaction = null;
+  const effectiveScope = generate ? generateScope : previewScope;
+  let stagedAllForPreview = false;
+  const generateSnapshot = generate
+    ? (() => {
+        const changes =
+          generateScope === 'staged'
+            ? getStagedChangedFiles(projectRoot)
+            : getAllChangedFiles(projectRoot);
+        if (!changes.length) {
+          throw fail(
+            ERROR_CATEGORIES.GIT_STATE,
+            `No ${generateScope} changes to generate a plan for.`,
+          );
+        }
+        return {
+          changes,
+          baseHead: hasHead(projectRoot)
+            ? readGit(['rev-parse', 'HEAD'], projectRoot).trim()
+            : null,
+          fingerprint: getSplitStateFingerprint(
+            projectRoot,
+            hasHead(projectRoot),
+            changes,
+            generateScope,
+          ),
+          file: safeExportPlanPath(projectRoot, splitPlanFile),
+        };
+      })()
+    : null;
   const finishCancelled = ({
     notice = 'Commit cancelled.',
     message = null,
@@ -374,6 +422,20 @@ async function runMain() {
     indexTransaction ||= createIndexTransaction(projectRoot);
     return indexTransaction;
   };
+  if (effectiveScope === 'all') {
+    try {
+      beginIndexTransaction();
+      runGit(['add', '-A'], projectRoot);
+      indexTransaction.markOwned();
+      stagedAllForPreview = true;
+    } catch (err) {
+      indexTransaction?.restore({ force: true });
+      indexTransaction = null;
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `Failed to stage plan snapshot: ${err.message}`, {
+        cause: err,
+      });
+    }
+  }
   if (!getChangedFiles(projectRoot).length) {
     // Nothing staged. But git diff --staged is also empty for unstaged work
     // and untracked files — surface what git status actually shows instead of
@@ -388,6 +450,10 @@ async function runMain() {
     if (!tips.length) {
       console.log('\n  ' + chalk.yellow('✗ No changes to commit.\n'));
       throw fail(ERROR_CATEGORIES.GIT_STATE, 'No changes to commit.', { reported: true });
+    }
+
+    if (effectiveScope === 'staged' || generate) {
+      throw fail(ERROR_CATEGORIES.GIT_STATE, `No ${effectiveScope} changes to preview.`);
     }
 
     console.log('\n  ' + chalk.yellow(`✗ No staged changes — ${tips.join(', ')}.`));
@@ -531,6 +597,13 @@ async function runMain() {
   let diffForModel = diff;
   let protectAnalysis = true;
   if (protectedInput.findings.length) {
+    if (generate && generateScope === 'all' && yes) {
+      throw fail(
+        ERROR_CATEGORIES.SENSITIVE_DATA,
+        'Non-interactive generate --scope=all refuses sensitive content; review and stage intended files explicitly.',
+        { code: 'sensitive_all_scope' },
+      );
+    }
     warnings.push('Sensitive data was detected and protected before the provider request.');
     console.log('\n  ' + chalk.yellow.bold('⚠ Potential sensitive data detected:'));
     for (const finding of protectedInput.findings) {
@@ -571,7 +644,7 @@ async function runMain() {
     : condenseDiff(
         strippedDiff,
         config.maxDiffChars,
-        getDiffStat(projectRoot),
+        () => getDiffStat(projectRoot),
         config.maxFileDiffChars,
       );
   let analysis;
@@ -773,13 +846,50 @@ async function runMain() {
   console.log('');
 
   if (dryRun) {
+    stagedAllForPreview ||= Boolean(indexTransaction);
     const restored = indexTransaction ? indexTransaction.restore() : true;
     indexTransaction = null;
     if (!restored) {
+      if (generate) {
+        throw fail(
+          ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+          'The Git index changed while generating a commit plan; no plan was written.',
+        );
+      }
       warnings.push('The Git index changed during the run and was left untouched.');
       console.log(
         '  ' + chalk.yellow('⚠ The Git index changed during the run and was left untouched.'),
       );
+    }
+    let plan = null;
+    let planFile = null;
+    if (generate) {
+      const fingerprint = getSplitStateFingerprint(
+        projectRoot,
+        hasHead(projectRoot),
+        undefined,
+        generateScope,
+      );
+      const baseHead = hasHead(projectRoot)
+        ? readGit(['rev-parse', 'HEAD'], projectRoot).trim()
+        : null;
+      if (fingerprint !== generateSnapshot.fingerprint || baseHead !== generateSnapshot.baseHead) {
+        throw fail(
+          ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+          'Repository changes changed while generating a commit plan; no plan was written.',
+        );
+      }
+      plan = [{ message, files: generateSnapshot.changes.map((change) => change.path) }];
+      const artifact = createSplitPlanArtifact({
+        scope: generateScope,
+        baseHead,
+        fingerprint,
+        language: config.language,
+        commitPolicy: config.commitPolicy,
+        changes: generateSnapshot.changes,
+        groups: plan,
+      });
+      planFile = await writeSplitPlanArtifact(generateSnapshot.file, artifact);
     }
     console.log(
       '  ' +
@@ -789,6 +899,10 @@ async function runMain() {
     );
     return {
       message,
+      plan,
+      planFile,
+      scope: effectiveScope || (stagedAllForPreview || indexTransaction ? 'all' : 'staged'),
+      changeCount: generate ? generateSnapshot.changes.length : changedFiles.length,
       provider: selectedProvider,
       model: config.modelId,
       latencyMs: elapsed,
@@ -835,6 +949,9 @@ async function runMain() {
     console.log('\n  ' + chalk.green.bold('✓ Done!\n'));
     return {
       message,
+      commitSha: readGit(['rev-parse', 'HEAD'], projectRoot).trim(),
+      scope: 'staged',
+      changeCount: changedFiles.length,
       provider: selectedProvider,
       model: config.modelId,
       latencyMs: elapsed,

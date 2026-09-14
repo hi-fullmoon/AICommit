@@ -7,7 +7,16 @@ import { generateCompletion } from '../src/completion.js';
 test('completion generators cover stable commands and shell-specific registration', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const script = generateCompletion(shell);
-    for (const command of ['config', 'policy', 'completion', 'split', 'doctor', 'update']) {
+    for (const command of [
+      'config',
+      'policy',
+      'completion',
+      'generate',
+      'apply',
+      'split',
+      'doctor',
+      'update',
+    ]) {
       assert.match(script, new RegExp(`\\b${command}\\b`), `${shell} omits ${command}`);
     }
     const longOptionPrefix = shell === 'fish' ? '-l ' : '--';
@@ -17,7 +26,7 @@ test('completion generators cover stable commands and shell-specific registratio
     }
     const rangeOption = `${longOptionPrefix}range`;
     assert.match(script, new RegExp(rangeOption), `${shell} omits ${rangeOption}`);
-    for (const action of ['run', 'resume', 'abort']) {
+    for (const action of ['run', 'resume', 'abort', 'status']) {
       assert.match(script, new RegExp(action), `${shell} omits ${action}`);
     }
     assert.doesNotMatch(script, /\bmetrics\b|\bstats\b|\bpreset\b|--split-hunks|--check|--split=/);
@@ -54,6 +63,6 @@ _values() {
 ${generateCompletion('zsh')}
 `;
   const output = execFileSync('zsh', ['-f'], { input: harness, encoding: 'utf8' });
-  assert.match(output, /values:split action run plan apply resume abort/);
+  assert.match(output, /values:split action run plan apply resume abort status/);
   assert.doesNotMatch(output, /describe:command/);
 });

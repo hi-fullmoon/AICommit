@@ -313,11 +313,15 @@ aicommit --dry-run       # 生成并审阅，但不创建提交
 aicommit split --dry-run # 审阅拆分计划，但不创建提交
 aicommit --yes           # 非交互提交已明确暂存的变更
 aicommit --yes --dry-run # 非交互预览所有变更；退出时恢复暂存状态
+aicommit --yes --dry-run --scope=staged --output=json # 只预览暂存区
+aicommit generate --scope=staged --file=/tmp/commit-plan.json --yes --output=json
+aicommit apply --file=/tmp/commit-plan.json --yes --output=json
 aicommit split --scope=all --yes # 非交互规划并提交所有工作区变更
 aicommit split --scope=all --yes --allow-single-fallback # 明确允许规划预算耗尽后的保守提交
 aicommit split plan --scope=staged --file=/tmp/split-plan.json --yes
 aicommit split apply --file=/tmp/split-plan.json --yes
 aicommit split resume --yes # 恢复中断的拆分事务
+aicommit split status --output=json # 只读查询恢复状态
 aicommit split abort --yes # 丢弃过期 checkpoint；保留提交和变更
 aicommit --reasoning=low # 流式显示低强度推理；Ctrl+O 展开或收起
 aicommit --no-reasoning # Provider / 模型支持时显式关闭推理
@@ -333,8 +337,8 @@ aicommit -h              # 帮助
 | `-l`, `--lang`            | 提交信息语言：`zh` 或 `en`                                          |
 | `-p`, `--provider`        | 使用 `providers` 中的命名 Provider                                  |
 | `-m`, `--model`           | 使用所选 Provider 下的命名模型配置                                  |
-| `--scope`                 | `aicommit split` 和 `aicommit split plan` 的范围：`staged` 或 `all` |
-| `--file`                  | `aicommit split plan` 和 `aicommit split apply` 的 JSON 计划路径    |
+| `--scope`                 | dry-run、generate 和 split 规划的范围：`staged` 或 `all`            |
+| `--file`                  | generate/apply 和 split plan/apply 的 JSON 计划路径                 |
 | `--dry-run`               | 生成并审阅消息或拆分计划，但不创建提交                              |
 | `-y`, `--yes`             | 不提示直接接受；普通模式要求变更已明确暂存                          |
 | `--allow-single-fallback` | 明确允许非交互拆分创建一个覆盖完整变更的保守提交                    |
@@ -390,11 +394,13 @@ exec zsh
 
 ### 机器可读输出
 
-脚本和 CI 请使用 `--output=json`。提交和 split 流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`doctor --output=json` 和 `update --output=json` 不要求 `--yes`。
+脚本和 CI 请使用 `--output=json`。提交、generate、apply 和 split 执行流程还必须使用 `--yes`，避免机器消费者卡在交互提示上。stdout 只包含一个 JSON 对象；进度、调试信息和诊断输出会写入 stderr。`split status`、`doctor` 和 `update` 的 JSON 模式不要求 `--yes`。
+
+让 AI 审阅单次提交时，先执行 `generate --scope=staged|all --file=<路径> --yes --output=json`，检查返回的消息和计划，再执行 `apply --file=<路径> --yes --output=json`。计划复用经过校验的单组工件；apply 会在提交前核对基础 HEAD、变更清单和内容指纹。计划文件应放在工作区外或 `.git/aicommit/`。`generate --scope=all` 包含已暂存、未暂存和未跟踪变更，结束时恢复临时暂存；非交互模式遇到检测出的敏感内容会停止。只想快速预览时，可用 `--dry-run --scope=staged|all --yes --output=json`；不指定范围时，保留旧版在暂存区为空时自动暂存的行为。
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "ok": true,
   "message": "fix: handle provider retry limits",
   "plan": null,
@@ -409,11 +415,16 @@ exec zsh
   "warnings": [],
   "exitReason": "dry_run",
   "committed": false,
+  "commitState": "none",
+  "commitSha": null,
+  "planFile": null,
+  "scope": "staged",
+  "changeCount": 1,
   "error": null
 }
 ```
 
-已发布的 [JSON schema](schemas/aicommit-output.schema.json) 覆盖成功、拆分计划、doctor / check 和错误结果。机器输出绝不包含 diff 或模型推理。split 输出只暴露每组消息及其分配路径。
+已发布的 [JSON schema](schemas/aicommit-output.schema.json) 覆盖成功、计划、状态、doctor / check 和错误结果。机器输出绝不包含 diff 或模型推理；计划只暴露每组消息及其分配路径。`committed` 表示本次调用是否创建了提交；`commitState` 表示事务处于 `none`、`partial`、`complete` 或 `unknown`。拆分失败时可能返回 `committed: true`、`error.code: "split_partial_failure"`、`data.split` 中已完成的提交 ID，以及 `error.nextAction`。若进程崩溃而没有输出 JSON，应先执行 `split status --output=json` 再决定下一步。
 
 文本与 JSON 模式共享稳定的进程退出码：
 

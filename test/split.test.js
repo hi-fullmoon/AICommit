@@ -717,6 +717,37 @@ test('resume reconciles a commit created in the checkpoint crash window exactly 
   assert.equal(existsSync(splitCheckpointPath(repo)), false);
 });
 
+test('resume reports a completed transaction without claiming a new commit', async (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'a.txt'), 'base\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+  writeFileSync(join(repo, 'a.txt'), 'next\n');
+  const files = getAllChangedFiles(repo);
+  assert.equal(
+    executeSplit([{ message: 'fix: update a', files: ['a.txt'] }], repo, files, false, 'all', {
+      faultInjector(event) {
+        if (event === 'after_commit_before_checkpoint') throw new Error('simulated crash');
+      },
+    }),
+    false,
+  );
+  const headBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repo,
+    encoding: 'utf8',
+  }).trim();
+  const resumed = await resumeSplit(repo, { yes: true });
+  assert.equal(resumed.committed, false);
+  assert.equal(resumed.commitState, 'complete');
+  assert.equal(resumed.commitSha, headBefore);
+  assert.equal(
+    execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
+    headBefore,
+  );
+  assert.equal(existsSync(splitCheckpointPath(repo)), false);
+});
+
 test('new split stops at an existing checkpoint and abort preserves current Git state', async (t) => {
   const repo = makeRepo();
   t.after(() => rmSync(repo, { recursive: true, force: true }));
