@@ -18,7 +18,7 @@ export async function runModelTask({
   const spinner = ora({ text: chalk.dim(spinnerText), color: 'cyan' }).start();
   let liveReasoning;
   const stream =
-    reasoning?.mode === 'on' && !machineOutput
+    reasoning && reasoning.mode !== 'off' && !machineOutput
       ? {
           onReasoningDelta(chunk) {
             if (!liveReasoning) {

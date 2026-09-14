@@ -164,6 +164,71 @@ test('large source is analyzed in chunks, then produces one summary or complete 
   assert.equal(cfg.analysisBudget.snapshot().usage.totalTokens, calls.length * 140);
 });
 
+test('large split planning forwards final-model thinking for live and review views', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify([
+                {
+                  ids: ['F1'],
+                  summary: 'Update one file',
+                  subject: 'fix: update one file',
+                },
+              ]),
+              reasoning_content: 'Grouped the single changed file.',
+            },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const cfg = analysisConfig(
+    config({
+      reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096, maxDisplayChars: 12000 },
+      largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'auto' },
+    }),
+  );
+  const deltas = [];
+  const completed = [];
+  const groups = await planAnalyzedChanges(
+    cfg,
+    [
+      {
+        id: 'F1',
+        path: 'app.js',
+        module: '.',
+        status: 'M',
+        kind: 'code',
+        additions: 1,
+        deletions: 1,
+        files: ['app.js'],
+      },
+    ],
+    { strategy: 'auto', totalFiles: 1 },
+    {
+      onReasoningDelta(chunk) {
+        deltas.push(chunk);
+      },
+      onReasoningComplete(text) {
+        completed.push(text);
+      },
+    },
+  );
+  assert.deepEqual(groups, [
+    { subject: 'fix: update one file', body: undefined, files: ['app.js'] },
+  ]);
+  assert.equal(deltas.join(''), 'Grouped the single changed file.');
+  assert.deepEqual(completed, ['Grouped the single changed file.']);
+});
+
 test('deep analysis packs ASCII fragments by estimated tokens instead of character count', async (t) => {
   const { cwd, git } = repo(t);
   for (let i = 0; i < 8; i++)

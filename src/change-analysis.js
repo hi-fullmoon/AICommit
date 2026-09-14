@@ -313,7 +313,7 @@ function parseAnalysisJson(raw) {
   throw new SyntaxError('Response contains no complete JSON array.');
 }
 
-async function jsonCall(config, instruction, items, validate = null) {
+async function jsonCall(config, instruction, items, validate = null, stream = null) {
   const parseAndValidate = (raw) => {
     const parsed = parseAnalysisJson(raw);
     validate?.(parsed);
@@ -329,7 +329,7 @@ async function jsonCall(config, instruction, items, validate = null) {
     Math.min(2048, config.maxTokens || 1024),
     'Return the complete requested JSON array, preserving every required input ID exactly once. ' +
       `Required IDs: ${JSON.stringify(items.map((item) => item.id))}`,
-    null,
+    stream,
     (response) => {
       try {
         parseAndValidate(response);
@@ -339,6 +339,7 @@ async function jsonCall(config, instruction, items, validate = null) {
       }
     },
   );
+  stream?.onReasoningComplete?.(result.reasoning);
   try {
     return parseAndValidate(result.text);
   } catch (cause) {
@@ -712,7 +713,7 @@ export async function summarizeChanges(config, facts) {
   return `Structured change summaries (not raw diff):\n${JSON.stringify(items)}`;
 }
 
-export async function planAnalyzedChanges(config, facts, coverage = null) {
+export async function planAnalyzedChanges(config, facts, coverage = null, stream = null) {
   let candidates = facts;
   const deep = isDeepAnalysis(config) && coverage?.strategy !== 'auto';
   const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
@@ -749,6 +750,9 @@ export async function planAnalyzedChanges(config, facts, coverage = null) {
               'Analysis plan is missing a commit subject.',
             );
         },
+        // Earlier batches may run many requests. Surface thinking from the
+        // final plan, which is the reasoning relevant to the review screen.
+        batches.length === 1 ? stream : null,
       );
       for (const group of groups) {
         next.push({

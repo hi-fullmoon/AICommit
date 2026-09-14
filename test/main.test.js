@@ -1373,7 +1373,17 @@ for (const strategy of ['auto', 'deep'])
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(
               JSON.stringify({
-                choices: [{ message: { content }, finish_reason: 'stop' }],
+                choices: [
+                  {
+                    message: {
+                      content,
+                      ...(split && strategy === 'auto'
+                        ? { reasoning_content: 'private large split thinking' }
+                        : {}),
+                    },
+                    finish_reason: 'stop',
+                  },
+                ],
                 usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
               }),
             );
@@ -1388,7 +1398,7 @@ for (const strategy of ['auto', 'deep'])
             apiKey: '',
             modelId: 'local-test-model',
             language: 'en',
-            reasoning: { mode: 'off' },
+            reasoning: { mode: split && strategy === 'auto' ? 'on' : 'off' },
             largeChange: { strategy },
           }),
         );
@@ -1398,6 +1408,7 @@ for (const strategy of ['auto', 'deep'])
         const result = await runCli(repo, home, args);
         assert.equal(result.code, 0, result.stdout + result.stderr);
         const output = JSON.parse(result.stdout);
+        assert.doesNotMatch(result.stdout, /private large split thinking/);
         assert.equal(output.data.analysis.totalFiles, 111);
         assert.equal(output.data.analysis.analyzedFiles, strategy === 'deep' ? 111 : 0);
         if (strategy === 'auto') {

@@ -796,7 +796,7 @@ async function runMain() {
       ? 'use'
       : await confirmAction(
           message,
-          reasoningEnabled
+          reasoningEnabled || reasoningText
             ? {
                 text: reasoningText,
                 maxChars: config.reasoning.maxDisplayChars,

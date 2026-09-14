@@ -1794,6 +1794,18 @@ export async function splitFlow(
       task: async (stream) => {
         if (large) {
           let plan;
+          let planReasoning = null;
+          const planningStream = stream
+            ? {
+                onReasoningDelta(chunk) {
+                  planReasoning = (planReasoning || '') + chunk;
+                  stream.onReasoningDelta(chunk);
+                },
+                onReasoningComplete(text) {
+                  if (text) planReasoning = text;
+                },
+              }
+            : null;
           try {
             analysis = await analyzeChanges(
               planningConfig,
@@ -1806,7 +1818,12 @@ export async function splitFlow(
                 ),
               persistentAnalysisCache,
             );
-            plan = await planAnalyzedChanges(planningConfig, analysis.facts, analysis.coverage);
+            plan = await planAnalyzedChanges(
+              planningConfig,
+              analysis.facts,
+              analysis.coverage,
+              planningStream,
+            );
           } catch (err) {
             const exhausted =
               err.data?.analysis?.exhausted ||
@@ -1836,6 +1853,7 @@ export async function splitFlow(
               fallbackReason: exhausted || 'planning_capacity',
             };
             plan = normalizePlan([], allFiles, config.language, config.commitPolicy);
+            planReasoning = null;
             const warning = `Large-change planning used one conservative all-files commit after ${exhausted || 'planning capacity'} exhaustion; review the fallback message and grouping.`;
             warnings.push(warning);
             console.error(`  Fallback: ${warning}`);
@@ -1858,7 +1876,7 @@ export async function splitFlow(
             raw: JSON.stringify(plan),
             elapsed: planningConfig.analysisBudget.snapshot().elapsedMs,
             usage: planningConfig.analysisBudget.snapshot().usage,
-            reasoning: null,
+            reasoning: planReasoning,
           };
         }
         return generateSplitPlan(
@@ -1953,7 +1971,7 @@ export async function splitFlow(
               { name: 'Cancel', value: 'cancel', description: 'Abort without committing' },
             ],
           },
-          reasoningEnabled
+          reasoningEnabled || reasoningText
             ? {
                 text: reasoningText,
                 maxChars: config.reasoning.maxDisplayChars,

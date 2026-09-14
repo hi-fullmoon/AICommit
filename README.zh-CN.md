@@ -457,7 +457,7 @@ exec zsh
 
 推理默认为 `on`，强度为 `medium`。OpenAI 推理模型、DeepSeek、OpenRouter 和 MiniMax 使用各自原生映射；不暴露推理能力的模型会正常继续，并显示“不可用”提示，而不是失败。官方 OpenAI 端点会在发送请求前根据模型代际校验所选强度，因此 `o3 --no-reasoning` 或 `gpt-5.1 --reasoning=max` 等不支持的组合会在本地失败，并清楚列出支持的级别。DeepSeek 当前的 `deepseek-v4-flash` 和 `deepseek-v4-pro` 会收到 `thinking: { "type": "enabled" }` 与 `reasoning_effort`；`medium` / `xhigh` 会归一化为 DeepSeek 的 `high` 级别。
 
-推理模式为 `on` 时（包括通过 `--reasoning=<level>` 启用），AICommit 会请求流式响应并实时显示推理。默认实时视图跟随终端最新两行；生成或审阅期间按 `Ctrl+O` 可展开或收起累计文本。较长的展开输出会限制在终端视口内，可用 `PageUp` / `PageDown` 阅读所有页面。长按 `Ctrl+O` 只计为一次切换，避免按键重复留下多个面板。输出会经过清理，并受 `reasoning.maxDisplayChars` 限制；不暴露推理的 Provider 会显示简短的不可用提示。
+推理模式为 `on` 时（包括通过 `--reasoning=<level>` 启用），AICommit 会请求流式响应并实时显示推理；`auto` 模式下若 Provider 主动返回 think，也会显示，但不会强制开启推理。split 模式会显示最终规划请求的 think，大变更走分批分析时也一样，并在审阅界面保留这段内容；前面的分析批次只显示进度，避免多个推理流混在一起。实时面板需要交互式终端，JSON 输出始终不包含推理。默认实时视图跟随终端最新两行；生成或审阅期间按 `Ctrl+O` 可展开或收起累计文本。较长的展开输出会限制在终端视口内，可用 `PageUp` / `PageDown` 阅读所有页面。长按 `Ctrl+O` 只计为一次切换，避免按键重复留下多个面板。输出会经过清理，并受 `reasoning.maxDisplayChars` 限制；不暴露推理的 Provider 会显示简短的不可用提示。
 
 ```json
 {
