@@ -4,6 +4,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-09-14
+
 ### Fixed
 
 - MiniMax streaming now accepts both cumulative snapshots and ordinary deltas without duplicating thinking or corrupting split plans. The live thinking panel also updates batch progress after the spinner stops.
@@ -243,7 +245,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.2...HEAD
+[2.6.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.2
 [2.6.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.1
 [2.6.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.0
 [2.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.5.0
