@@ -125,8 +125,13 @@ test('capture preserves Unicode, spaces, renames, and a stable binary fingerprin
   const units = [...capture.units()];
   assert.equal(new Set(units.map((u) => u.fileId)).size, 2);
   assert.ok(capture.manifest.some((f) => f.addPaths.length === 2));
-  const original = git('diff', '--staged', '--binary', '--full-index', '--no-ext-diff');
-  assert.equal(getIndexFingerprint(cwd), createHash('sha256').update(original).digest('hex'));
+  const fingerprint = getIndexFingerprint(cwd);
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(getIndexFingerprint(cwd), fingerprint);
+  writeFileSync(join(cwd, 'blob.bin'), Buffer.from([0, 255, 0, 2]));
+  assert.equal(getIndexFingerprint(cwd), fingerprint, 'unstaged bytes are outside the snapshot');
+  git('add', 'blob.bin');
+  assert.notEqual(getIndexFingerprint(cwd), fingerprint);
 });
 
 test('large source is analyzed in chunks, then produces one summary or complete logical groups', async (t) => {

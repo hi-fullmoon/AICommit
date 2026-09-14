@@ -210,6 +210,34 @@ test('index fingerprint changes with staged content and transaction restores pri
   }
 });
 
+test('index fingerprint tracks staged blobs and modes but ignores unstaged edits', () => {
+  const dir = makeRepo();
+  try {
+    writeFileSync(join(dir, 'a.txt'), 'staged first\n');
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir });
+    const first = getIndexFingerprint(dir);
+    writeFileSync(join(dir, 'a.txt'), 'unstaged newer\n');
+    assert.equal(getIndexFingerprint(dir), first);
+
+    execFileSync('git', ['add', 'a.txt'], { cwd: dir });
+    const second = getIndexFingerprint(dir);
+    assert.notEqual(second, first);
+    execFileSync('git', ['update-index', '--chmod=+x', 'a.txt'], { cwd: dir });
+    const executable = getIndexFingerprint(dir);
+    assert.notEqual(executable, second);
+
+    writeFileSync(join(dir, 'binary file.bin'), Buffer.from([0, 1, 2, 3]));
+    execFileSync('git', ['add', 'binary file.bin'], { cwd: dir });
+    const withBinary = getIndexFingerprint(dir);
+    assert.notEqual(withBinary, executable);
+
+    execFileSync('git', ['mv', 'b.txt', 'renamed b.txt'], { cwd: dir });
+    assert.notEqual(getIndexFingerprint(dir), withBinary);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('index transaction does not overwrite a concurrent index change', () => {
   const dir = makeRepo();
   try {
@@ -371,6 +399,19 @@ test('condenseDiff keeps complete sections up to the budget and prepends stat', 
   assert.ok(cut.diff.includes('+a'), 'first section kept');
   assert.ok(!cut.diff.includes('+b'), 'second section dropped');
   assert.ok(cut.diff.includes('diff truncated'), 'cut is marked');
+});
+
+test('condenseDiff requests the Git stat only when the total budget truncates files', () => {
+  const diff = 'diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n+changed\n';
+  let calls = 0;
+  const stat = () => {
+    calls++;
+    return 'STAT';
+  };
+  assert.equal(condenseDiff(diff, 1000, stat).diff, diff);
+  assert.equal(calls, 0);
+  assert.ok(condenseDiff(diff, 10, stat).diff.startsWith('STAT'));
+  assert.equal(calls, 1);
 });
 
 test('condenseDiff with a single oversized section returns just the marker', () => {

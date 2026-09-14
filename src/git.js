@@ -70,13 +70,24 @@ export function getStagedDiff(cwd, contextLines) {
   return readGit(['diff', unifiedArg(contextLines), '--staged'], cwd).trim();
 }
 
-// Hash the complete staged patch (including binary changes and full object
-// ids) so a long-running AI/review step cannot silently commit a different
-// index from the one used to generate the message.
+// Git's raw staged diff contains the full old/new blob IDs, modes, status,
+// and NUL-delimited paths for every changed entry. Hashing that metadata is
+// equivalent to hashing the staged patch for snapshot identity, including
+// binary changes, without regenerating and spooling the entire patch during
+// every pre/post-model safety check.
 export function getIndexFingerprint(cwd) {
   return updateGitHash(
     createHash('sha256'),
-    ['diff', '--staged', '--binary', '--full-index', '--no-ext-diff'],
+    [
+      'diff',
+      '--raw',
+      '--staged',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--abbrev=64',
+      '-z',
+    ],
     cwd,
   ).digest('hex');
 }
@@ -263,7 +274,8 @@ export function condenseDiff(diff, maxChars, stat, maxSectionChars = Infinity) {
   }
   const marker = `... (diff truncated — ${diff.length} chars total)`;
   const body = kept ? `${kept}\n${marker}` : marker;
-  return { diff: stat ? `${stat}\n\n${body}` : body, truncated: true };
+  const resolvedStat = typeof stat === 'function' ? stat() : stat;
+  return { diff: resolvedStat ? `${resolvedStat}\n\n${body}` : body, truncated: true };
 }
 
 export function getChangedFiles(cwd) {

@@ -37,11 +37,15 @@ if (!sizeMiB) {
     const source = spoolGit([['diff', '--staged']], cwd);
     let bytes = 0;
     for (const buffer of source.buffers()) bytes += buffer.length;
+    const captureMs = performance.now() - start;
     getIndexFingerprint(cwd);
+    const fingerprintMs = performance.now() - start - captureMs;
     console.log(
       JSON.stringify({
         fixtureMiB: sizeMiB,
         patchBytes: bytes,
+        captureMs: Math.round(captureMs),
+        fingerprintMs: Math.round(fingerprintMs),
         elapsedMs: Math.round(performance.now() - start),
         peakRssMiB: Math.round(process.resourceUsage().maxRSS / 1024),
         providerRequests: 0,
