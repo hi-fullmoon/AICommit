@@ -4,6 +4,22 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-14
+
+### Added
+
+- Added `generate --scope=staged|all` and `apply` for a reviewable single-commit plan that rechecks the repository snapshot before committing.
+- Added read-only `split status --output=json` so interrupted split transactions expose completed commits and the next recovery action.
+
+### Changed
+
+- Machine output schema 1.1 now reports commit IDs, plan paths, explicit change scope, and structured recovery errors. Consumers pinned to schema 1.0 should update their parsers.
+- Staged snapshot checks use Git object IDs instead of regenerating full patches, and normal generation skips `git diff --stat` unless its diff is truncated.
+
+### Fixed
+
+- Split planning now displays the final model request's thinking for large changes and preserves it in interactive review; `auto` mode displays thinking when a provider emits it. JSON output remains free of model reasoning.
+
 ## [2.5.0] - 2026-09-10
 
 ### Added
@@ -217,7 +233,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.0
 [2.5.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.5.0
 [2.4.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.1
 [2.4.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.4.0
