@@ -229,6 +229,90 @@ test('large split planning forwards final-model thinking for live and review vie
   assert.deepEqual(completed, ['Grouped the single changed file.']);
 });
 
+test('batched split planning streams every batch but reviews only the final merge', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const events = [];
+  let requests = 0;
+  globalThis.fetch = async (_url, init) => {
+    requests++;
+    const input = JSON.parse(init.body).messages.find((message) =>
+      message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+    );
+    const ids = JSON.parse(decodeUntrustedData(input.content).content).map((item) => item.id);
+    const reply = JSON.stringify([
+      { ids, summary: 'Update related files', subject: 'feat: update related files' },
+    ]);
+    const event = (delta, finish_reason = null) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+    return new Response(
+      event({ reasoning_content: `thought ${requests} part 1` }) +
+        event({ reasoning_content: ` part 2` }) +
+        event({ content: reply }, 'stop') +
+        'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const cfg = analysisConfig(
+    config({
+      splitMaxPlanFiles: 10,
+      reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096, maxDisplayChars: 12000 },
+      largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'auto' },
+    }),
+  );
+  const facts = Array.from({ length: 25 }, (_, index) => ({
+    id: `F${index}`,
+    kind: 'source',
+    module: `src/module-${index}`,
+    status: 'M',
+    files: [`src/module-${index}/index.js`],
+    additions: 1,
+    deletions: 1,
+  }));
+  const groups = await planAnalyzedChanges(
+    cfg,
+    facts,
+    { strategy: 'auto', totalFiles: facts.length },
+    {
+      onProgress(status) {
+        events.push(['progress', status]);
+      },
+      onReasoningDelta(chunk) {
+        events.push(['delta', requests, chunk]);
+      },
+      onReasoningComplete(text) {
+        events.push(['complete', text]);
+      },
+    },
+  );
+  assert.equal(requests, 4, 'three planning batches and one final merge');
+  assert.equal(new Set(groups.flatMap((group) => group.files)).size, facts.length);
+  assert.deepEqual(
+    events.filter(([kind]) => kind === 'progress').map(([, status]) => status),
+    [
+      'Planning split batch 1/3 ...',
+      'Planning split batch 2/3 ...',
+      'Planning split batch 3/3 ...',
+      'Planning final split merge ...',
+    ],
+  );
+  for (let index = 1; index <= requests; index++) {
+    assert.ok(
+      events.some(
+        ([kind, request, chunk]) =>
+          kind === 'delta' && request === index && chunk === `thought ${index} part 1`,
+      ),
+    );
+  }
+  assert.deepEqual(
+    events.filter(([kind]) => kind === 'complete'),
+    [['complete', 'thought 4 part 1 part 2']],
+  );
+  assert.ok(events.some(([, , chunk]) => chunk === '\n\n[Planning final merge]\n'));
+});
+
 test('deep analysis packs ASCII fragments by estimated tokens instead of character count', async (t) => {
   const { cwd, git } = repo(t);
   for (let i = 0; i < 8; i++)

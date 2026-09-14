@@ -736,8 +736,29 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
       coverage.metadataOnlyFiles = coverage.totalFiles - coverage.sampledFiles;
     }
     const next = [];
-    for (const batch of batches) {
+    for (const [batchIndex, batch] of batches.entries()) {
       const ids = batch.map((x) => x.id);
+      const finalPlan = batches.length === 1;
+      stream?.onProgress?.(
+        finalPlan
+          ? 'Planning final split merge ...'
+          : `Planning split batch ${batchIndex + 1}/${batches.length} ...`,
+      );
+      let startedThinking = false;
+      const batchStream = stream && {
+        onReasoningDelta(chunk) {
+          if (!startedThinking && chunk) {
+            startedThinking = true;
+            if (!finalPlan || level > 0) {
+              const stage = finalPlan ? 'final merge' : `batch ${batchIndex + 1}/${batches.length}`;
+              stream.onReasoningDelta?.(`\n\n[Planning ${stage}]\n`);
+            }
+          }
+          stream.onReasoningDelta?.(chunk);
+        },
+        // Only the final merge belongs in the subsequent review prompt.
+        onReasoningComplete: finalPlan ? (text) => stream.onReasoningComplete?.(text) : undefined,
+      };
       const groups = await jsonCall(
         config,
         `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.`,
@@ -750,9 +771,7 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
               'Analysis plan is missing a commit subject.',
             );
         },
-        // Earlier batches may run many requests. Surface thinking from the
-        // final plan, which is the reasoning relevant to the review screen.
-        batches.length === 1 ? stream : null,
+        batchStream,
       );
       for (const group of groups) {
         next.push({

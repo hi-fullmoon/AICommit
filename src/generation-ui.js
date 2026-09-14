@@ -20,6 +20,9 @@ export async function runModelTask({
   const stream =
     reasoning && reasoning.mode !== 'off' && !machineOutput
       ? {
+          onProgress(status) {
+            if (spinner.isSpinning) spinner.text = chalk.dim(status);
+          },
           onReasoningDelta(chunk) {
             if (!liveReasoning) {
               spinner.stop();

@@ -1797,12 +1797,14 @@ export async function splitFlow(
           let planReasoning = null;
           const planningStream = stream
             ? {
+                onProgress(status) {
+                  stream.onProgress?.(status);
+                },
                 onReasoningDelta(chunk) {
-                  planReasoning = (planReasoning || '') + chunk;
                   stream.onReasoningDelta(chunk);
                 },
                 onReasoningComplete(text) {
-                  if (text) planReasoning = text;
+                  planReasoning = text || null;
                 },
               }
             : null;

@@ -4,6 +4,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Fixed
+
+- Split mode now streams thinking during each large-change planning batch, with batch progress in the spinner; interactive review still shows only the final plan's reasoning.
+
 ## [2.6.0] - 2026-09-14
 
 ### Added
