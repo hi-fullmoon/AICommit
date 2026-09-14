@@ -169,6 +169,7 @@ function expandedLineCapacity(reservedRows) {
 
 const reasoningStreamPrompt = createPrompt((config, done) => {
   const [text, setText] = useState(config.initialText || '');
+  const [progressText, setProgressText] = useState(config.initialProgress || 'Thinking…');
   const [expanded, setExpanded] = useState(false);
   const [reasoningOffset, setReasoningOffset] = useState(0);
   const [status, setStatus] = useState('streaming');
@@ -178,6 +179,7 @@ const reasoningStreamPrompt = createPrompt((config, done) => {
   const maxOffset = Math.max(0, completeView.totalLines - pageSize);
 
   config.controller.update = setText;
+  config.controller.updateProgress = setProgressText;
   config.controller.finish = () => {
     setStatus('done');
     done(text);
@@ -220,14 +222,18 @@ const reasoningStreamPrompt = createPrompt((config, done) => {
     maxExpandedLines: pageSize,
     offset: reasoningOffset,
   });
-  return `${panel}\n${chalk.dim('  Thinking…  Ctrl+C cancel')}\x1B[?25l`;
+  return `${panel}\n${chalk.dim(`  ${sanitizeTerminalText(progressText)}  Ctrl+C cancel`)}\x1B[?25l`;
 });
 
 // Start a redraw-safe live reasoning view. Updates are batched to one frame
 // every ~32ms so token-sized SSE chunks do not cause hundreds of terminal
 // redraws per second. The complete text remains available to the subsequent
 // review prompt after this temporary view is cleared.
-export function startReasoningStream(maxChars = 12000, initialText = '') {
+export function startReasoningStream(
+  maxChars = 12000,
+  initialText = '',
+  initialProgress = 'Thinking…',
+) {
   const controller = {};
   let accumulated = String(initialText || '');
   let timer = null;
@@ -238,6 +244,7 @@ export function startReasoningStream(maxChars = 12000, initialText = '') {
       append(chunk) {
         accumulated += String(chunk || '');
       },
+      setProgress() {},
       async stop() {
         stopped = true;
         return accumulated;
@@ -246,7 +253,7 @@ export function startReasoningStream(maxChars = 12000, initialText = '') {
   }
 
   const prompt = reasoningStreamPrompt(
-    { controller, maxChars, initialText: accumulated },
+    { controller, maxChars, initialText: accumulated, initialProgress },
     { clearPromptOnDone: true },
   );
 
@@ -256,6 +263,9 @@ export function startReasoningStream(maxChars = 12000, initialText = '') {
   };
 
   return {
+    setProgress(status) {
+      if (!stopped) controller.updateProgress?.(status);
+    },
     append(chunk) {
       if (stopped || !chunk) return;
       accumulated += String(chunk);

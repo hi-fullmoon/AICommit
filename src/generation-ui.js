@@ -17,16 +17,25 @@ export async function runModelTask({
 }) {
   const spinner = ora({ text: chalk.dim(spinnerText), color: 'cyan' }).start();
   let liveReasoning;
+  let progressStatus = 'Thinking…';
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
   const stream =
     reasoning && reasoning.mode !== 'off' && !machineOutput
       ? {
           onProgress(status) {
-            if (spinner.isSpinning) spinner.text = chalk.dim(status);
+            progressStatus = status;
+            if (liveReasoning) liveReasoning.setProgress(status);
+            else if (spinner.isSpinning) spinner.text = chalk.dim(status);
           },
           onReasoningDelta(chunk) {
+            if (!interactive) return;
             if (!liveReasoning) {
               spinner.stop();
-              liveReasoning = startReasoningStream(reasoning.maxDisplayChars, chunk);
+              liveReasoning = startReasoningStream(
+                reasoning.maxDisplayChars,
+                chunk,
+                progressStatus,
+              );
               return;
             }
             liveReasoning.append(chunk);

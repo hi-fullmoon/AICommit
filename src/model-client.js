@@ -236,7 +236,7 @@ function transport(config, adapter, state) {
           if (
             (response.headers.get('content-type') || '').toLowerCase().includes('text/event-stream')
           )
-            return normalizeEventStream(response);
+            return normalizeEventStream(response, adapter.id);
           let data;
           try {
             data = await response.json();

@@ -109,6 +109,56 @@ test('Pi textual reasoning metadata is displayed, encrypted metadata stays opaqu
   assert.deepEqual(deltas, ['inspected diff']);
 });
 
+test('MiniMax cumulative SSE snapshots produce one valid answer and incremental thinking', async () => {
+  globalThis.fetch = async () =>
+    sse(
+      chunk({ reasoning_details: [{ type: 'thinking', text: 'Plan' }] }),
+      chunk({ reasoning_details: [{ type: 'thinking', text: 'Plan files' }] }),
+      chunk({ reasoning_details: [{ type: 'thinking', text: 'Plan files' }] }),
+      chunk({ content: '[{"ids":' }),
+      chunk({ content: '[{"ids":["F1"]}]' }, 'stop'),
+      '[DONE]',
+    );
+  const deltas = [];
+  const result = await requestGeneration(
+    {
+      ...config,
+      providerType: 'minimax',
+      modelId: 'MiniMax-M3',
+      reasoning: { mode: 'on', effort: 'medium' },
+    },
+    { ...request, stream: { onReasoningDelta: (text) => deltas.push(text) } },
+  );
+  assert.deepEqual(deltas, ['Plan', ' files']);
+  assert.equal(result.reasoning, 'Plan files');
+  assert.equal(result.content, '[{"ids":["F1"]}]');
+  assert.deepEqual(JSON.parse(result.content), [{ ids: ['F1'] }]);
+});
+
+test('MiniMax ordinary deltas and intentional repeats are preserved', async () => {
+  globalThis.fetch = async () =>
+    sse(
+      chunk({ reasoning_content: 'check ' }),
+      chunk({ reasoning_content: 'check ' }),
+      chunk({ reasoning_content: 'done' }),
+      chunk({ content: 'fix: ' }),
+      chunk({ content: 'fix: ' }),
+      chunk({ content: 'finish' }, 'stop'),
+      '[DONE]',
+    );
+  const result = await requestGeneration(
+    {
+      ...config,
+      providerType: 'minimax',
+      modelId: 'MiniMax-M3',
+      reasoning: { mode: 'on', effort: 'medium' },
+    },
+    request,
+  );
+  assert.equal(result.reasoning, 'check check done');
+  assert.equal(result.content, 'fix: fix: finish');
+});
+
 test('accepted SSE interruption is not replayed by either Pi or the app', async () => {
   let calls = 0;
   globalThis.fetch = async () => {

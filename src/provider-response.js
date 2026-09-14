@@ -89,14 +89,50 @@ function reasoningDelta(delta) {
   return primary + details;
 }
 
-function normalizeChunk(value) {
+// MiniMax may stream ordinary deltas or the cumulative snapshots shown in its
+// OpenAI-compatible example. Detect a snapshot only when it extends
+// the text already received; otherwise retain the chunk verbatim so repeated
+// ordinary deltas are not lost.
+function miniMaxIncrement(value, state) {
+  if (typeof value !== 'string' || !value) return value;
+  const prior = state.text;
+  if (prior && value.startsWith(prior)) {
+    if (value.length > prior.length) {
+      state.text = value;
+      state.cumulative = true;
+      return value.slice(prior.length);
+    }
+    if (state.cumulative) return '';
+  }
+  state.text += value;
+  state.cumulative = false;
+  return value;
+}
+
+function normalizeChunk(value, miniMaxChoices = null) {
   if (!value || !Array.isArray(value.choices)) return value;
   for (const choice of value.choices) {
     if (!choice || typeof choice !== 'object') continue;
     choice.finish_reason = normalizeFinishReason(choice.finish_reason);
     const delta = choice.delta ?? choice.message;
     if (!delta || typeof delta !== 'object') continue;
-    choice.delta = { ...delta, reasoning_content: reasoningDelta(delta) };
+    const reasoning = reasoningDelta(delta);
+    if (miniMaxChoices) {
+      const index = choice.index ?? 0;
+      if (!miniMaxChoices.has(index))
+        miniMaxChoices.set(index, {
+          content: { text: '', cumulative: false },
+          reasoning: { text: '', cumulative: false },
+        });
+      const state = miniMaxChoices.get(index);
+      choice.delta = {
+        ...delta,
+        content: miniMaxIncrement(delta.content, state.content),
+        reasoning_content: miniMaxIncrement(reasoning, state.reasoning),
+      };
+    } else {
+      choice.delta = { ...delta, reasoning_content: reasoning };
+    }
     // Retain reasoning_details for Pi's replay metadata while also exposing all
     // its textual segments as ordinary thinking deltas, including legacy shapes.
   }
@@ -106,10 +142,11 @@ function normalizeChunk(value) {
 // eventsource-parser handles UTF-8-decoded SSE framing; this boundary adjusts
 // only vendor fields. Pi still owns model-result assembly and finish validation.
 // Web Stream piping preserves backpressure, cancellation and body read errors.
-export function normalizeEventStream(response) {
+export function normalizeEventStream(response, provider = '') {
   if (!response.body)
     throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Streaming response did not include a body.');
   let done = false;
+  const miniMaxChoices = provider === 'minimax' ? new Map() : null;
   const encoder = new globalThis.TextEncoder();
   const body = response.body
     .pipeThrough(new globalThis.TextDecoderStream())
@@ -132,7 +169,7 @@ export function normalizeEventStream(response) {
                 { cause },
               );
             }
-            data = JSON.stringify(normalizeChunk(value));
+            data = JSON.stringify(normalizeChunk(value, miniMaxChoices));
           }
           controller.enqueue(
             encoder.encode(`${event.event ? `event: ${event.event}\n` : ''}data: ${data}\n\n`),

@@ -4,6 +4,10 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+### Fixed
+
+- MiniMax streaming now accepts both cumulative snapshots and ordinary deltas without duplicating thinking or corrupting split plans. The live thinking panel also updates batch progress after the spinner stops.
+
 ## [2.6.1] - 2026-09-14
 
 ### Fixed
