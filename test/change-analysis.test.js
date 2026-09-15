@@ -382,6 +382,34 @@ test('local split candidates are planned in bounded batches and merged globally'
   );
 });
 
+test('very large local split inventories are bundled before model planning', async (t) => {
+  const cfg = analysisConfig(
+    config({
+      splitMaxPlanFiles: 20,
+      largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'auto' },
+    }),
+  );
+  const facts = Array.from({ length: 1_000 }, (_, index) => ({
+    id: `F${index}`,
+    kind: 'source',
+    module: `src/module-${index}`,
+    status: 'M',
+    files: [`src/module-${index}/index.js`],
+    additions: 1,
+    deletions: 1,
+    evidence: `+export const value${index} = true;`,
+  }));
+  const coverage = { strategy: 'auto', totalFiles: facts.length };
+  const calls = mockModel(t);
+
+  const groups = await planAnalyzedChanges(cfg, facts, coverage);
+
+  assert.equal(coverage.planningCandidatesOriginal, facts.length);
+  assert.ok(coverage.planningCandidates <= cfg.splitMaxPlanFiles * 2);
+  assert.equal(new Set(groups.flatMap((group) => group.files)).size, facts.length);
+  assert.ok(calls.length < 10);
+});
+
 test('deep analysis preflight degrades to local inventory before an impossible token run', async (t) => {
   const cfg = analysisConfig(
     config({

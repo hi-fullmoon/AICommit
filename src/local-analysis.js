@@ -251,6 +251,86 @@ export function analyzeLocally(config, capture, protect, previews) {
   };
 }
 
+function planningBucketKey(fact) {
+  const topLevel = fact.module === '.' ? '.' : fact.module.split('/')[0];
+  return JSON.stringify([
+    topLevel,
+    fact.kind,
+    fact.status,
+    fact.modeChange || '',
+    Boolean(fact.binary),
+  ]);
+}
+
+function moduleSpan(facts) {
+  const modules = [...new Set(facts.map((fact) => fact.module))];
+  if (modules.length === 1) return modules[0];
+  const parts = modules.map((module) => module.split('/'));
+  const common = [];
+  for (let index = 0; index < parts[0].length; index++) {
+    const value = parts[0][index];
+    if (!parts.every((item) => item[index] === value)) break;
+    common.push(value);
+  }
+  return common.length ? `${common.join('/')}/*` : 'multiple modules';
+}
+
+// Extremely large auto-mode inventories cannot represent every independent
+// file candidate to the model without hundreds of repeated requests. Bundle
+// adjacent candidates locally while retaining their complete file mapping;
+// the model groups bundle IDs, and execution still covers every original path.
+export function compactLocalPlanFacts(config, facts) {
+  const maxItems = config.splitMaxPlanFiles || 100;
+  const threshold = maxItems * 4;
+  if (facts.length <= threshold) {
+    return { facts, originalCandidates: facts.length, planningCandidates: facts.length };
+  }
+
+  const target = Math.max(1, maxItems * 2);
+  const bundleSize = Math.ceil(facts.length / target);
+  const ordered = [...facts].sort(
+    (left, right) =>
+      planningBucketKey(left).localeCompare(planningBucketKey(right)) ||
+      left.module.localeCompare(right.module) ||
+      left.id.localeCompare(right.id),
+  );
+  const bundles = [];
+  let bucket = [];
+  let key = null;
+  const flush = () => {
+    if (!bucket.length) return;
+    const first = bucket[0];
+    const evidence = bucket.find((fact) => fact.evidence)?.evidence || '';
+    const modeChanges = new Set(bucket.map((fact) => fact.modeChange).filter(Boolean));
+    bundles.push({
+      id: `C${bundles.length + 1}`,
+      kind: first.kind,
+      module: moduleSpan(bucket),
+      status: first.status,
+      files: bucket.flatMap((fact) => fact.files),
+      additions: bucket.reduce((total, fact) => total + fact.additions, 0),
+      deletions: bucket.reduce((total, fact) => total + fact.deletions, 0),
+      modeChange: modeChanges.size === 1 ? [...modeChanges][0] : null,
+      binary: bucket.some((fact) => fact.binary),
+      evidence,
+    });
+    bucket = [];
+  };
+
+  for (const fact of ordered) {
+    const nextKey = planningBucketKey(fact);
+    if (bucket.length && (nextKey !== key || bucket.length >= bundleSize)) flush();
+    key = nextKey;
+    bucket.push(fact);
+  }
+  flush();
+  return {
+    facts: bundles,
+    originalCandidates: facts.length,
+    planningCandidates: bundles.length,
+  };
+}
+
 export function localPlanBatches(config, facts, cap) {
   const error = () =>
     fail(ERROR_CATEGORIES.CONFIG, 'A split candidate is too large for one planning request.', {
@@ -260,10 +340,7 @@ export function localPlanBatches(config, facts, cap) {
   const batches = [];
   let batch = [];
   for (const fact of facts) {
-    const item = {
-      ...summaryOf(fact, false),
-      summary: 'Local candidate only; verify grouping. Content not fully analyzed.',
-    };
+    const item = summaryOf(fact, false);
     if (Buffer.byteLength(JSON.stringify([item])) > cap) throw error();
     const candidate = [...batch, item];
     if (
@@ -278,12 +355,15 @@ export function localPlanBatches(config, facts, cap) {
   if (batch.length) batches.push(batch);
 
   const factsById = new Map(facts.map((fact) => [fact.id, fact]));
+  let evidenceCount = 0;
   for (const items of batches) {
     for (const item of items) {
+      if (evidenceCount >= 16) break;
       const evidence = factsById.get(item.id)?.evidence;
       if (!evidence) continue;
       item.representativeExcerpt = evidence;
       if (Buffer.byteLength(JSON.stringify(items)) > cap) delete item.representativeExcerpt;
+      else evidenceCount++;
     }
   }
   return batches;

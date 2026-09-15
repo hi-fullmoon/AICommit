@@ -5,7 +5,10 @@ import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
 
 export const SPLIT_PLAN_KIND = 'aicommit-split-plan';
 export const SPLIT_PLAN_VERSION = 1;
-const MAX_PLAN_BYTES = 1024 * 1024;
+// A file-level split can legitimately contain thousands of long paths. Keep
+// reads bounded, but size the artifact limit for the validated 10,000-change
+// ceiling instead of rejecting plans that this module can create itself.
+const MAX_PLAN_BYTES = 64 * 1024 * 1024;
 const HASH_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 const HUNK_HASH_RE = /^[0-9a-f]{64}$/;
@@ -241,13 +244,14 @@ export function validateSplitPlanArtifact(input) {
     normalizeGroup(group, index, allowedPaths, hunkCatalog, commitPolicy, input.language),
   );
   const assignedFiles = groups.flatMap((group) => group.files);
-  if (new Set(assignedFiles).size !== assignedFiles.length) {
+  const assignedFileSet = new Set(assignedFiles);
+  if (assignedFileSet.size !== assignedFiles.length) {
     throw new Error('Split plan assigns a path to more than one group.');
   }
   const assignedHunks = new Set();
   for (const group of groups) {
     for (const assignment of group.hunks || []) {
-      if (assignedFiles.includes(assignment.path)) {
+      if (assignedFileSet.has(assignment.path)) {
         throw new Error(`Split plan assigns both a whole file and hunks: ${assignment.path}`);
       }
       for (const id of assignment.ids) {
@@ -260,7 +264,7 @@ export function validateSplitPlanArtifact(input) {
     }
   }
   const missing = displayPaths.filter((path) => {
-    if (assignedFiles.includes(path)) return false;
+    if (assignedFileSet.has(path)) return false;
     const ids = hunkCatalog.get(path);
     return !ids || [...ids].some((id) => !assignedHunks.has(`${path}\0${id}`));
   });
@@ -310,10 +314,14 @@ export function createSplitPlanArtifact({
 export async function writeSplitPlanArtifact(path, artifact) {
   const absolute = resolve(path);
   const validated = validateSplitPlanArtifact(artifact);
+  const serialized = JSON.stringify(validated, null, 2) + '\n';
+  if (Buffer.byteLength(serialized) > MAX_PLAN_BYTES) {
+    throw new Error('Split plan exceeds the 64 MiB limit.');
+  }
   await mkdir(dirname(absolute), { recursive: true, mode: 0o700 });
   const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(validated, null, 2) + '\n', {
+    await writeFile(temporary, serialized, {
       encoding: 'utf8',
       mode: 0o600,
       flag: 'wx',
@@ -341,7 +349,7 @@ export async function readSplitPlanArtifact(path) {
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error('Split plan must be a regular, non-symbolic-link file.');
   }
-  if (stat.size > MAX_PLAN_BYTES) throw new Error('Split plan exceeds the 1 MiB limit.');
+  if (stat.size > MAX_PLAN_BYTES) throw new Error('Split plan exceeds the 64 MiB limit.');
   let parsed;
   try {
     parsed = JSON.parse(await readFile(absolute, 'utf8'));

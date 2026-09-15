@@ -13,7 +13,7 @@ import {
 } from '../src/change-analysis.js';
 import { getStagedChangedFiles } from '../src/split.js';
 import { cleanupGitSpools } from '../src/git-spool.js';
-import { localInputBytes, localPlanBatches } from '../src/local-analysis.js';
+import { compactLocalPlanFacts, localInputBytes, localPlanBatches } from '../src/local-analysis.js';
 
 function config() {
   return analysisConfig({
@@ -174,6 +174,24 @@ test('ten thousand independent edits produce bounded local planning batches with
   assert.equal(batches.flat().length, result.facts.length);
   assert.ok(batches.every((batch) => batch.length <= cfg.splitMaxPlanFiles));
   assert.ok(batches.every((batch) => Buffer.byteLength(JSON.stringify(batch)) <= cap));
+  const compacted = compactLocalPlanFacts(cfg, result.facts);
+  const compactBatches = localPlanBatches(cfg, compacted.facts, cap);
+  const originalBytes = batches.reduce(
+    (total, batch) => total + Buffer.byteLength(JSON.stringify(batch)),
+    0,
+  );
+  const compactBytes = compactBatches.reduce(
+    (total, batch) => total + Buffer.byteLength(JSON.stringify(batch)),
+    0,
+  );
+  assert.equal(compacted.originalCandidates, 10000);
+  assert.ok(compacted.planningCandidates <= cfg.splitMaxPlanFiles * 2 + 16);
+  assert.equal(new Set(compacted.facts.flatMap((fact) => fact.files)).size, 10000);
+  const testBundle = compacted.facts.find((fact) => fact.files.includes('tests/中文.test.js'));
+  assert.equal(testBundle.kind, 'test');
+  assert.deepEqual(testBundle.files, ['tests/中文.test.js']);
+  assert.ok(compactBytes < originalBytes / 20);
+  assert.ok(compactBatches.flat().filter((item) => item.representativeExcerpt).length <= 16);
   assert.equal(calls(), 0);
   assert.equal(cfg.analysisBudget.snapshot().requests, 0);
 });

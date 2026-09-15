@@ -15,7 +15,10 @@ import { validateSplitPlanArtifact } from './split-plan.js';
 
 export const SPLIT_CHECKPOINT_KIND = 'aicommit-split-checkpoint';
 export const SPLIT_CHECKPOINT_VERSION = 1;
-const MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024;
+// Checkpoints contain both the validated plan and one object snapshot per real
+// path, so their bound must be larger than the plan artifact bound. This still
+// caps parsing of local metadata while allowing the supported 10,000 changes.
+const MAX_CHECKPOINT_BYTES = 128 * 1024 * 1024;
 const OID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 function object(value) {
@@ -197,7 +200,7 @@ export function readSplitCheckpoint(projectRoot) {
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error('Split checkpoint must be a regular, non-symbolic-link file.');
   }
-  if (stat.size > MAX_CHECKPOINT_BYTES) throw new Error('Split checkpoint exceeds 2 MiB.');
+  if (stat.size > MAX_CHECKPOINT_BYTES) throw new Error('Split checkpoint exceeds 128 MiB.');
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -213,10 +216,14 @@ export function writeSplitCheckpoint(projectRoot, input) {
     ...input,
     updatedAt: new Date().toISOString(),
   });
+  const serialized = JSON.stringify(checkpoint, null, 2) + '\n';
+  if (Buffer.byteLength(serialized) > MAX_CHECKPOINT_BYTES) {
+    throw new Error('Split checkpoint exceeds the 128 MiB limit.');
+  }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
-    writeFileSync(temporary, JSON.stringify(checkpoint, null, 2) + '\n', {
+    writeFileSync(temporary, serialized, {
       encoding: 'utf8',
       mode: 0o600,
     });

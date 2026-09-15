@@ -11,7 +11,7 @@ process.once('exit', cleanupGitSpools);
 
 // Git writes directly to a private temporary file, never to a Node stdout
 // buffer. Consumers scan the captured bytes without reopening the worktree.
-export function spoolGit(commands, cwd) {
+export function spoolGit(commands, cwd, { env = undefined } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'aicommit-diff-'));
   const path = join(dir, 'patch');
   let fd;
@@ -20,6 +20,7 @@ export function spoolGit(commands, cwd) {
     for (const args of commands) {
       execFileSync('git', ['--no-pager', ...args], {
         cwd,
+        ...(env ? { env } : {}),
         stdio: ['ignore', fd, 'pipe'],
         timeout: 120000,
         maxBuffer: 1024 * 1024,
@@ -78,6 +79,23 @@ export function spoolGit(commands, cwd) {
             );
         }
         if (pending.length) yield pending.toString('utf8');
+      },
+      *nulFields(maxFieldBytes = 16 * 1024) {
+        let pending = Buffer.alloc(0);
+        for (const buffer of this.buffers()) {
+          const data = pending.length ? Buffer.concat([pending, buffer]) : buffer;
+          let start = 0;
+          for (let end = data.indexOf(0); end !== -1; end = data.indexOf(0, start)) {
+            if (end - start > maxFieldBytes)
+              throw new Error(`NUL-delimited Git field exceeds ${maxFieldBytes} bytes.`);
+            yield data.subarray(start, end).toString('utf8');
+            start = end + 1;
+          }
+          pending = Buffer.from(data.subarray(start));
+          if (pending.length > maxFieldBytes)
+            throw new Error(`NUL-delimited Git field exceeds ${maxFieldBytes} bytes.`);
+        }
+        if (pending.length) throw new Error('NUL-delimited Git output was truncated.');
       },
       text(limit) {
         if (size > limit) return null;

@@ -4,6 +4,16 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.3] - 2026-09-15
+
+### Changed
+
+- Very large `auto` split inventories now bundle adjacent local candidates by module, file kind, and Git status before hierarchical model planning, substantially reducing repeated input tokens while retaining every file in the final plan.
+
+### Fixed
+
+- Split execution now batches large path inventories instead of overflowing Node's Git output/argument buffers, and large plan/checkpoint files remain readable for recovery.
+
 ## [2.6.2] - 2026-09-14
 
 ### Fixed
@@ -245,7 +255,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.2...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.3...HEAD
+[2.6.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.3
 [2.6.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.2
 [2.6.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.1
 [2.6.0]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.0

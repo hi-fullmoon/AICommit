@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { pathBatches } from './git.js';
+
 const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 function git(projectRoot, args, { indexPath = null, input = undefined } = {}) {
@@ -215,9 +217,13 @@ export function validateHunkTransaction(projectRoot, plan, snapshots) {
     }
 
     const finalEntries = parseIndexEntries(
-      git(projectRoot, ['ls-files', '--stage', '-z', '--', ...snapshots.map((item) => item.path)], {
-        indexPath,
-      }),
+      pathBatches(snapshots.map((item) => item.path))
+        .map((batch) =>
+          git(projectRoot, ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...batch], {
+            indexPath,
+          }),
+        )
+        .join(''),
     );
     for (const entry of snapshots) {
       if (!entriesEqual(finalEntries.get(entry.path) || null, entry.target)) {

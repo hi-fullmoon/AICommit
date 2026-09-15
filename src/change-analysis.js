@@ -12,6 +12,7 @@ import {
   isDeepAnalysis,
   isGeneratedFile,
   localOverview,
+  compactLocalPlanFacts,
   localPlanBatches,
 } from './local-analysis.js';
 
@@ -714,8 +715,15 @@ export async function summarizeChanges(config, facts) {
 }
 
 export async function planAnalyzedChanges(config, facts, coverage = null, stream = null) {
-  let candidates = facts;
   const deep = isDeepAnalysis(config) && coverage?.strategy !== 'auto';
+  const compacted = deep
+    ? { facts, originalCandidates: facts.length, planningCandidates: facts.length }
+    : compactLocalPlanFacts(config, facts);
+  let candidates = compacted.facts;
+  if (coverage) {
+    coverage.planningCandidatesOriginal = compacted.originalCandidates;
+    coverage.planningCandidates = compacted.planningCandidates;
+  }
   const policy = normalizeCommitPolicy(config.commitPolicy, config.language);
   const cap = Math.min(
     config.splitMaxDiffChars || 16000,
@@ -761,7 +769,7 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
       };
       const groups = await jsonCall(
         config,
-        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.`,
+        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.${!deep && level === 0 ? ' Inputs are a compact local inventory, not full semantic summaries. One ID may represent multiple files and must remain atomic; use kind, module, status, fileCount, examples, and any representativeExcerpt conservatively.' : ''}`,
         batch,
         (candidate) => {
           validatePartition(candidate, ids);

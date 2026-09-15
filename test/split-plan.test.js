@@ -51,6 +51,27 @@ test('split plan artifact round-trips atomically with owner-only permissions', a
   assert.deepEqual(new Set(schema.required), new Set(Object.keys(expected)));
 });
 
+test('large validated split plan artifacts remain readable', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'aicommit-large-plan-artifact-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, 'plan.json');
+  const paths = Array.from(
+    { length: 3_000 },
+    (_, index) =>
+      `generated/long-component-name/${String(index).padStart(4, '0')}-${'artifact'.repeat(18)}.map`,
+  );
+  const plan = validPlan({
+    changes: paths.map((file) => ({ status: 'A', path: file, addPaths: [file] })),
+    groups: [{ message: 'chore: add generated artifacts', files: paths }],
+  });
+
+  await writeSplitPlanArtifact(path, plan);
+
+  assert.ok(statSync(path).size > 1024 * 1024);
+  const loaded = await readSplitPlanArtifact(path);
+  assert.equal(loaded.artifact.changes.length, paths.length);
+});
+
 test('split plan validation rejects empty, duplicate, unknown, unsafe, and non-policy groups', () => {
   const base = validPlan();
   assert.throws(() => validateSplitPlanArtifact({ ...base, extra: true }), /unknown top-level/);

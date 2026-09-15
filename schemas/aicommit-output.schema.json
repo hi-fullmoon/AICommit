@@ -195,6 +195,16 @@
               "type": "number",
               "minimum": 0
             },
+            "planningCandidatesOriginal": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Local candidates before token-saving planning compaction."
+            },
+            "planningCandidates": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Candidate bundles sent through hierarchical split planning."
+            },
             "requests": {
               "type": "number",
               "minimum": 0

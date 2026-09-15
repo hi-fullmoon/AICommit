@@ -236,20 +236,33 @@ export function getSplitChangedFiles(cwd, scope = 'all') {
 // the planner must see the same latest content executeSplit will git add -A.
 function getWorkingTreeDiff(projectRoot, head, contextLines, paths = []) {
   const u = unifiedArg(contextLines);
-  const pathArgs = paths.length ? ['--', ...paths] : [];
-  if (head) {
-    return readGit(['diff', u, 'HEAD', ...pathArgs], projectRoot).trim();
+  const batches = paths.length ? pathBatches(paths) : [[]];
+  const parts = [];
+  for (const batch of batches) {
+    const pathArgs = batch.length ? ['--', ...batch] : [];
+    if (head) {
+      parts.push(readGit(['diff', u, 'HEAD', ...pathArgs], projectRoot).trim());
+      continue;
+    }
+    parts.push(readGit(['diff', u, '--cached', ...pathArgs], projectRoot).trim());
+    parts.push(readGit(['diff', u, ...pathArgs], projectRoot).trim());
   }
-
-  const cached = readGit(['diff', u, '--cached', ...pathArgs], projectRoot).trim();
-  const unstaged = readGit(['diff', u, ...pathArgs], projectRoot).trim();
-  return [cached, unstaged].filter(Boolean).join('\n');
+  return parts.filter(Boolean).join('\n');
 }
 
 export function getSplitDiff(projectRoot, head, contextLines, scope = 'all', paths = []) {
   if (scope === 'staged') {
-    const pathArgs = paths.length ? ['--', ...paths] : [];
-    return readGit(['diff', unifiedArg(contextLines), '--cached', ...pathArgs], projectRoot).trim();
+    const batches = paths.length ? pathBatches(paths) : [[]];
+    return batches
+      .map((batch) => {
+        const pathArgs = batch.length ? ['--', ...batch] : [];
+        return readGit(
+          ['diff', unifiedArg(contextLines), '--cached', ...pathArgs],
+          projectRoot,
+        ).trim();
+      })
+      .filter(Boolean)
+      .join('\n');
   }
   return getWorkingTreeDiff(projectRoot, head, contextLines, paths);
 }
@@ -261,7 +274,7 @@ export function getSplitStateFingerprint(projectRoot, head, files, scope = 'all'
   const hash = createHash('sha256');
   if (scope === 'staged') {
     hash.update(head ? readGit(['rev-parse', 'HEAD'], projectRoot).trim() : '<unborn>');
-    hash.update(readGit(['ls-files', '--stage', '-z'], projectRoot));
+    updateGitHash(hash, ['ls-files', '--stage', '-z'], projectRoot);
     return hash.digest('hex');
   }
   files ||= getAllChangedFiles(projectRoot);
@@ -909,9 +922,9 @@ function getGroupDiff(
   return 'Changed files (new files, no diff available):\n' + parts.join('\n');
 }
 
-function parseStageZeroEntries(text) {
+function parseStageZeroEntries(fields) {
   const entries = new Map();
-  for (const field of text.split('\0')) {
+  for (const field of fields) {
     if (!field) continue;
     const match = field.match(/^(\d+) ([0-9a-f]+) (\d)\t([\s\S]+)$/);
     if (!match || match[3] !== '0') continue;
@@ -920,8 +933,37 @@ function parseStageZeroEntries(text) {
   return entries;
 }
 
-function readStageZeroEntries(projectRoot) {
-  return parseStageZeroEntries(readGit(['ls-files', '--stage', '-z'], projectRoot));
+function* filterGitFields(fields, wanted) {
+  for (const field of fields) {
+    const tab = field.indexOf('\t');
+    if (tab !== -1 && wanted.has(field.slice(tab + 1))) yield field;
+  }
+}
+
+function readStageZeroEntries(projectRoot, paths = null, indexPath = null) {
+  if (paths !== null && !paths.length) return new Map();
+  const wanted = paths === null ? null : new Set(paths);
+  const batches = paths === null ? null : pathBatches(paths);
+  if (batches && batches.length <= 8) {
+    const output = batches
+      .map((batch) => {
+        const args = ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...batch];
+        return indexPath
+          ? runGitWithIndex(args, projectRoot, indexPath)
+          : readGit(args, projectRoot);
+      })
+      .join('');
+    return parseStageZeroEntries(output.split('\0'));
+  }
+  const source = spoolGit([['--literal-pathspecs', 'ls-files', '--stage', '-z']], projectRoot, {
+    ...(indexPath ? { env: { ...process.env, GIT_INDEX_FILE: indexPath } } : {}),
+  });
+  try {
+    const fields = wanted ? filterGitFields(source.nulFields(), wanted) : source.nulFields();
+    return parseStageZeroEntries(fields);
+  } finally {
+    source.dispose();
+  }
 }
 
 function runGitWithIndex(args, projectRoot, indexPath, inherit = false, input = undefined) {
@@ -977,25 +1019,11 @@ function activeCommitHooks(projectRoot) {
 
 function submodulePaths(projectRoot, paths) {
   const found = new Set();
-  const index = pathBatches(paths)
-    .map((batch) =>
-      readGit(['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', ...batch], projectRoot),
-    )
-    .join('');
-  for (const entry of index.split('\0')) {
-    const match = entry.match(/^160000 [0-9a-f]+ \d\t([\s\S]+)$/);
-    if (match) found.add(match[1]);
-  }
+  for (const [path, entry] of readStageZeroEntries(projectRoot, paths))
+    if (entry.mode === '160000') found.add(path);
   if (hasHead(projectRoot)) {
-    const tree = pathBatches(paths)
-      .map((batch) =>
-        readGit(['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD', '--', ...batch], projectRoot),
-      )
-      .join('');
-    for (const entry of tree.split('\0')) {
-      const match = entry.match(/^160000 commit [0-9a-f]+\t([\s\S]+)$/);
-      if (match) found.add(match[1]);
-    }
+    for (const [path, entry] of readHeadEntries(projectRoot, paths))
+      if (entry.mode === '160000') found.add(path);
   }
   return [...found];
 }
@@ -1112,7 +1140,7 @@ function resetCommittedPaths(projectRoot, groups, allFiles) {
 }
 
 function captureTargetEntries(projectRoot, scope, paths) {
-  if (scope === 'staged') return readStageZeroEntries(projectRoot);
+  if (scope === 'staged') return readStageZeroEntries(projectRoot, paths);
   const tempDir = mkdtempSync(join(tmpdir(), 'aicommit-split-snapshot-'));
   const indexPath = join(tempDir, 'index');
   try {
@@ -1128,9 +1156,7 @@ function captureTargetEntries(projectRoot, scope, paths) {
       false,
       paths.join('\0') + '\0',
     );
-    return parseStageZeroEntries(
-      runGitWithIndex(['ls-files', '--stage', '-z'], projectRoot, indexPath),
-    );
+    return readStageZeroEntries(projectRoot, paths, indexPath);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -1139,7 +1165,7 @@ function captureTargetEntries(projectRoot, scope, paths) {
 function captureCheckpointSnapshots(projectRoot, scope, allFiles) {
   const paths = [...new Set(allFiles.flatMap((change) => change.addPaths))].sort();
   const target = captureTargetEntries(projectRoot, scope, paths);
-  const index = readStageZeroEntries(projectRoot);
+  const index = readStageZeroEntries(projectRoot, paths);
   return paths.map((path) => ({
     path,
     target: target.get(path) || null,
@@ -1243,15 +1269,35 @@ function splitCommitFailure(projectRoot, message) {
 function readHeadEntries(projectRoot, paths) {
   const entries = new Map();
   if (!hasHead(projectRoot) || !paths.length) return entries;
-  const text = pathBatches(paths)
-    .map((batch) =>
-      readGit(['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD', '--', ...batch], projectRoot),
-    )
-    .join('');
-  for (const field of text.split('\0')) {
-    if (!field) continue;
-    const match = field.match(/^(\d+) \S+ ([0-9a-f]+)\t([\s\S]+)$/);
-    if (match) entries.set(match[3], { mode: match[1], oid: match[2] });
+  const wanted = new Set(paths);
+  const batches = pathBatches(paths);
+  let source = null;
+  try {
+    const fields =
+      batches.length <= 8
+        ? batches
+            .map((batch) =>
+              readGit(
+                ['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD', '--', ...batch],
+                projectRoot,
+              ),
+            )
+            .join('')
+            .split('\0')
+        : filterGitFields(
+            (source = spoolGit(
+              [['--literal-pathspecs', 'ls-tree', '-rz', 'HEAD']],
+              projectRoot,
+            )).nulFields(),
+            wanted,
+          );
+    for (const field of fields) {
+      if (!field) continue;
+      const match = field.match(/^(\d+) \S+ ([0-9a-f]+)\t([\s\S]+)$/);
+      if (match) entries.set(match[3], { mode: match[1], oid: match[2] });
+    }
+  } finally {
+    source?.dispose();
   }
   return entries;
 }
@@ -1289,7 +1335,7 @@ function reconcileCompletedIndex(projectRoot, checkpoint) {
   const paths = [
     ...new Set(groups.flatMap((group) => expandGroupPaths(group, checkpoint.plan.changes))),
   ];
-  const current = readStageZeroEntries(projectRoot);
+  const current = readStageZeroEntries(projectRoot, paths);
   const head = readHeadEntries(projectRoot, paths);
   const snapshots = new Map(checkpoint.snapshots.map((snapshot) => [snapshot.path, snapshot]));
   for (const path of paths) {
@@ -1826,6 +1872,13 @@ export async function splitFlow(
               analysis.coverage,
               planningStream,
             );
+            if (
+              analysis.coverage.planningCandidates < analysis.coverage.planningCandidatesOriginal
+            ) {
+              console.error(
+                `  Planning input: bundled ${analysis.coverage.planningCandidatesOriginal} local candidates into ${analysis.coverage.planningCandidates} token-efficient groups.`,
+              );
+            }
           } catch (err) {
             const exhausted =
               err.data?.analysis?.exhausted ||

@@ -669,6 +669,38 @@ test('checkpoint resumes after a later hook failure without duplicate or omitted
   assert.equal(existsSync(splitCheckpointPath(repo)), false);
 });
 
+test('large path inventories create a readable checkpoint without overflowing Git output buffers', (t) => {
+  const repo = makeRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const oid = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: repo,
+    encoding: 'utf8',
+    input: '{}\n',
+  }).trim();
+  const prefix = 'generated/very-long-component-directory-name-for-buffer-reproduction/';
+  const paths = Array.from(
+    { length: 10_000 },
+    (_, index) => `${prefix}generated-artifact-${String(index).padStart(5, '0')}.map`,
+  );
+  execFileSync('git', ['update-index', '--index-info'], {
+    cwd: repo,
+    input: paths.map((path) => `100644 ${oid}\t${path}\n`).join(''),
+  });
+  const files = paths.map((path) => ({ status: 'A', path, addPaths: [path] }));
+  const groups = [{ message: 'chore: add generated artifacts', files: paths }];
+  const hook = join(repo, '.git', 'hooks', 'pre-commit');
+  writeFileSync(hook, '#!/bin/sh\nexit 1\n');
+  chmodSync(hook, 0o755);
+
+  assert.equal(executeSplit(groups, repo, files, true, 'staged'), false);
+
+  const checkpointPath = splitCheckpointPath(repo);
+  assert.ok(statSync(checkpointPath).size > 2 * 1024 * 1024);
+  const checkpoint = readSplitCheckpoint(repo).checkpoint;
+  assert.equal(checkpoint.plan.changes.length, paths.length);
+  assert.equal(checkpoint.snapshots.length, paths.length);
+});
+
 test('resume reconciles a commit created in the checkpoint crash window exactly once', async (t) => {
   const repo = makeRepo();
   t.after(() => rmSync(repo, { recursive: true, force: true }));
