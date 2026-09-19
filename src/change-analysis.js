@@ -351,17 +351,17 @@ async function jsonCall(config, instruction, items, validate = null, stream = nu
   }
 }
 
-export function validatePartition(groups, ids) {
+export function validatePartition(groups, ids, requireSummary = true) {
   const remaining = new Set(ids);
   if (!Array.isArray(groups) || !groups.length)
     throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Analysis returned an empty partition.');
   for (const group of groups) {
     if (
+      !group ||
       !Array.isArray(group.ids) ||
       !group.ids.length ||
-      typeof group.summary !== 'string' ||
-      !group.summary.trim() ||
-      group.summary.length > 2000
+      (requireSummary &&
+        (typeof group.summary !== 'string' || !group.summary.trim() || group.summary.length > 2000))
     )
       throw fail(ERROR_CATEGORIES.RESPONSE_FORMAT, 'Analysis returned an invalid group.');
     for (const id of group.ids)
@@ -729,15 +729,23 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
     config.splitMaxDiffChars || 16000,
     Math.floor(config.analysisBudget.limits.chunkInputTokens * 0.6),
   );
+  // A model may keep every input as a separate commit. Limit candidate count
+  // by the response budget too, leaving room for a complete JSON plan.
+  const outputTokens = Math.min(2048, config.maxTokens || 1024);
+  const maxPlanItems = Math.max(
+    1,
+    Math.min(config.splitMaxPlanFiles || 100, Math.floor((outputTokens - 224) / 80)),
+  );
+  const batchConfig = { ...config, splitMaxPlanFiles: maxPlanItems };
   for (let level = 0; level < 8; level++) {
     const byId = new Map(candidates.map((x) => [x.id, x]));
     const batches =
       !deep && level === 0
-        ? localPlanBatches(config, candidates, cap)
+        ? localPlanBatches(batchConfig, candidates, cap)
         : packItems(
             candidates.map(({ id, path, summary }) => ({ id, path, summary })),
             cap,
-            config.splitMaxPlanFiles || 100,
+            maxPlanItems,
           );
     if (!deep && level === 0 && coverage) {
       coverage.sampledFiles = batches.flat().filter((item) => item.representativeExcerpt).length;
@@ -769,10 +777,10 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
       };
       const groups = await jsonCall(
         config,
-        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.${!deep && level === 0 ? ' Inputs are a compact local inventory, not full semantic summaries. One ID may represent multiple files and must remain atomic; use kind, module, status, fileCount, examples, and any representativeExcerpt conservatively.' : ''}`,
+        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.${finalPlan ? ' The summary field is optional in this final plan.' : ''}${!deep && level === 0 ? ' Inputs are a compact local inventory, not full semantic summaries. One ID may represent multiple files and must remain atomic; use kind, module, status, fileCount, examples, and any representativeExcerpt conservatively.' : ''}`,
         batch,
         (candidate) => {
-          validatePartition(candidate, ids);
+          validatePartition(candidate, ids, false);
           if (candidate.some((group) => typeof group.subject !== 'string' || !group.subject.trim()))
             throw fail(
               ERROR_CATEGORIES.RESPONSE_FORMAT,
@@ -782,8 +790,23 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
         batchStream,
       );
       for (const group of groups) {
+        const sourceSummary = group.ids
+          .map((id) => {
+            const fact = byId.get(id);
+            return (
+              fact.summary ||
+              `${fact.status || 'Changed'} ${fact.kind || 'files'} in ${fact.module || fact.path || 'repository'} (${fact.files.length} files)`
+            ).slice(0, 160);
+          })
+          .join('; ');
         next.push({
           ...group,
+          summary:
+            typeof group.summary === 'string' &&
+            group.summary.trim() &&
+            group.summary.length <= 2000
+              ? group.summary
+              : sourceSummary.slice(0, 2000),
           id: `L${level}G${next.length}`,
           files: group.ids.flatMap((id) => byId.get(id).files),
         });

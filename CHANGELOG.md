@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.4] - 2026-09-19
+
+### Fixed
+
+- Large split planning now sizes batches for the model response limit and preserves valid file groupings when the provider omits a group summary.
+
 ## [2.6.3] - 2026-09-15
 
 ### Changed
@@ -255,7 +261,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.3...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.4...HEAD
+[2.6.4]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.4
 [2.6.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.3
 [2.6.2]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.2
 [2.6.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.1
