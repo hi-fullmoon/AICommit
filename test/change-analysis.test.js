@@ -410,6 +410,55 @@ test('very large local split inventories are bundled before model planning', asy
   assert.ok(calls.length < 10);
 });
 
+test('large split plans fit output batches and recover omitted group summaries', async (t) => {
+  const cfg = analysisConfig(
+    config({ largeChange: { ...DEFAULT_CONFIG.largeChange, strategy: 'auto' } }),
+  );
+  const facts = Array.from({ length: 141 }, (_, index) => ({
+    id: `F${index + 1}`,
+    kind: 'source',
+    module: `src/module-${index}`,
+    status: 'M',
+    files: [`src/module-${index}/index.js`],
+    additions: 1,
+    deletions: 0,
+  }));
+  const originalFetch = globalThis.fetch;
+  const batchSizes = [];
+  let finalRequests = 0;
+  let synthesizedSummaries = 0;
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    const input = payload.messages.find((message) =>
+      message.content.startsWith('BEGIN_AICOMMIT_UNTRUSTED_JSON'),
+    );
+    const items = JSON.parse(decodeUntrustedData(input.content).content);
+    batchSizes.push(items.length);
+    const isFinal = payload.messages[0].content.includes('summary field is optional');
+    if (isFinal) finalRequests++;
+    if (items.some((item) => item.summary)) synthesizedSummaries++;
+    const group = {
+      ids: items.map((item) => item.id),
+      subject: 'chore: update modules',
+    };
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify([group]) } }] }),
+    );
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const groups = await planAnalyzedChanges(cfg, facts);
+
+  assert.ok(batchSizes.length > 1);
+  assert.ok(batchSizes.every((size) => size <= 10));
+  assert.equal(finalRequests, 1);
+  assert.ok(synthesizedSummaries > 0);
+  assert.equal(groups.length, 1);
+  assert.equal(new Set(groups[0].files).size, facts.length);
+});
+
 test('deep analysis preflight degrades to local inventory before an impossible token run', async (t) => {
   const cfg = analysisConfig(
     config({
@@ -626,6 +675,8 @@ test('partitions reject omissions, duplicate IDs, and malformed summaries', () =
   assert.throws(() => validatePartition([{ ids: ['a'], summary: 'x' }], ['a', 'b']), /unassigned/);
   assert.throws(() => validatePartition([{ ids: ['a', 'a'], summary: 'x' }], ['a']), /duplicate/);
   assert.throws(() => validatePartition([{ ids: ['a'], summary: '' }], ['a']), /invalid/);
+  assert.deepEqual(validatePartition([{ ids: ['a'] }], ['a'], false), undefined);
+  assert.throws(() => validatePartition([{ ids: ['unknown'] }], ['a'], false), /unknown/);
 });
 
 test('budgets reserve before dispatch, include retries, and stop without another network call', async (t) => {
