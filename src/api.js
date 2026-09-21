@@ -207,6 +207,7 @@ export async function getResponseText(
         : reasoning || '';
 
     const partial = text.trim();
+    const followUp = typeof followUpPrompt === 'function' ? followUpPrompt() : followUpPrompt;
     const recoveryPrompt =
       truncatedByLimit || invalidResponse
         ? `The previous response was ${
@@ -214,8 +215,8 @@ export async function getResponseText(
           }. ` +
           'Reproduce the COMPLETE answer from the beginning; do not continue from the cut-off point. ' +
           'Keep the answer concise.\n\n' +
-          followUpPrompt
-        : followUpPrompt;
+          followUp
+        : followUp;
 
     // With reasoning, its conclusion plus the partial answer is enough to
     // reconstruct the output without paying to send the original diff again.

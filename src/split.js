@@ -1836,7 +1836,7 @@ export async function splitFlow(
       reasoning: config.reasoning,
       machineOutput,
       cancelMessage: 'Split cancelled.',
-      failureMessage: 'API call failed',
+      failureMessage: 'Split planning failed',
       task: async (stream) => {
         if (large) {
           let plan;

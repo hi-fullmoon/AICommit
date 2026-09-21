@@ -4,7 +4,7 @@ import { createAnalysisBudget, DEFAULT_LARGE_CHANGE, estimateTokens } from './an
 import { getResponseText } from './api.js';
 import { encodeUntrustedData } from './trust.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
-import { normalizeCommitPolicy } from './policy.js';
+import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
 import { getProviderAdapter } from './providers.js';
 import { createHash } from 'node:crypto';
 import {
@@ -315,6 +315,7 @@ function parseAnalysisJson(raw) {
 }
 
 async function jsonCall(config, instruction, items, validate = null, stream = null) {
+  let validationError = '';
   const parseAndValidate = (raw) => {
     const parsed = parseAnalysisJson(raw);
     validate?.(parsed);
@@ -328,14 +329,17 @@ async function jsonCall(config, instruction, items, validate = null, stream = nu
     ],
     0,
     Math.min(2048, config.maxTokens || 1024),
-    'Return the complete requested JSON array, preserving every required input ID exactly once. ' +
-      `Required IDs: ${JSON.stringify(items.map((item) => item.id))}`,
+    () =>
+      'Return the complete requested JSON array, preserving every required input ID exactly once. ' +
+      `Required IDs: ${JSON.stringify(items.map((item) => item.id))}. ` +
+      (validationError ? `Correct these validation errors: ${validationError}` : ''),
     stream,
     (response) => {
       try {
         parseAndValidate(response);
         return true;
-      } catch {
+      } catch (error) {
+        validationError = error.message;
         return false;
       }
     },
@@ -349,6 +353,28 @@ async function jsonCall(config, instruction, items, validate = null, stream = nu
       cause,
     });
   }
+}
+
+export function validatePlanMessages(groups, policy) {
+  const errors = [];
+  for (const [index, group] of groups.entries()) {
+    const subject = typeof group.subject === 'string' ? group.subject.trim() : '';
+    if (!subject) {
+      errors.push(`Group ${index + 1}: The subject field must be a non-empty commit header.`);
+      continue;
+    }
+    const body = typeof group.body === 'string' ? group.body.trim() : '';
+    const validation = validateCommitCandidate(body ? `${subject}\n\n${body}` : subject, {
+      policy,
+    });
+    if (!validation.valid)
+      errors.push(`Group ${index + 1}: ${validation.errors.map((item) => item.message).join(' ')}`);
+  }
+  if (errors.length)
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      `Split commit messages violate commitPolicy: ${errors.join(' ')}`,
+    );
 }
 
 export function validatePartition(groups, ids) {
@@ -769,15 +795,11 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
       };
       const groups = await jsonCall(
         config,
-        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"commit subject","body":"optional commit body"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.${!deep && level === 0 ? ' Inputs are a compact local inventory, not full semantic summaries. One ID may represent multiple files and must remain atomic; use kind, module, status, fileCount, examples, and any representativeExcerpt conservatively.' : ''}`,
+        `Each commit message must follow this policy: ${JSON.stringify(policy)}.\nThe subject field must contain the complete Conventional Commit header: <type>[optional scope][optional !]: <description>. Respect the policy's language, scope, length, body, and breaking-change rules; include a body when required and omit it when forbidden.\nGroup related changes into logical commits, including related implementation and tests across directories. Return [{"ids":[input IDs],"summary":"factual combined change summary","subject":"complete commit header","body":"commit body if permitted or required"}]. Assign every input ID exactly once. Do not merge unrelated changes just to reduce group count.${!deep && level === 0 ? ' Inputs are a compact local inventory, not full semantic summaries. One ID may represent multiple files and must remain atomic; use kind, module, status, fileCount, examples, and any representativeExcerpt conservatively.' : ''}`,
         batch,
         (candidate) => {
           validatePartition(candidate, ids);
-          if (candidate.some((group) => typeof group.subject !== 'string' || !group.subject.trim()))
-            throw fail(
-              ERROR_CATEGORIES.RESPONSE_FORMAT,
-              'Analysis plan is missing a commit subject.',
-            );
+          validatePlanMessages(candidate, policy);
         },
         batchStream,
       );
