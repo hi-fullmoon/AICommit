@@ -4,7 +4,7 @@ import { createAnalysisBudget, DEFAULT_LARGE_CHANGE, estimateTokens } from './an
 import { getResponseText } from './api.js';
 import { encodeUntrustedData } from './trust.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
-import { normalizeCommitPolicy, validateCommitCandidate } from './policy.js';
+import { normalizeCommitPolicy, parseCommitMessage, validateCommitCandidate } from './policy.js';
 import { getProviderAdapter } from './providers.js';
 import { createHash } from 'node:crypto';
 import {
@@ -375,6 +375,77 @@ export function validatePlanMessages(groups, policy) {
       ERROR_CATEGORIES.RESPONSE_FORMAT,
       `Split commit messages violate commitPolicy: ${errors.join(' ')}`,
     );
+}
+
+export function invalidPlanMessages(groups, policy) {
+  return groups.flatMap((group, index) => {
+    try {
+      validatePlanMessages([group], policy);
+      return [];
+    } catch (error) {
+      const message = parseCommitMessage(typeof group.subject === 'string' ? group.subject : '');
+      return [
+        {
+          id: String(index),
+          subject: group.subject,
+          body: group.body,
+          subjectLength: [...(message.parsed?.subject || '')].length,
+          subjectMaxLength: policy.subject.maxLength,
+          errors: error.message,
+        },
+      ];
+    }
+  });
+}
+
+export function applyMessageCorrections(groups, corrections, policy) {
+  const invalid = invalidPlanMessages(groups, policy);
+  const remaining = new Set(invalid.map((item) => item.id));
+  if (!Array.isArray(corrections)) throw new Error('Expected a message correction array.');
+  const next = groups.map((group) => ({ ...group }));
+  for (const correction of corrections) {
+    if (!correction || !remaining.delete(correction.id))
+      throw new Error('Corrections must contain each invalid group ID exactly once.');
+    validatePlanMessages([correction], policy);
+    // Never accept model-provided file assignments, summaries, or group ordering.
+    next[Number(correction.id)] = {
+      ...next[Number(correction.id)],
+      subject: correction.subject,
+      body: correction.body,
+    };
+  }
+  if (remaining.size) throw new Error('Corrections omitted invalid group IDs.');
+  return next;
+}
+
+async function repairPlanMessages(config, groups, policy, stream) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const invalid = invalidPlanMessages(groups, policy);
+    if (!invalid.length) return groups;
+    stream?.onProgress?.(`Correcting ${invalid.length} commit messages (${attempt}/3) ...`);
+    try {
+      const corrections = await jsonCall(
+        config,
+        `Repair only the supplied commit messages. Policy: ${JSON.stringify(policy)}. ` +
+          `The description after the type/scope prefix must fit within ${policy.subject.maxLength} Unicode characters. ` +
+          (policy.subject.headerMaxLength
+            ? `The complete header must fit within ${policy.subject.headerMaxLength} characters. `
+            : '') +
+          'Rewrite concisely; do not truncate. Move detail into the body only when permitted. ' +
+          'Return [{"id":"original ID","subject":"complete commit header","body":"optional body"}]. ' +
+          'Preserve every supplied ID exactly once. Do not plan or regroup files.',
+        invalid,
+        (candidate) => applyMessageCorrections(groups, candidate, policy),
+        stream,
+      );
+      return applyMessageCorrections(groups, corrections, policy);
+    } catch (error) {
+      if (error.category !== ERROR_CATEGORIES.RESPONSE_FORMAT || attempt === 3) {
+        error.data = { ...error.data, messageRepairDraft: groups };
+        throw error;
+      }
+    }
+  }
 }
 
 export function validatePartition(groups, ids, requireSummary = true) {
@@ -807,7 +878,6 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
         batch,
         (candidate) => {
           validatePartition(candidate, ids, false);
-          validatePlanMessages(candidate, policy);
         },
         batchStream,
       );
@@ -834,8 +904,15 @@ export async function planAnalyzedChanges(config, facts, coverage = null, stream
         });
       }
     }
-    if (batches.length === 1)
-      return next.map(({ subject, body, files }) => ({ subject, body, files }));
+    if (batches.length === 1) {
+      const plan = next.map(({ subject, body, files }) => ({ subject, body, files }));
+      try {
+        return await repairPlanMessages(config, plan, policy, stream);
+      } catch (error) {
+        error.data = { ...error.data, messageRepairDraft: plan, messageRepairComplete: true };
+        throw error;
+      }
+    }
     candidates = next;
   }
   throw fail(ERROR_CATEGORIES.PROVIDER, 'Split planning exceeded the maximum summary depth.', {

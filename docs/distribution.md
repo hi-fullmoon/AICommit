@@ -33,7 +33,7 @@ The release workflow uses npm Trusted Publishing without a long-lived `NPM_TOKEN
 ```bash
 workdir=$(mktemp -d)
 cd "$workdir"
-npm install --package-lock-only @hifullmoon/aicommit@2.6.5
+npm install --package-lock-only @hifullmoon/aicommit@2.6.6
 npm audit signatures
 ```
 

@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-09-21
+
+### Fixed
+
+- Large split plans now preserve complete file groupings while correcting only invalid commit messages, with bounded retries and character counts. Interactive runs can edit messages after automatic correction fails and continue to plan review; non-interactive failures preserve a private diagnostic draft for protected input.
+
 ## [2.6.5] - 2026-09-21
 
 ### Fixed
@@ -267,7 +273,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.5...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.6...HEAD
+[2.6.6]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.6
 [2.6.5]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.5
 [2.6.4]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.4
 [2.6.3]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.3

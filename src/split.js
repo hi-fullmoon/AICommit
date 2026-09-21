@@ -8,6 +8,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  writeFileSync,
   constants as fsConstants,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -71,6 +72,8 @@ import {
   analysisConfig,
   analyzeChanges,
   planAnalyzedChanges,
+  invalidPlanMessages,
+  applyMessageCorrections,
   summarizeChanges,
 } from './change-analysis.js';
 import { updateGitHash, spoolGit } from './git-spool.js';
@@ -672,6 +675,35 @@ async function editPlan(groups, allFiles, language, commitPolicy) {
         ),
     );
     return null;
+  }
+}
+
+async function editInvalidPlanMessages(groups, policy) {
+  let draft = JSON.stringify(invalidPlanMessages(groups, policy), null, 2);
+  while (true) {
+    const action = await vimSelect({
+      message: 'File grouping is ready. Edit the invalid commit messages to continue?',
+      choices: [
+        { name: 'Edit commit messages', value: 'edit' },
+        { name: 'Cancel', value: 'cancel' },
+      ],
+    });
+    if (action === 'cancel') return null;
+    const edited = await editor({
+      message: 'Fix subject/body fields; keep each id unchanged. Save and close to validate.',
+      default: draft,
+      postfix: '.json',
+      waitForUseInput: false,
+    });
+    try {
+      const candidate = JSON.parse(edited);
+      const corrected = applyMessageCorrections(groups, candidate, policy);
+      return corrected;
+    } catch (error) {
+      // Keep the user's edits available for the next attempt, including invalid JSON.
+      console.error(`  ${sanitizeTerminalText(error.message)}`);
+      draft = edited;
+    }
   }
 }
 
@@ -1880,6 +1912,9 @@ export async function splitFlow(
               );
             }
           } catch (err) {
+            // A validated partition must not become an all-files fallback just
+            // because repairing its messages exhausted the remaining budget.
+            if (err.data?.messageRepairDraft) throw err;
             const exhausted =
               err.data?.analysis?.exhausted ||
               (!planningConfig.analysisBudget.remainingMs() ? 'time' : null);
@@ -1950,9 +1985,58 @@ export async function splitFlow(
       },
     }));
   } catch (err) {
-    console.log(`\n  ${indentError(err)}\n`);
-    err.reported = true;
-    throw err;
+    if (
+      err.data?.messageRepairComplete &&
+      !yes &&
+      !machineOutput &&
+      process.stdin.isTTY &&
+      process.stdout.isTTY
+    ) {
+      console.error(`  ${indentError(err)}`);
+      const corrected = await editInvalidPlanMessages(
+        err.data.messageRepairDraft,
+        normalizeCommitPolicy(config.commitPolicy, config.language),
+      );
+      if (!corrected) return finishCancelled();
+      raw = JSON.stringify(corrected);
+      elapsed = planningConfig.analysisBudget.snapshot().elapsedMs;
+      usage = planningConfig.analysisBudget.snapshot().usage;
+      reasoningText = null;
+      warnings.push('Commit messages were corrected manually; the file grouping was preserved.');
+    }
+    if (!raw && err.data?.messageRepairDraft && protectModelInput) {
+      try {
+        const directory = mkdtempSync(join(tmpdir(), 'aicommit-message-repair-'));
+        const path = join(directory, 'draft.json');
+        writeFileSync(
+          path,
+          JSON.stringify(
+            {
+              kind: 'aicommit-message-repair-draft',
+              notice:
+                'Complete file grouping with invalid messages; not an apply-ready split plan.',
+              groups: err.data.messageRepairDraft,
+            },
+            null,
+            2,
+          ) + '\n',
+          { mode: 0o600, flag: 'wx' },
+        );
+        err.data.messageRepairDraftPath = path;
+        console.error(
+          `  Message repair draft saved to ${path} (complete grouping, not apply-ready).`,
+        );
+      } catch (writeError) {
+        console.error(
+          `  Could not save message repair draft: ${sanitizeTerminalText(writeError.message)}`,
+        );
+      }
+    }
+    if (!raw) {
+      console.log(`\n  ${indentError(err)}\n`);
+      err.reported = true;
+      throw err;
+    }
   }
 
   let groups;
