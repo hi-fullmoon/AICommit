@@ -14,6 +14,56 @@ import {
 import { getStagedChangedFiles } from '../src/split.js';
 import { cleanupGitSpools } from '../src/git-spool.js';
 import { compactLocalPlanFacts, localInputBytes, localPlanBatches } from '../src/local-analysis.js';
+import { buildCommitMessages } from '../src/api.js';
+import { estimateTokens } from '../src/analysis-budget.js';
+
+test('real Git hunks retain behavior changes after imports and fit the complete request budget', async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'aicommit-local-budget-'));
+  t.after(() => {
+    cleanupGitSpools();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+  const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+  const imports = Array.from(
+    { length: 60 },
+    (_, i) => `import value${i} from './value${i}.js';\n`,
+  ).join('');
+  const separator = '\n'.repeat(10);
+  writeFileSync(
+    join(cwd, 'calculate.js'),
+    imports + separator + 'export function calculate(value) {\n  return value;\n}\n',
+  );
+  git('add', '-A');
+  git('commit', '-qm', 'initial');
+  writeFileSync(
+    join(cwd, 'calculate.js'),
+    imports.replaceAll('./value', './updated') +
+      separator +
+      'export function calculate(value) {\n  return Math.max(0, value);\n}\n',
+  );
+  git('add', '-A');
+  const cfg = config();
+  cfg.largeChange.chunkInputTokens = 3000;
+  cfg.analysisBudget.limits.chunkInputTokens = 3000;
+  cfg.repositoryContextText = '项目提交约定：保留清晰的行为描述。'.repeat(45);
+  const capture = captureChanges(
+    [['diff', '--staged', '--unified=1']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    cfg,
+  );
+  const result = await analyzeChanges(cfg, capture);
+  assert.match(result.facts[0].evidence, /Math\.max\(0, value\)/);
+  assert.ok(Buffer.byteLength(result.facts[0].evidence) <= 900);
+  const requestTokens = estimateTokens(
+    JSON.stringify(buildCommitMessages(cfg, result.summary).messages),
+  );
+  assert.ok(requestTokens <= cfg.analysisBudget.limits.chunkInputTokens);
+  assert.match(result.summary, /not complete semantic analysis/);
+});
 
 function config() {
   return analysisConfig({
