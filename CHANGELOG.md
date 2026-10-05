@@ -4,6 +4,16 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.7] - 2026-10-05
+
+### Changed
+
+- Large-change local analysis now selects bounded excerpts across change hunks, prioritizing behavior changes over imports and comments.
+
+### Fixed
+
+- Local change summaries now fit the complete commit request input budget, including system policy, repository context, and JSON envelopes.
+
 ## [2.6.6] - 2026-09-21
 
 ### Fixed
@@ -273,7 +283,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.6...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.7...HEAD
+[2.6.7]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.7
 [2.6.6]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.6
 [2.6.5]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.5
 [2.6.4]: https://github.com/hi-fullmoon/AICommit/releases/tag/v2.6.4

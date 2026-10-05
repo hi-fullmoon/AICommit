@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { isLockFile, matchStripPattern } from './git.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
+import { buildCommitMessages } from './api.js';
+import { estimateTokens } from './analysis-budget.js';
 
 // These are evidence-selection rules, not exclusions from Git or secret scans.
 export function isGeneratedFile(path) {
@@ -117,6 +119,16 @@ export function localOverview(config, facts) {
     samples: [],
   };
   const cap = localInputBytes(config);
+  const fits = () => {
+    const text = JSON.stringify(data);
+    return (
+      Buffer.byteLength(text) <= cap &&
+      estimateTokens(JSON.stringify(buildCommitMessages(config, text).messages)) <=
+        (config.analysisBudget?.limits.chunkInputTokens ||
+          config.largeChange?.chunkInputTokens ||
+          12000)
+    );
+  };
   let sampledFiles = 0;
   const seen = new Set();
   const ordered = ranked(facts);
@@ -145,17 +157,18 @@ export function localOverview(config, facts) {
     if (data.samples.length >= 16) break;
     const sample = summaryOf(fact);
     data.samples.push(sample);
-    if (Buffer.byteLength(JSON.stringify(data)) > cap) {
+    data.omittedGroups--;
+    if (!fits()) {
       data.samples.pop();
+      data.omittedGroups++;
       continue;
     }
     if (fact.evidence) sampledFiles++;
-    data.omittedGroups--;
   }
   // A tiny configured budget may not even fit aggregate metadata. Fail before
   // sending rather than silently slicing JSON or dropping the uncertainty notice.
   const text = JSON.stringify(data);
-  if (Buffer.byteLength(text) > cap)
+  if (!fits())
     throw fail(
       ERROR_CATEGORIES.CONFIG,
       'Local change inventory does not fit the input budget. Increase largeChange.chunkInputTokens or maxDiffChars.',
@@ -172,30 +185,61 @@ export function analyzeLocally(config, capture, protect, previews) {
         hash: createHash('sha256'),
         evidence: '',
         textual: false,
+        excerpts: [],
+        excerpt: '',
+        score: 0,
       },
     ]),
   );
+  const finishExcerpt = (record) => {
+    if (!record.excerpt) return;
+    record.excerpts.push({ text: record.excerpt, score: record.score });
+    record.excerpts.sort((a, b) => b.score - a.score);
+    record.excerpts.length = Math.min(record.excerpts.length, 8);
+    record.excerpt = '';
+    record.score = 0;
+  };
   for (const unit of capture.units(protect, previews)) {
     if (unit.metadataOnly) continue;
     const record = records.get(unit.fileId);
     // Tracked fragments carry Git headers; untracked fragments are plain text.
     const section = unit.id.match(/S\d+(?=P\d+$)/)?.[0];
     if (section && section !== record.section) {
+      finishExcerpt(record);
       record.section = section;
       record.inHunk = false;
     }
     for (const line of unit.text.split(/(?<=\n)/)) {
       if (section) {
-        if (line.startsWith('@@')) record.inHunk = true;
+        if (line.startsWith('@@')) {
+          finishExcerpt(record);
+          record.inHunk = true;
+        }
         if (!record.inHunk || !/^[+-]/.test(line)) continue;
       }
       record.hash.update(line);
       record.textual = true;
-      const remaining = 900 - Buffer.byteLength(record.evidence);
-      if (remaining > 3) record.evidence += clip(line, remaining);
+      // Keep bounded candidates across hunks instead of spending the entire
+      // evidence allowance on imports at the beginning of a file.
+      const remaining = 450 - Buffer.byteLength(record.excerpt);
+      if (remaining > 3) {
+        record.excerpt += clip(line, remaining);
+        record.score = Math.max(
+          record.score,
+          /^[+-]\s*(?:import\b|export\s+\{|\/\/|\*|$)/.test(line) ? 1 : 4,
+        );
+      }
+      if (Buffer.byteLength(record.excerpt) >= 447) finishExcerpt(record);
     }
   }
   const grouped = new Map();
+  for (const record of records.values()) {
+    finishExcerpt(record);
+    record.evidence = record.excerpts
+      .slice(0, 3)
+      .map((excerpt) => clip(excerpt.text, 300))
+      .join('');
+  }
   for (const { file, hash, evidence, textual } of records.values()) {
     const kind = category(file, config);
     const module = moduleOf(file.addPaths?.at(-1) || file.path);
