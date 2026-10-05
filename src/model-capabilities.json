@@ -1,0 +1,2009 @@
+{
+  "source": "@earendil-works/pi-ai@0.85.0; capability metadata snapshot, MIT",
+  "profiles": [
+    {
+      "reasoning": false,
+      "contextWindow": 8192,
+      "maxTokens": 8192
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 1047576,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": false,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 128000,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": null,
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 128000,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": false,
+      "thinkingLevelMap": {
+        "off": null,
+        "xhigh": "xhigh"
+      },
+      "contextWindow": 128000,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 128000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 272000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1050000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "contextWindow": 272000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 128000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 200000,
+      "maxTokens": 100000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 384000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 384000
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 200000,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 64000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 64000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 65535
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 300000,
+      "maxTokens": 5120
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 5120
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 1000000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 80000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 2000000,
+      "maxTokens": 30000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 4000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 256000,
+      "maxTokens": 64000
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 163840,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 163840,
+      "maxTokens": 147456
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 161000,
+      "maxTokens": 144900
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 64000,
+      "maxTokens": 16000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 163840,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 131072,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 163840,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1024000,
+      "maxTokens": 384000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 384000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 512000,
+      "maxTokens": 460800
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1048576,
+      "maxTokens": 65535
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 65535
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 65536,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 131072,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 128000,
+      "maxTokens": 50000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 260000,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 144000
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 65536,
+      "maxTokens": 8192
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1048756,
+      "maxTokens": 262144
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 115200
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 327680,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 40000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 204800,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 200000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 196608,
+      "maxTokens": 176947
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 524288,
+      "maxTokens": 512000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 524288,
+      "maxTokens": 471859
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1048576,
+      "maxTokens": 943718
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 256000,
+      "maxTokens": 204800
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 209715
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 131072,
+      "maxTokens": 104857
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 102400
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 209715
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 32768,
+      "maxTokens": 26214
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 32768,
+      "maxTokens": 26214
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 65536,
+      "maxTokens": 52428
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 131072,
+      "maxTokens": 100352
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 100352
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 100352
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 256000,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": null,
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": null,
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 256000,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 16385,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 4095,
+      "maxTokens": 3685
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 8191,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": false,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh"
+      },
+      "contextWindow": 128000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1050000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "contextWindow": 1050000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 400000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 100000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 200000,
+      "maxTokens": 100000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 2000000,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 4096
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 30000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1048576,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 32768,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 32768,
+      "maxTokens": 29491
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 1000000,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 40960,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 131072,
+      "maxTokens": 8192
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 32000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 81920,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 1000000,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 131072,
+      "maxTokens": 32768
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 262144,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 81920
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": null,
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 262144
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": null,
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1010000,
+      "maxTokens": 909000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": null,
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 16384,
+      "maxTokens": 14745
+    },
+    {
+      "reasoning": false,
+      "contextWindow": 256000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 65536
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 256000,
+      "maxTokens": 230400
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 64000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 524288,
+      "maxTokens": 471859
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 524288,
+      "maxTokens": 262144
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 262144
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 131072,
+      "maxTokens": 117964
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 524288,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 2000000,
+      "maxTokens": 1800000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 900000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "contextWindow": 500000,
+      "maxTokens": 450000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 500000,
+      "maxTokens": 450000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null
+      },
+      "contextWindow": 256000,
+      "maxTokens": 230400
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 131072,
+      "maxTokens": 98304
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 65536,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 204800,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 202752,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 202752,
+      "maxTokens": 16384
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 198000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 128000
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 256000,
+      "maxTokens": 230400
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 262144
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 131072
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048575,
+      "maxTokens": 943717
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 393216
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      },
+      "contextWindow": 262144,
+      "maxTokens": 235929
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1024000,
+      "maxTokens": 384000,
+      "requiresReasoningContentOnAssistantMessages": true
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718,
+      "requiresReasoningContentOnAssistantMessages": true
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 384000,
+      "requiresReasoningContentOnAssistantMessages": true
+    },
+    {
+      "reasoning": true,
+      "contextWindow": 262144,
+      "maxTokens": 235929,
+      "requiresReasoningContentOnAssistantMessages": true
+    },
+    {
+      "reasoning": true,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 393216,
+      "requiresReasoningContentOnAssistantMessages": true
+    }
+  ],
+  "providers": {
+    "openai": {
+      "gpt-4": 0,
+      "gpt-4-turbo": 1,
+      "gpt-4.1": 2,
+      "gpt-4.1-mini": 2,
+      "gpt-4.1-nano": 2,
+      "gpt-4o": 3,
+      "gpt-4o-2024-05-13": 1,
+      "gpt-4o-2024-08-06": 3,
+      "gpt-4o-2024-11-20": 3,
+      "gpt-4o-mini": 3,
+      "gpt-5": 4,
+      "gpt-5-chat-latest": 5,
+      "gpt-5-mini": 4,
+      "gpt-5-nano": 4,
+      "gpt-5-pro": 6,
+      "gpt-5.1": 7,
+      "gpt-5.2": 8,
+      "gpt-5.2-chat-latest": 9,
+      "gpt-5.2-pro": 10,
+      "gpt-5.3-chat-latest": 11,
+      "gpt-5.3-codex": 8,
+      "gpt-5.3-codex-spark": 12,
+      "gpt-5.4": 13,
+      "gpt-5.4-mini": 8,
+      "gpt-5.4-nano": 8,
+      "gpt-5.4-pro": 14,
+      "gpt-5.5": 13,
+      "gpt-5.5-pro": 14,
+      "gpt-5.6-luna": 15,
+      "gpt-5.6-sol": 15,
+      "gpt-5.6-terra": 15,
+      "gpt-realtime-2.1": 16,
+      "o1": 17,
+      "o1-pro": 17,
+      "o3": 17,
+      "o3-mini": 17,
+      "o3-pro": 17,
+      "o4-mini": 17
+    },
+    "deepseek": {
+      "deepseek-v4-flash": 18,
+      "deepseek-v4-flash-vision-exp": 18,
+      "deepseek-v4-pro": 19
+    },
+    "openrouter": {
+      "anthropic/claude-3-haiku": 20,
+      "anthropic/claude-fable-5": 21,
+      "anthropic/claude-fable-5.1": 21,
+      "anthropic/claude-haiku-4.5": 22,
+      "anthropic/claude-opus-4": 23,
+      "anthropic/claude-opus-4.1": 23,
+      "anthropic/claude-opus-4.5": 22,
+      "anthropic/claude-opus-4.6": 24,
+      "anthropic/claude-opus-4.7": 25,
+      "anthropic/claude-opus-4.8": 25,
+      "anthropic/claude-opus-5": 21,
+      "anthropic/claude-sonnet-4": 22,
+      "anthropic/claude-sonnet-4.5": 26,
+      "anthropic/claude-sonnet-4.6": 24,
+      "anthropic/claude-sonnet-5": 25,
+      "aion-labs/aion-2.0": 27,
+      "aion-labs/aion-3.0": 27,
+      "aion-labs/aion-3.0-mini": 27,
+      "amazon/nova-2-lite-v1": 28,
+      "amazon/nova-lite-v1": 29,
+      "amazon/nova-micro-v1": 30,
+      "amazon/nova-premier-v1": 31,
+      "amazon/nova-pro-v1": 29,
+      "anthropic/claude-fable-5.1:batch": 21,
+      "anthropic/claude-fable-5:batch": 21,
+      "anthropic/claude-haiku-4.5:batch": 22,
+      "anthropic/claude-opus-4.1:batch": 23,
+      "anthropic/claude-opus-4.5:batch": 22,
+      "anthropic/claude-opus-4.6:batch": 24,
+      "anthropic/claude-opus-4.7:batch": 25,
+      "anthropic/claude-opus-4.8:batch": 25,
+      "anthropic/claude-opus-5:batch": 25,
+      "anthropic/claude-sonnet-4.5:batch": 26,
+      "anthropic/claude-sonnet-4.6:batch": 24,
+      "anthropic/claude-sonnet-5:batch": 25,
+      "arcee-ai/trinity-large-thinking": 32,
+      "auto": 33,
+      "bytedance-seed/seed-1.6": 34,
+      "bytedance-seed/seed-1.6-flash": 34,
+      "bytedance-seed/seed-2-1-turbo": 35,
+      "bytedance-seed/seed-2.0-code": 36,
+      "bytedance-seed/seed-2.0-lite": 37,
+      "bytedance-seed/seed-2.0-mini": 37,
+      "cohere/command-r-08-2024": 38,
+      "cohere/command-r-plus-08-2024": 38,
+      "cohere/north-mini-code:free": 39,
+      "deepseek/deepseek-chat": 40,
+      "deepseek/deepseek-chat-v3-0324": 41,
+      "deepseek/deepseek-chat-v3.1": 42,
+      "deepseek/deepseek-r1": 43,
+      "deepseek/deepseek-r1-0528": 44,
+      "deepseek/deepseek-v3.1-terminus": 45,
+      "deepseek/deepseek-v3.2": 46,
+      "deepseek/deepseek-v3.2-exp": 46,
+      "deepseek/deepseek-v4-flash": 171,
+      "deepseek/deepseek-v4-flash-0731": 172,
+      "deepseek/deepseek-v4-flash-0731:batch": 172,
+      "deepseek/deepseek-v4-flash-vision-exp": 173,
+      "deepseek/deepseek-v4-pro": 171,
+      "deepseek/deepseek-v4-pro-0813": 171,
+      "deepseek/deepseek-v4-pro-0813:batch": 172,
+      "dots-studio/dots-3-note-preview:free": 50,
+      "google/gemini-2.5-flash": 51,
+      "google/gemini-2.5-flash-lite": 51,
+      "google/gemini-2.5-flash-lite:batch": 51,
+      "google/gemini-2.5-flash:batch": 51,
+      "google/gemini-2.5-pro": 52,
+      "google/gemini-2.5-pro-preview": 52,
+      "google/gemini-2.5-pro-preview-05-06": 53,
+      "google/gemini-2.5-pro:batch": 52,
+      "google/gemini-3-flash-preview": 54,
+      "google/gemini-3-flash-preview:batch": 54,
+      "google/gemini-3-pro-image": 55,
+      "google/gemini-3.1-flash-lite": 54,
+      "google/gemini-3.1-flash-lite-preview": 54,
+      "google/gemini-3.1-flash-lite:batch": 54,
+      "google/gemini-3.1-pro-preview": 56,
+      "google/gemini-3.1-pro-preview-customtools": 56,
+      "google/gemini-3.1-pro-preview:batch": 56,
+      "google/gemini-3.5-flash": 57,
+      "google/gemini-3.5-flash-lite": 57,
+      "google/gemini-3.5-flash-lite:batch": 57,
+      "google/gemini-3.5-flash:batch": 57,
+      "google/gemini-3.6-flash": 57,
+      "google/gemini-3.6-flash:batch": 57,
+      "google/gemini-3.7-flash": 56,
+      "google/gemini-3.7-flash:batch": 56,
+      "google/gemini-3.8-flash": 56,
+      "google/gemini-3.8-flash:batch": 56,
+      "google/gemma-3-12b-it": 58,
+      "google/gemma-3-27b-it": 59,
+      "google/gemma-4-26b-a4b-it": 60,
+      "google/gemma-4-26b-a4b-it:free": 34,
+      "google/gemma-4-31b-it": 60,
+      "google/gemma-4-31b-it:batch": 35,
+      "google/gemma-4-31b-it:free": 34,
+      "ibm-granite/granite-4.1-8b": 59,
+      "ibm-granite/granite-4.2-8b": 61,
+      "inception/mercury-2": 62,
+      "inception/mercury-2.5-preview": 63,
+      "inclusionai/ling-3.0-flash": 34,
+      "inclusionai/ling-3.0-flash-fin": 35,
+      "inclusionai/ling-3.0-flash-fin:free": 34,
+      "kwaipilot/kat-coder-pro-v2": 64,
+      "kwaipilot/kat-coder-pro-v2.5": 65,
+      "liquid/lfm-2.5-2.6b:free": 66,
+      "meituan/longcat-2.0": 67,
+      "meta-llama/llama-3.1-70b-instruct": 58,
+      "meta-llama/llama-3.1-8b-instruct": 59,
+      "meta-llama/llama-3.3-70b-instruct": 58,
+      "meta-llama/llama-4-maverick": 68,
+      "meta-llama/llama-4-scout": 69,
+      "meta/muse-glimmer-30b": 70,
+      "meta/muse-glimmer-30b:batch": 70,
+      "meta/muse-spark-1.1": 71,
+      "meta/muse-spark-1.2": 71,
+      "meta/muse-spark-1.2-contributor": 71,
+      "meta/muse-spark-1.3": 71,
+      "meta/muse-spark-1.3-contributor": 71,
+      "minimax/minimax-m1": 72,
+      "minimax/minimax-m2": 73,
+      "minimax/minimax-m2.1": 73,
+      "minimax/minimax-m2.5": 74,
+      "minimax/minimax-m2.7": 73,
+      "minimax/minimax-m2.7:free": 75,
+      "minimax/minimax-m3": 76,
+      "minimax/minimax-m3:batch": 77,
+      "minimax/minimax-m3:free": 78,
+      "mistralai/codestral-2508": 79,
+      "mistralai/devstral-2512": 80,
+      "mistralai/ministral-14b-2512": 80,
+      "mistralai/ministral-3b-2512": 81,
+      "mistralai/ministral-8b-2512": 80,
+      "mistralai/mistral-large": 82,
+      "mistralai/mistral-large-2407": 81,
+      "mistralai/mistral-large-2512": 80,
+      "mistralai/mistral-medium-3": 81,
+      "mistralai/mistral-medium-3-5": 83,
+      "mistralai/mistral-medium-3-5:batch": 84,
+      "mistralai/mistral-medium-3.1": 81,
+      "mistralai/mistral-nemo": 58,
+      "mistralai/mistral-saba": 85,
+      "mistralai/mistral-small-2603": 83,
+      "mistralai/mistral-small-3.2-24b-instruct": 3,
+      "mistralai/mixtral-8x22b-instruct": 86,
+      "mistralai/voxtral-small-24b-2507": 85,
+      "moonshotai/kimi-k2": 87,
+      "moonshotai/kimi-k2-0905": 88,
+      "moonshotai/kimi-k2-thinking": 89,
+      "moonshotai/kimi-k2.5": 90,
+      "moonshotai/kimi-k2.6": 174,
+      "moonshotai/kimi-k2.7-code": 91,
+      "moonshotai/kimi-k3": 92,
+      "moonshotai/kimi-k3:batch": 93,
+      "nex-agi/nex-n2-mini": 35,
+      "nex-agi/nex-n2-pro": 35,
+      "nvidia/nemotron-3-nano-30b-a3b": 35,
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": 94,
+      "nvidia/nemotron-3-super-120b-a12b": 95,
+      "nvidia/nemotron-3-super-120b-a12b:free": 96,
+      "nvidia/nemotron-3-ultra-550b-a55b": 97,
+      "nvidia/nemotron-3-ultra-550b-a55b:free": 98,
+      "nvidia/nemotron-3.5-lightning": 99,
+      "nvidia/nemotron-3.5-lightning:free": 100,
+      "openai/gpt-3.5-turbo": 101,
+      "openai/gpt-3.5-turbo-0613": 102,
+      "openai/gpt-3.5-turbo-16k": 101,
+      "openai/gpt-3.5-turbo:batch": 101,
+      "openai/gpt-4": 103,
+      "openai/gpt-4-turbo": 1,
+      "openai/gpt-4-turbo-preview": 1,
+      "openai/gpt-4-turbo:batch": 1,
+      "openai/gpt-4.1": 2,
+      "openai/gpt-4.1-mini": 2,
+      "openai/gpt-4.1-mini:batch": 2,
+      "openai/gpt-4.1-nano": 2,
+      "openai/gpt-4.1-nano:batch": 2,
+      "openai/gpt-4.1:batch": 2,
+      "openai/gpt-4o": 3,
+      "openai/gpt-4o-2024-05-13": 1,
+      "openai/gpt-4o-2024-08-06": 3,
+      "openai/gpt-4o-2024-11-20": 3,
+      "openai/gpt-4o-mini": 3,
+      "openai/gpt-4o-mini-2024-07-18": 3,
+      "openai/gpt-4o-mini:batch": 3,
+      "openai/gpt-4o:batch": 3,
+      "openai/gpt-5": 4,
+      "openai/gpt-5-mini": 4,
+      "openai/gpt-5-mini:batch": 4,
+      "openai/gpt-5-nano": 4,
+      "openai/gpt-5-nano:batch": 4,
+      "openai/gpt-5-pro": 6,
+      "openai/gpt-5-pro:batch": 6,
+      "openai/gpt-5.1": 7,
+      "openai/gpt-5.1-codex": 104,
+      "openai/gpt-5.1-codex-max": 105,
+      "openai/gpt-5.1-codex-mini": 7,
+      "openai/gpt-5.1:batch": 7,
+      "openai/gpt-5.2": 8,
+      "openai/gpt-5.2-chat": 106,
+      "openai/gpt-5.2-codex": 105,
+      "openai/gpt-5.2-pro": 10,
+      "openai/gpt-5.2-pro:batch": 10,
+      "openai/gpt-5.2:batch": 8,
+      "openai/gpt-5.3-codex": 8,
+      "openai/gpt-5.4": 107,
+      "openai/gpt-5.4-mini": 8,
+      "openai/gpt-5.4-mini:batch": 8,
+      "openai/gpt-5.4-nano": 8,
+      "openai/gpt-5.4-nano:batch": 8,
+      "openai/gpt-5.4-pro": 14,
+      "openai/gpt-5.4-pro:batch": 14,
+      "openai/gpt-5.4:batch": 107,
+      "openai/gpt-5.5": 107,
+      "openai/gpt-5.5-pro": 14,
+      "openai/gpt-5.5-pro:batch": 14,
+      "openai/gpt-5.5:batch": 107,
+      "openai/gpt-5.6-luna": 108,
+      "openai/gpt-5.6-luna-pro": 108,
+      "openai/gpt-5.6-luna-pro:batch": 108,
+      "openai/gpt-5.6-luna:batch": 108,
+      "openai/gpt-5.6-sol": 108,
+      "openai/gpt-5.6-sol-pro": 108,
+      "openai/gpt-5.6-sol-pro:batch": 108,
+      "openai/gpt-5.6-sol:batch": 108,
+      "openai/gpt-5.6-terra": 108,
+      "openai/gpt-5.6-terra-pro": 108,
+      "openai/gpt-5.6-terra-pro:batch": 108,
+      "openai/gpt-5.6-terra:batch": 108,
+      "openai/gpt-5:batch": 4,
+      "openai/gpt-audio": 3,
+      "openai/gpt-audio-mini": 3,
+      "openai/gpt-chat-latest": 109,
+      "openai/gpt-oss-120b": 110,
+      "openai/gpt-oss-120b:batch": 110,
+      "openai/gpt-oss-20b": 110,
+      "openai/gpt-oss-safeguard-20b": 111,
+      "openai/o1": 112,
+      "openai/o3": 112,
+      "openai/o3-mini": 112,
+      "openai/o3-mini-high": 113,
+      "openai/o3-mini:batch": 112,
+      "openai/o3-pro": 112,
+      "openai/o3:batch": 112,
+      "openai/o4-mini": 112,
+      "openai/o4-mini-high": 113,
+      "openai/o4-mini:batch": 112,
+      "openrouter/auto": 114,
+      "openrouter/auto-beta": 114,
+      "openrouter/free": 115,
+      "openrouter/fusion": 116,
+      "poolside/laguna-s-2.1": 117,
+      "poolside/laguna-s-2.1:free": 34,
+      "poolside/laguna-xs-2.1": 34,
+      "poolside/laguna-xs-2.1:free": 34,
+      "qwen/qwen-2.5-72b-instruct": 118,
+      "qwen/qwen-2.5-7b-instruct": 119,
+      "qwen/qwen-plus": 120,
+      "qwen/qwen-plus-2025-07-28": 120,
+      "qwen/qwen3-14b": 121,
+      "qwen/qwen3-235b-a22b": 122,
+      "qwen/qwen3-235b-a22b-2507": 65,
+      "qwen/qwen3-235b-a22b-thinking-2507": 123,
+      "qwen/qwen3-30b-a3b": 121,
+      "qwen/qwen3-30b-a3b-instruct-2507": 124,
+      "qwen/qwen3-30b-a3b-thinking-2507": 125,
+      "qwen/qwen3-32b": 121,
+      "qwen/qwen3-8b": 122,
+      "qwen/qwen3-coder": 126,
+      "qwen/qwen3-coder-30b-a3b-instruct": 65,
+      "qwen/qwen3-coder-flash": 127,
+      "qwen/qwen3-coder-next": 65,
+      "qwen/qwen3-coder-plus": 127,
+      "qwen/qwen3-max": 126,
+      "qwen/qwen3-max-thinking": 128,
+      "qwen/qwen3-next-80b-a3b-instruct": 65,
+      "qwen/qwen3-next-80b-a3b-thinking": 27,
+      "qwen/qwen3-vl-235b-a22b-instruct": 129,
+      "qwen/qwen3-vl-235b-a22b-thinking": 27,
+      "qwen/qwen3-vl-30b-a3b-instruct": 130,
+      "qwen/qwen3-vl-30b-a3b-thinking": 27,
+      "qwen/qwen3-vl-32b-instruct": 129,
+      "qwen/qwen3-vl-8b-instruct": 129,
+      "qwen/qwen3-vl-8b-thinking": 27,
+      "qwen/qwen3.5-122b-a10b": 131,
+      "qwen/qwen3.5-27b": 128,
+      "qwen/qwen3.5-35b-a3b": 35,
+      "qwen/qwen3.5-397b-a17b": 35,
+      "qwen/qwen3.5-9b": 35,
+      "qwen/qwen3.5-9b:batch": 35,
+      "qwen/qwen3.5-flash-02-23": 100,
+      "qwen/qwen3.5-plus-02-15": 100,
+      "qwen/qwen3.5-plus-20260420": 100,
+      "qwen/qwen3.6-27b": 35,
+      "qwen/qwen3.6-35b-a3b": 35,
+      "qwen/qwen3.6-flash": 100,
+      "qwen/qwen3.6-max-preview": 128,
+      "qwen/qwen3.6-plus": 100,
+      "qwen/qwen3.7-flash": 100,
+      "qwen/qwen3.7-max": 132,
+      "qwen/qwen3.7-plus": 132,
+      "qwen/qwen3.8-2.4t-a95b": 133,
+      "qwen/qwen3.8-2.4t-a95b:batch": 134,
+      "qwen/qwen3.8-27b": 135,
+      "qwen/qwen3.8-flash": 132,
+      "qwen/qwen3.8-max": 136,
+      "rekaai/reka-edge": 137,
+      "relace/relace-search": 138,
+      "sakana/fugu-ultra": 139,
+      "sakana/sakana-namazu": 140,
+      "sao10k/l3.1-euryale-70b": 58,
+      "stepfun/step-3.5-flash": 141,
+      "stepfun/step-3.7-flash": 142,
+      "tencent/hy3": 143,
+      "tencent/hy3-preview": 144,
+      "tencent/hy4-preview": 145,
+      "thedrummer/unslopnemo-12b": 85,
+      "thinkingmachines/inkling": 146,
+      "thinkingmachines/inkling-small": 147,
+      "thinkingmachines/inkling-small:batch": 146,
+      "thinkingmachines/inkling-small:free": 148,
+      "thinkingmachines/inkling:batch": 146,
+      "thinkingmachines/inkling:free": 148,
+      "upstage/solar-pro-3": 149,
+      "upstage/solar-pro4": 150,
+      "x-ai/grok-4.20": 151,
+      "x-ai/grok-4.3": 152,
+      "x-ai/grok-4.3:batch": 152,
+      "x-ai/grok-4.5": 153,
+      "x-ai/grok-4.6": 154,
+      "x-ai/grok-build-0.1": 155,
+      "xiaomi/mimo-v2.5": 117,
+      "xiaomi/mimo-v2.5-pro": 117,
+      "z-ai/glm-4.5": 156,
+      "z-ai/glm-4.5-air": 156,
+      "z-ai/glm-4.5v": 157,
+      "z-ai/glm-4.6": 158,
+      "z-ai/glm-4.6v": 45,
+      "z-ai/glm-4.7": 159,
+      "z-ai/glm-4.7-flash": 160,
+      "z-ai/glm-5": 161,
+      "z-ai/glm-5-turbo": 159,
+      "z-ai/glm-5.1": 162,
+      "z-ai/glm-5.2": 163,
+      "z-ai/glm-5.2:free": 164,
+      "z-ai/glm-5.3": 165,
+      "z-ai/glm-5.3-flash": 166,
+      "z-ai/glm-5.3-flash:batch": 167,
+      "z-ai/glm-5v-turbo": 159,
+      "~anthropic/claude-fable-latest": 21,
+      "~anthropic/claude-haiku-latest": 22,
+      "~anthropic/claude-opus-latest": 25,
+      "~anthropic/claude-sonnet-latest": 25,
+      "~deepseek/deepseek-v4-flash-latest": 175,
+      "~google/gemini-flash-latest": 56,
+      "~google/gemini-pro-latest": 56,
+      "~moonshotai/kimi-latest": 92,
+      "~openai/gpt-latest": 108,
+      "~openai/gpt-mini-latest": 8,
+      "~x-ai/grok-latest": 154,
+      "~z-ai/glm-flash-latest": 169,
+      "~z-ai/glm-latest": 170
+    }
+  }
+}

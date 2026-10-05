@@ -24,7 +24,7 @@ const fixtures = await Promise.all(
   fixtureFiles.map(async (name) => JSON.parse(await readFile(join(fixtureDir, name), 'utf8'))),
 );
 
-test('provider contract fixture matrix runs through Pi AI and normalizes responses', async () => {
+test('provider contract fixture matrix runs through the OpenAI SDK and normalizes responses', async () => {
   for (const fixture of fixtures) {
     let sent;
     globalThis.fetch = async (url, init) => {

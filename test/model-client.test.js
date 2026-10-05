@@ -27,7 +27,7 @@ const chunk = (delta, finish_reason = null) => ({ choices: [{ index: 0, delta, f
 const sse = (...events) =>
   new Response(events.map(event).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
 
-test('Pi request pins the complete proxy URL and uses only resolved credentials', async () => {
+test('SDK request pins the complete proxy URL and uses only resolved credentials', async () => {
   const authorizations = [];
   globalThis.fetch = async (url, init) => {
     assert.equal(url, config.apiUrl);
@@ -46,7 +46,7 @@ test('Pi request pins the complete proxy URL and uses only resolved credentials'
   assert.equal(keyless.usage, null, 'unreported usage is not reported as zero');
 });
 
-test('Pi parses split UTF-8 SSE frames and cached token usage without double counting', async () => {
+test('SDK parses split UTF-8 SSE frames and cached token usage without double counting', async () => {
   const bytes = Buffer.from(
     [
       chunk({ reasoning_content: '检查变更' }),
@@ -88,7 +88,7 @@ test('Pi parses split UTF-8 SSE frames and cached token usage without double cou
   assert.equal(result.piMessage.usage.cacheRead, 20);
 });
 
-test('Pi textual reasoning metadata is displayed, encrypted metadata stays opaque', async () => {
+test('textual reasoning metadata is displayed, encrypted metadata stays opaque', async () => {
   globalThis.fetch = async () =>
     sse(
       chunk({
@@ -159,7 +159,7 @@ test('MiniMax ordinary deltas and intentional repeats are preserved', async () =
   assert.equal(result.content, 'fix: fix: finish');
 });
 
-test('accepted SSE interruption is not replayed by either Pi or the app', async () => {
+test('accepted SSE interruption is not replayed by either the SDK or the app', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
@@ -183,7 +183,7 @@ test('accepted SSE interruption is not replayed by either Pi or the app', async 
   assert.equal(calls, 1);
 });
 
-test('Pi rejects DONE without a finish reason and never returns its partial content', async () => {
+test('client rejects DONE without a finish reason and never returns its partial content', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
@@ -216,7 +216,7 @@ test('callback errors abort the SDK request without retrying or leaving its sign
   assert.equal(signal.aborted, true);
 });
 
-test('explicit non-streaming compatibility requests still use Pi result normalization', async () => {
+test('explicit non-streaming compatibility requests still normalize results', async () => {
   globalThis.fetch = async (_url, init) => {
     assert.equal(JSON.parse(init.body).stream, false);
     return new Response(
@@ -266,14 +266,14 @@ test('Ollama generate bridge uses prompt/system and retains options and thinking
   assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
 });
 
-test('Node runtime guard matches Pi minimum including the minor boundary', () => {
+test('Node runtime guard retains the supported minimum including the minor boundary', () => {
   for (const version of ['18.20.8', '20.19.0', '22.18.0'])
     assert.equal(nodeSupported(version), false);
   for (const version of ['22.19.0', '22.20.0', '24.0.0'])
     assert.equal(nodeSupported(version), true);
 });
 
-test('Pi catalog distinguishes non-reasoning OpenRouter models from reasoning models', async () => {
+test('capability snapshot distinguishes non-reasoning OpenRouter models from reasoning models', async () => {
   globalThis.fetch = async (_url, init) => {
     const payload = JSON.parse(init.body);
     assert.equal(payload.reasoning, undefined);

@@ -1,4 +1,4 @@
-import { stream as streamPi } from '@earendil-works/pi-ai/api/openai-completions';
+import OpenAI from 'openai';
 import { getProviderAdapter, normalizeUsage } from './providers.js';
 import { ERROR_CATEGORIES, fail } from './errors.js';
 import { completionEvent, normalizeEventStream } from './provider-response.js';
@@ -141,40 +141,6 @@ async function fetchWithRetry(
   throw new Error('Provider request exhausted its retry budget.');
 }
 
-function piContext(messages, model) {
-  return {
-    systemPrompt:
-      messages
-        .filter((m) => m.role === 'system')
-        .map((m) => m.content)
-        .join('\n\n') || undefined,
-    messages: messages
-      .filter((m) => m.role !== 'system')
-      .map((message) => {
-        if (message.role === 'user') return { ...message, timestamp: Date.now() };
-        if (message.role !== 'assistant')
-          throw new Error(`Unsupported generation message role: ${message.role}`);
-        return {
-          role: 'assistant',
-          content: [{ type: 'text', text: message.content }],
-          api: model.api,
-          provider: model.provider,
-          model: model.id,
-          stopReason: 'stop',
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          timestamp: Date.now(),
-        };
-      }),
-  };
-}
-
 function nativeOllamaPayload(payload, apiUrl) {
   const { max_tokens, temperature, stream_options: _streamOptions, options, ...rest } = payload;
   const body = {
@@ -271,6 +237,77 @@ function transport(config, adapter, state) {
   };
 }
 
+function requestPayload(adapter, request, options) {
+  const system = request.messages
+    .filter((message) => message.role === 'system')
+    .map((message) => message.content)
+    .join('\n\n');
+  const messages = request.messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => {
+      if (!['user', 'assistant'].includes(message.role))
+        throw new Error(`Unsupported generation message role: ${message.role}`);
+      return {
+        role: message.role,
+        content: message.content,
+        ...((adapter.id === 'deepseek' ||
+          adapter.model.requiresReasoningContentOnAssistantMessages) &&
+        adapter.model.reasoning &&
+        message.role === 'assistant'
+          ? { reasoning_content: '' }
+          : {}),
+      };
+    });
+  if (system) messages.unshift({ role: 'system', content: system });
+  const payload = {
+    model: adapter.model.id,
+    messages,
+    stream: true,
+    [adapter.capabilities.tokenBudget === 'max_completion_tokens'
+      ? 'max_completion_tokens'
+      : 'max_tokens']: options.maxTokens,
+    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+  };
+  const model = adapter.model;
+  const effort = options.reasoningEffort;
+  const mapped = model.thinkingLevelMap?.[effort] ?? effort;
+  if (model.reasoning) {
+    if (adapter.id === 'deepseek') {
+      if (effort) payload.thinking = { type: 'enabled' };
+      else if (model.thinkingLevelMap?.off !== null) payload.thinking = { type: 'disabled' };
+      if (effort) payload.reasoning_effort = mapped;
+    } else if (adapter.id === 'openrouter') {
+      if (effort) payload.reasoning = { effort: mapped };
+      else if (model.thinkingLevelMap?.off !== null)
+        payload.reasoning = { effort: model.thinkingLevelMap?.off ?? 'none' };
+    } else if (adapter.id === 'openai') {
+      if (effort) payload.reasoning_effort = mapped;
+      else if (typeof model.thinkingLevelMap?.off === 'string')
+        payload.reasoning_effort = model.thinkingLevelMap.off;
+    }
+  }
+  options.onPayload(payload);
+  return payload;
+}
+
+function generationError(err, state, config) {
+  if (err.category) return err;
+  const cause = state.error || err;
+  if (cause.category) return cause;
+  const timeout = timeoutError(cause, config.timeoutMs || DEFAULT_TIMEOUT_MS);
+  if (timeout || /timed out|timeout/i.test(cause.message))
+    return fail(ERROR_CATEGORIES.NETWORK, timeout?.message || cause.message, { cause });
+  if (networkFailure(cause) || /socket|network|fetch failed|terminated|econn/i.test(cause.message))
+    return fail(ERROR_CATEGORIES.NETWORK, cause.message, { cause });
+  if (cause instanceof SyntaxError)
+    return fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      `Provider returned invalid JSON: ${cause.message}`,
+      { cause },
+    );
+  return cause;
+}
+
 export async function requestGeneration(config, request) {
   secureEndpoint(config.apiUrl);
   if (config.analysisBudget) {
@@ -293,97 +330,108 @@ export async function requestGeneration(config, request) {
   const state = { attempts: 0, raw: null, error: null };
   const startedAt = performance.now();
   const controller = new AbortController();
-  const events = streamPi(adapter.model, piContext(request.messages, adapter.model), {
-    ...options,
-    // Pi's transport requires a key even for a keyless server. The placeholder
-    // never leaves the process: transport installs only the resolved config key.
+  // An explicit key prevents SDK environment credential discovery. The transport
+  // removes this placeholder and sends only the resolved AICommit credential.
+  const client = new OpenAI({
     apiKey: config.apiKey || 'aicommit-keyless',
-    headers: adapter.headers,
-    env: {},
+    baseURL: adapter.model.baseUrl,
+    defaultHeaders: adapter.headers,
     maxRetries: 0,
-    timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS,
-    signal: config.analysisBudget
-      ? AbortSignal.any([controller.signal, config.analysisBudget.signal])
-      : controller.signal,
+    timeout: config.timeoutMs || DEFAULT_TIMEOUT_MS,
     fetch: transport(config, adapter, state),
   });
-  let result;
+  let content = '';
+  let reasoningText = '';
+  let responseModel = config.modelId;
+  let reportedUsage = null;
+  let finishReason = null;
   try {
+    const events = await client.chat.completions.create(requestPayload(adapter, request, options), {
+      signal: config.analysisBudget
+        ? AbortSignal.any([controller.signal, config.analysisBudget.signal])
+        : controller.signal,
+    });
     for await (const event of events) {
-      if (event.type === 'thinking_delta') request.stream?.onReasoningDelta?.(event.delta);
-      if (event.type === 'error') {
-        if (state.error) throw state.error;
-        const message = event.error.errorMessage || 'Provider request failed.';
-        if (/without finish_reason/.test(message))
-          throw fail(
-            ERROR_CATEGORIES.RESPONSE_FORMAT,
-            'Streaming response ended before the provider sent a finish_reason. The partial response was discarded; retry the request.',
-          );
-        if (/timed out|timeout/i.test(message))
-          throw fail(
-            ERROR_CATEGORIES.NETWORK,
-            `Request timed out after ${Math.round((config.timeoutMs || DEFAULT_TIMEOUT_MS) / 1000)}s — the model took too long to respond. Raise "timeoutMs" in your config if this keeps happening.`,
-          );
-        if (/socket|network|fetch failed|terminated|econn/i.test(message))
-          throw fail(ERROR_CATEGORIES.NETWORK, message);
-        if (/JSON|Unexpected token/i.test(message))
-          throw fail(
-            ERROR_CATEGORIES.RESPONSE_FORMAT,
-            `Provider returned invalid JSON: ${message}`,
-          );
-        throw fail(ERROR_CATEGORIES.PROVIDER, `Provider request failed: ${message}`);
+      if (event.model) responseModel = event.model;
+      if (event.usage) reportedUsage = event.usage;
+      const choice = event.choices?.find((value) => (value.index ?? 0) === 0);
+      if (!choice) continue;
+      if (!event.usage && choice.usage) reportedUsage = choice.usage;
+      const delta = choice.delta;
+      if (typeof delta?.content === 'string') content += delta.content;
+      if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
+        reasoningText += delta.reasoning_content;
+        request.stream?.onReasoningDelta?.(delta.reasoning_content);
       }
-      if (event.type === 'done') result = event.message;
+      if (choice.finish_reason != null) {
+        finishReason = choice.finish_reason;
+        if (!['stop', 'end', 'length', 'tool_calls', 'function_call'].includes(finishReason))
+          throw fail(ERROR_CATEGORIES.PROVIDER, `Provider finish_reason: ${finishReason}`);
+      }
     }
+    // The SDK treats an AbortError as the end of iteration. An interrupted
+    // response must still fail, even if a finish marker arrived before it.
+    if (events.controller.signal.aborted)
+      throw fail(ERROR_CATEGORIES.NETWORK, 'Provider response stream was aborted.');
+    if (finishReason === null)
+      throw fail(
+        ERROR_CATEGORIES.RESPONSE_FORMAT,
+        'Streaming response ended before the provider sent a finish_reason. The partial response was discarded; retry the request.',
+      );
+  } catch (err) {
+    throw generationError(err, state, config);
   } finally {
     controller.abort();
   }
-  if (!result)
-    throw fail(
-      ERROR_CATEGORIES.RESPONSE_FORMAT,
-      'Provider returned an invalid response: no completed generation.',
-    );
-  const content = result.content
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
-  const reasoning =
-    result.content
-      .filter((block) => block.type === 'thinking')
-      .map((block) => block.thinking)
-      .filter(Boolean)
-      .join('\n') || null;
   const usage = state.raw
-    ? normalizeUsage(state.raw.usage || state.raw)
-    : result.usage.totalTokens ||
-        result.usage.input ||
-        result.usage.output ||
-        result.usage.cacheRead ||
-        result.usage.cacheWrite
-      ? {
-          inputTokens: result.usage.input + result.usage.cacheRead + result.usage.cacheWrite,
-          outputTokens: result.usage.output,
-          totalTokens: result.usage.totalTokens,
-        }
-      : null;
-  const finishReason =
-    state.raw?.choices?.[0]?.finish_reason ??
-    state.raw?.stop_reason ??
-    state.raw?.done_reason ??
-    result.rawStopReason ??
-    result.stopReason;
+    ? normalizeUsage(state.raw.usage || state.raw.choices?.[0]?.usage || state.raw)
+    : normalizeUsage(reportedUsage);
+  const reasoning = reasoningText || null;
+  const cacheRead =
+    reportedUsage?.prompt_tokens_details?.cached_tokens ??
+    reportedUsage?.prompt_cache_hit_tokens ??
+    reportedUsage?.cached_tokens ??
+    0;
+  const cacheWrite = reportedUsage?.prompt_tokens_details?.cache_write_tokens || 0;
+  const blocks = [];
+  if (content) blocks.push({ type: 'text', text: content });
+  if (reasoning) blocks.push({ type: 'thinking', thinking: reasoning });
+  // Retain the previous public result shape for callers during the SDK migration.
+  const assistantMessage = {
+    role: 'assistant',
+    api: 'openai-completions',
+    provider: adapter.id,
+    model: config.modelId,
+    responseModel,
+    content: blocks,
+    usage: {
+      input: Math.max(0, (usage?.inputTokens || 0) - cacheRead - cacheWrite),
+      output: usage?.outputTokens || 0,
+      cacheRead,
+      cacheWrite,
+      totalTokens: usage?.totalTokens || 0,
+    },
+    stopReason: ['tool_calls', 'function_call'].includes(finishReason)
+      ? 'toolUse'
+      : finishReason === 'end'
+        ? 'stop'
+        : finishReason,
+    timestamp: Date.now(),
+  };
   config.analysisBudget?.settle(state.ticket, usage);
   return {
     provider: adapter.id,
-    model: result.responseModel || result.model,
+    model: responseModel,
     content,
     reasoning,
     usage,
-    finishReason,
-    // Preserve callAPI's Chat Completions-shaped compatibility return. Pi's full
-    // normalized message is also available for future protocol-specific callers.
+    finishReason:
+      state.raw?.choices?.[0]?.finish_reason ??
+      state.raw?.stop_reason ??
+      state.raw?.done_reason ??
+      finishReason,
     raw: state.raw || {
-      model: result.responseModel || result.model,
+      model: responseModel,
       choices: [
         { message: { content, reasoning_content: reasoning }, finish_reason: finishReason },
       ],
@@ -395,7 +443,7 @@ export async function requestGeneration(config, request) {
           }
         : null,
     },
-    piMessage: result,
+    piMessage: assistantMessage,
     capabilities: adapter.capabilities,
     attempts: state.attempts,
     latencyMs: performance.now() - startedAt,

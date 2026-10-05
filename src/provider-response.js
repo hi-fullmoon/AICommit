@@ -31,7 +31,7 @@ export function completionEvent(data) {
     );
   const choice = data.choices?.[0];
   const message = choice?.message ?? data.message;
-  const usage = normalizeUsage(data.usage || data);
+  const usage = normalizeUsage(data.usage || choice?.usage || data);
   const finish = choice?.finish_reason ?? data.stop_reason ?? data.done_reason ?? 'stop';
   return {
     model: data.model,
@@ -60,7 +60,7 @@ export function completionEvent(data) {
   };
 }
 
-// Keep provider stop aliases out of Pi's error branch so the business recovery
+// Keep provider stop aliases out of the error branch so the business recovery
 // path receives a truncated result. Unknown and safety-related reasons stay intact.
 function normalizeFinishReason(reason) {
   if (['max_tokens', 'max_output_tokens', 'token_limit'].includes(reason)) return 'length';
@@ -110,7 +110,18 @@ function miniMaxIncrement(value, state) {
 }
 
 function normalizeChunk(value, miniMaxChoices = null) {
-  if (!value || !Array.isArray(value.choices)) return value;
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    (value.choices !== undefined && !Array.isArray(value.choices)) ||
+    value.choices?.some((choice) => !choice || typeof choice !== 'object' || Array.isArray(choice))
+  )
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      'Provider returned an invalid streaming response: expected an object with a choices array.',
+    );
+  if (!value.choices) return value;
   for (const choice of value.choices) {
     if (!choice || typeof choice !== 'object') continue;
     choice.finish_reason = normalizeFinishReason(choice.finish_reason);
@@ -133,14 +144,14 @@ function normalizeChunk(value, miniMaxChoices = null) {
     } else {
       choice.delta = { ...delta, reasoning_content: reasoning };
     }
-    // Retain reasoning_details for Pi's replay metadata while also exposing all
+    // Retain reasoning_details metadata while also exposing all
     // its textual segments as ordinary thinking deltas, including legacy shapes.
   }
   return value;
 }
 
 // eventsource-parser handles UTF-8-decoded SSE framing; this boundary adjusts
-// only vendor fields. Pi still owns model-result assembly and finish validation.
+// only vendor fields. The client assembles results and validates completion.
 // Web Stream piping preserves backpressure, cancellation and body read errors.
 export function normalizeEventStream(response, provider = '') {
   if (!response.body)
@@ -169,6 +180,11 @@ export function normalizeEventStream(response, provider = '') {
                 { cause },
               );
             }
+            if (value?.error || event.event === 'error')
+              throw fail(
+                ERROR_CATEGORIES.PROVIDER,
+                `Provider request failed: ${textValue(value?.error?.message ?? value?.message) || JSON.stringify(value)}`,
+              );
             data = JSON.stringify(normalizeChunk(value, miniMaxChoices));
           }
           controller.enqueue(

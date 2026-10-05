@@ -1,7 +1,27 @@
-import { clampThinkingLevel, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
-import { OPENAI_MODELS } from '@earendil-works/pi-ai/providers/openai.models';
-import { DEEPSEEK_MODELS } from '@earendil-works/pi-ai/providers/deepseek.models';
-import { OPENROUTER_MODELS } from '@earendil-works/pi-ai/providers/openrouter.models';
+import modelCapabilities from './model-capabilities.json' with { type: 'json' };
+
+function getSupportedThinkingLevels(model) {
+  if (!model.reasoning) return ['off'];
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    return mapped !== null && (!['xhigh', 'max'].includes(level) || mapped !== undefined);
+  });
+}
+
+function clampThinkingLevel(model, level) {
+  const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const supported = getSupportedThinkingLevels(model);
+  if (supported.includes(level)) return level;
+  const index = levels.indexOf(level);
+  return (
+    levels.slice(index).find((candidate) => supported.includes(candidate)) ??
+    levels
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => supported.includes(candidate)) ??
+    'off'
+  );
+}
 export const PROVIDER_TYPES = Object.freeze([
   'openai',
   'openrouter',
@@ -86,15 +106,17 @@ export function normalizeUsage(usage) {
   return Object.keys(normalized).length ? normalized : null;
 }
 
-// Read Pi's bundled catalog locally. Credentials and network model discovery remain
+// Read the local capability snapshot. Credentials and network model discovery remain
 // outside this layer; a configured model ID need not be present in the catalog.
 function catalogModel(provider, modelId) {
-  if (provider === 'openai') {
-    return OPENAI_MODELS[modelId] || OPENAI_MODELS[modelId.replace(/-codex$/, '')];
-  }
-  if (provider === 'deepseek') return DEEPSEEK_MODELS[modelId];
-  if (provider === 'openrouter') return OPENROUTER_MODELS[modelId];
-  return undefined;
+  const models = modelCapabilities.providers[provider];
+  if (!models) return undefined;
+  const id = Object.hasOwn(models, modelId)
+    ? modelId
+    : provider === 'openai'
+      ? modelId.replace(/-codex$/, '')
+      : modelId;
+  return Object.hasOwn(models, id) ? modelCapabilities.profiles[models[id]] : undefined;
 }
 
 export function isOpenAIReasoningModel(modelId = '') {
@@ -139,8 +161,7 @@ function resolveEffort(provider, model, reasoning) {
   return level === 'off' ? undefined : level;
 }
 
-// The application selects a Pi model and applies only configuration compatibility
-// overrides. Pi owns message conversion, model effort mapping and wire protocols.
+// Keep vendor parameter mappings separate from the OpenAI SDK transport.
 export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) {
   const provider = detectProviderType(apiUrl, providerType);
   const nativeOllama =
@@ -151,28 +172,14 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
   const model = {
     ...known,
     id: modelId,
-    name: known?.name || modelId,
     api: 'openai-completions',
     provider,
     // The transport pins the full configured URL, including nonstandard proxy paths.
     baseUrl: endpoint(apiUrl)?.origin || '',
     reasoning:
       known?.reasoning ?? (openAIReasoning || ['deepseek', 'openrouter'].includes(provider)),
-    input: ['text'],
-    cost: known?.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: known?.contextWindow || 128000,
     maxTokens: known?.maxTokens || 16384,
-    compat: {
-      ...(known?.api === 'openai-completions' ? known.compat : {}),
-      supportsStore: false,
-      supportsDeveloperRole: false,
-      supportsReasoningEffort: ['openai', 'deepseek', 'openrouter'].includes(provider),
-      supportsUsageInStreaming: provider === 'openai',
-      supportsFinishReason: true,
-      maxTokensField: tokenField,
-      thinkingFormat:
-        provider === 'deepseek' ? 'deepseek' : provider === 'openrouter' ? 'openrouter' : 'openai',
-    },
   };
   const capabilities = Object.freeze({
     streaming: !nativeOllama,
@@ -200,9 +207,8 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
         temperature:
           openAIReasoning || (provider === 'deepseek' && mode === 'on') ? undefined : temperature,
         reasoningEffort,
-        cacheRetention: 'none',
         onPayload(payload) {
-          // Pi's absent effort means "off"; AICommit's auto means server defaults.
+          // Auto preserves server defaults; explicit modes take precedence over extras.
           const reasoningKeys = ['thinking', 'reasoning', 'reasoning_effort'];
           const mapped = Object.fromEntries(
             reasoningKeys
