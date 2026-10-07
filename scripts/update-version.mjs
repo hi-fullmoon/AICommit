@@ -110,7 +110,7 @@ export function updateChangelog(contents, currentVersion, nextVersion, date = ne
   }
   updated = updated.replace(
     oldCompare,
-    `${newCompare}\n[${nextVersion}]: https://github.com/hi-fullmoon/AICommit/releases/tag/v${nextVersion}`,
+    `${newCompare}\n[${nextVersion}]: https://github.com/hi-fullmoon/AICommit/tree/v${nextVersion}`,
   );
   return updated;
 }

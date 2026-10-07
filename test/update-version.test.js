@@ -40,14 +40,14 @@ test('changelog promotion moves Unreleased notes and comparison links', () => {
 - Previous release.
 
 [Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.5.1...HEAD
-[1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
+[1.5.1]: https://github.com/hi-fullmoon/AICommit/tree/v1.5.1
 `;
   const updated = updateChangelog(changelog, '1.5.1', '1.6.0', new Date(2026, 7, 28));
   assert.match(updated, /## \[Unreleased\]\n\n## \[1\.6\.0\] - 2026-08-28/);
   assert.match(updated, /## \[1\.6\.0\][\s\S]*### Added[\s\S]*New release automation/);
   assert.match(updated, /New release automation\.\n\n## \[1\.5\.1\]/);
   assert.match(updated, /compare\/v1\.6\.0\.\.\.HEAD/);
-  assert.match(updated, /\[1\.6\.0\]: .*\/releases\/tag\/v1\.6\.0/);
+  assert.match(updated, /\[1\.6\.0\]: .*\/tree\/v1\.6\.0/);
 });
 
 test('changelog promotion requires release notes', () => {
@@ -99,7 +99,7 @@ test('version update synchronizes npm metadata and docs without release-channel 
 ## [1.5.1] - 2026-08-27
 
 [Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v1.5.1...HEAD
-[1.5.1]: https://github.com/hi-fullmoon/AICommit/releases/tag/v1.5.1
+[1.5.1]: https://github.com/hi-fullmoon/AICommit/tree/v1.5.1
 `,
   );
   await writeFile(
