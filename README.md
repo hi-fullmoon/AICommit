@@ -4,6 +4,27 @@
 
 AI-powered git commit message generator: reads your diff, asks an AI model for a conventional commit message, and commits after your confirmation.
 
+[npm package](https://www.npmjs.com/package/@hifullmoon/aicommit) · [Releases](https://github.com/hi-fullmoon/AICommit/releases) · [Privacy model](docs/privacy.md)
+
+- Use OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, Ollama, or a custom OpenAI-compatible endpoint.
+- Review, edit, or cancel before committing; preview with `--dry-run`.
+- Generate English or Chinese messages and apply shared [team commit policies](docs/team-policy.md).
+
+AICommit runs locally without usage telemetry. Cloud providers receive the selected diff and context; choose a local Ollama endpoint to use a local model. See the [privacy model](docs/privacy.md) for details.
+
+## Quick start
+
+Requires Node.js >= 22.19.0 and Git. Run the last two commands inside your Git repository after configuring a provider:
+
+```bash
+npm install --global @hifullmoon/aicommit
+aicommit setup
+aicommit --dry-run
+aicommit
+```
+
+Cloud providers require your own API credentials. For Ollama, start your local server and install a model before setup.
+
 ## Usage preview
 
 These screenshots were captured from real interactive terminal sessions in this repository. Provider, model, paths, and timings reflect the environment at capture time.

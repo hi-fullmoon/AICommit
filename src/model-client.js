@@ -166,7 +166,13 @@ function nativeOllamaPayload(payload, apiUrl) {
 function transport(config, adapter, state) {
   return async (_sdkUrl, init) => {
     try {
-      const headers = new globalThis.Headers(init.headers);
+      // Build outbound headers from application-owned values: SDK headers can
+      // include arbitrary credentials from OPENAI_CUSTOM_HEADERS.
+      const headers = new globalThis.Headers({
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...adapter.headers,
+      });
       // Never let SDK defaults resolve a different credential or follow a redirect
       // carrying repository content to an endpoint the user did not configure.
       if (config.apiKey) headers.set('Authorization', `Bearer ${config.apiKey}`);
@@ -334,6 +340,9 @@ export async function requestGeneration(config, request) {
   // removes this placeholder and sends only the resolved AICommit credential.
   const client = new OpenAI({
     apiKey: config.apiKey || 'aicommit-keyless',
+    organization: null,
+    project: null,
+    logLevel: 'off',
     baseURL: adapter.model.baseUrl,
     defaultHeaders: adapter.headers,
     maxRetries: 0,

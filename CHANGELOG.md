@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.8] - 2026-10-07
+
+### Fixed
+
+- Provider requests now ignore SDK environment headers and logging settings, preventing unrelated credentials from reaching configured endpoints and keeping JSON output free of SDK logs.
+
 ## [2.6.7] - 2026-10-05
 
 ### Changed
@@ -283,7 +289,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.7...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.8...HEAD
+[2.6.8]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.8
 [2.6.7]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.7
 [2.6.6]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.6
 [2.6.5]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.5

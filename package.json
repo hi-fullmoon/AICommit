@@ -1,7 +1,7 @@
 {
   "name": "@hifullmoon/aicommit",
-  "version": "2.6.7",
-  "description": "Safe, local-first AI commit message generator for Git workflows",
+  "version": "2.6.8",
+  "description": "AI Git commit message CLI for Conventional Commits with OpenAI, DeepSeek, OpenRouter and local Ollama models",
   "type": "module",
   "bin": {
     "aicommit": "./bin/aicommit.js"
@@ -11,6 +11,7 @@
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
+    "README.zh-CN.md",
     "SECURITY.md",
     "bin/",
     "docs/*.md",
@@ -67,11 +68,20 @@
     "commit",
     "ai",
     "cli",
+    "aicommit",
+    "ai-commit",
+    "git-commit",
+    "commit-message",
+    "commit-message-generator",
     "conventional-commits",
+    "developer-tools",
     "openai",
     "deepseek",
     "openrouter",
-    "ollama"
+    "ollama",
+    "minimax",
+    "kimi",
+    "local-llm"
   ],
   "repository": {
     "type": "git",

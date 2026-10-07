@@ -4,6 +4,27 @@
 
 AI 驱动的 Git 提交信息生成器：读取 diff，请 AI 模型生成符合 Conventional Commits 规范的提交信息，并在你确认后执行提交。
 
+[npm 包](https://www.npmjs.com/package/@hifullmoon/aicommit) · [版本发布](https://github.com/hi-fullmoon/AICommit/releases) · [隐私模型](docs/privacy.md)
+
+- 支持 OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code、Ollama 和自定义 OpenAI 兼容端点。
+- 提交前可以检查、编辑或取消；通过 `--dry-run` 预览。
+- 支持中文或英文提交信息，以及共享的[团队提交策略](docs/team-policy.md)。
+
+AICommit 在本地运行，不记录使用指标。使用云端 Provider 时，选定的 diff 和上下文会发送给该 Provider；选择本地 Ollama 端点可以使用本地模型。详见[隐私模型](docs/privacy.md)。
+
+## 快速开始
+
+需要 Node.js >= 22.19.0 和 Git。配置 Provider 后，在你的 Git 仓库内执行最后两条命令：
+
+```bash
+npm install --global @hifullmoon/aicommit
+aicommit setup
+aicommit --dry-run
+aicommit
+```
+
+云端 Provider 需要你自己的 API 凭据。使用 Ollama 时，请先启动本地服务并安装模型，再运行配置向导。
+
 ## 使用预览
 
 以下截图来自本仓库中的真实交互式终端会话。Provider、模型、路径和耗时均为截图时的实际环境。
