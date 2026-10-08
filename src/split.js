@@ -378,7 +378,8 @@ export async function generateSplitPlan(
     `- Body mode: ${policy.body.mode}; at most ${policy.body.maxLines} non-empty lines.`,
     `- Breaking changes: ${policy.breakingChange}.`,
     '- Give every message a short subject line; when the subject alone does not say it all, add a body of bullet lines (what changed and why), each starting with "- " — the same format the single-commit flow produces.',
-    '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Only files marked "(not shown)" may be omitted; they are collected into a final catch-all commit automatically.',
+    '- Assign EVERY file shown in the "Changed files:" list to exactly one group — do not leave any out. Incomplete coverage is rejected; no catch-all commit is created automatically.',
+    '- Describe the actual supported changes in every subject. Do not use generic subjects such as "update remaining files", "commit other files", or "提交剩余其他文件".',
     ...(hunkMode
       ? [
           '- Experimental hunk mode is enabled. A file annotated with hunk IDs may either stay whole in "files", or its IDs may be assigned across groups with "hunks":[{"path":"app.js","ids":["H1"]}].',
@@ -485,53 +486,8 @@ function groupMessage(g, policy) {
   return validateCommitCandidate(message, { policy }).valid ? message : '';
 }
 
-function fallbackCommitMessage(policy) {
-  const type = policy.types.includes('chore') ? 'chore' : policy.types[0];
-  let scope = '';
-  if (policy.scope.mode === 'required') {
-    if (policy.scope.values.length) scope = policy.scope.values[0];
-    else {
-      const disallowed = new Set(policy.scope.disallowedValues || []);
-      const preferred = ['changes', 'repository', 'all'];
-      scope = preferred.find((candidate) => !disallowed.has(candidate)) || '';
-      for (let index = 1; !scope; index++) {
-        const candidate = `fallback-${index}`;
-        if (!disallowed.has(candidate)) scope = candidate;
-      }
-    }
-  }
-  const breaking = policy.breakingChange === 'require' ? '!' : '';
-  const prefix = `${type}${scope ? `(${scope})` : ''}${breaking}: `;
-  const preferred = policy.effectiveLanguage === 'zh' ? '更新其余文件' : 'update remaining files';
-  const available = Math.max(
-    1,
-    Math.min(
-      policy.subject.maxLength,
-      policy.subject.headerMaxLength
-        ? policy.subject.headerMaxLength - [...prefix].length
-        : policy.subject.maxLength,
-    ),
-  );
-  const subject = [...preferred].slice(0, available).join('');
-  const body =
-    policy.body.mode === 'required'
-      ? policy.effectiveLanguage === 'zh'
-        ? '- 包含本次已审核的全部文件变更'
-        : '- Include all reviewed file changes'
-      : '';
-  const message = cleanCommitMessage(`${prefix}${subject}${body ? `\n\n${body}` : ''}`);
-  const validation = validateCommitCandidate(message, { policy });
-  if (!validation.valid) {
-    throw fail(
-      ERROR_CATEGORIES.CONFIG,
-      `Cannot construct a conservative fallback message under commitPolicy: ${validation.errors.map((item) => item.message).join(' ')}`,
-    );
-  }
-  return message;
-}
-
 // Clean up the model's plan: drop unknown/duplicate files, drop empty
-// groups, and sweep any file the model forgot into a final catch-all group.
+// groups, and reject incomplete coverage instead of inventing a commit message.
 export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
   const policy = normalizeCommitPolicy(commitPolicy, language);
   const known = new Map(allFiles.map((f) => [f.path, f]));
@@ -593,11 +549,11 @@ export function normalizePlan(groups, allFiles, language, commitPolicy = null) {
     if (ids.length) leftoverHunks.push({ path: change.path, ids });
   }
   if (leftoverFiles.length || leftoverHunks.length) {
-    result.push({
-      message: fallbackCommitMessage(policy),
-      files: leftoverFiles,
-      ...(leftoverHunks.length ? { hunks: leftoverHunks } : {}),
-    });
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      `Split plan omitted ${leftoverFiles.length} files and ${leftoverHunks.length} hunk assignments with valid commit messages. No commit was created; regenerate the plan or supply messages describing those changes.`,
+      { data: { omittedFiles: leftoverFiles, omittedHunks: leftoverHunks } },
+    );
   }
 
   return result;
@@ -1919,6 +1875,13 @@ export async function splitFlow(
               err.data?.analysis?.exhausted ||
               (!planningConfig.analysisBudget.remainingMs() ? 'time' : null);
             if (!exhausted && !err.data?.fallbackPlan) throw err;
+            if (exhausted) {
+              throw fail(
+                err.category || ERROR_CATEGORIES.PROVIDER,
+                `Large-change planning exhausted its ${exhausted} budget before producing a complete plan. No commit was created; increase the analysis budget or split the changes into smaller batches.`,
+                { cause: err, data: err.data },
+              );
+            }
             if (yes && !dryRun && !allowSingleFallback) {
               throw fail(
                 err.category || ERROR_CATEGORIES.PROVIDER,
@@ -1942,7 +1905,9 @@ export async function splitFlow(
               degradedFrom: planningConfig.largeChange.strategy,
               fallbackReason: exhausted || 'planning_capacity',
             };
-            plan = normalizePlan([], allFiles, config.language, config.commitPolicy);
+            const summary = await summarizeChanges(fallbackConfig, analysis.facts);
+            const generated = await generateCommitMessage(fallbackConfig, summary, 0, '', stream);
+            plan = [{ message: generated.message, files: allFiles.map((file) => file.path) }];
             planReasoning = null;
             const warning = `Large-change planning used one conservative all-files commit after ${exhausted || 'planning capacity'} exhaustion; review the fallback message and grouping.`;
             warnings.push(warning);

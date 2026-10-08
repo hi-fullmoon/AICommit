@@ -1434,7 +1434,7 @@ for (const strategy of ['auto', 'deep'])
     );
   }
 
-test('split falls back to one complete commit when deep-analysis budget is exhausted', async (t) => {
+test('split preserves changes when deep-analysis budget is exhausted even with fallback allowed', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'aicommit-large-fallback-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home');
@@ -1511,7 +1511,7 @@ test('split falls back to one complete commit when deep-analysis budget is exhau
 
   const refused = await runCli(repo, home, ['split', '--scope=staged', '--yes', '--output=json']);
   assert.equal(refused.code, 5, refused.stdout + refused.stderr);
-  assert.match(JSON.parse(refused.stdout).error.message, /--allow-single-fallback/);
+  assert.match(JSON.parse(refused.stdout).error.message, /exhausted its tokens budget/);
   assert.notEqual(git(repo, ['status', '--porcelain']).trim(), '');
   assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '1');
 
@@ -1523,16 +1523,12 @@ test('split falls back to one complete commit when deep-analysis budget is exhau
     '--output=json',
   ]);
 
-  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.equal(result.code, 5, result.stdout + result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.data.analysis.strategy, 'fallback');
-  assert.equal(output.data.analysis.fallbackReason, 'tokens');
-  assert.equal(output.plan.length, 1);
-  assert.equal(new Set(output.plan[0].files).size, 9);
-  assert.ok(output.warnings.some((warning) => warning.includes('conservative all-files')));
+  assert.match(output.error.message, /exhausted its tokens budget/);
   assert.ok(requests > 0);
-  assert.equal(git(repo, ['status', '--porcelain']).trim(), '');
-  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '2');
+  assert.notEqual(git(repo, ['status', '--porcelain']).trim(), '');
+  assert.equal(git(repo, ['rev-list', '--count', 'HEAD']).trim(), '1');
 });
 
 test('deep-analysis CLI resumes cached chunks across failed process runs', async (t) => {

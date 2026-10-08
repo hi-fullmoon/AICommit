@@ -4,6 +4,13 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.9] - 2026-10-08
+
+### Fixed
+
+- Split planning no longer creates generic "update remaining files" commits for omitted changes. Incomplete plans are rejected, and exhausted analysis budgets stop without committing.
+- Single-commit fallback after planning capacity exhaustion now generates its message from change summaries within the remaining analysis budget.
+
 ## [2.6.8] - 2026-10-07
 
 ### Fixed
@@ -289,7 +296,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.8...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.9...HEAD
+[2.6.9]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.9
 [2.6.8]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.8
 [2.6.7]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.7
 [2.6.6]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.6

@@ -94,31 +94,26 @@ test('normalizePlan sanitizes subject and body fields before returning them', ()
   assert.doesNotMatch(result[0].message, /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/);
 });
 
-test('normalizePlan sweeps leftover files into a catch-all group', () => {
+test('normalizePlan rejects omitted files instead of inventing a catch-all message', () => {
   const groups = [{ subject: 'feat: a', files: ['a.js'] }];
-  const result = normalizePlan(groups, [M('a.js'), M('b.js')], 'en');
-  assert.equal(result.length, 2);
-  assert.deepEqual(result[1].files, ['b.js']);
-  assert.match(result[1].message, /update remaining files/);
+  assert.throws(
+    () => normalizePlan(groups, [M('a.js'), M('b.js')], 'en'),
+    (error) => {
+      assert.deepEqual(error.data.omittedFiles, ['b.js']);
+      assert.match(error.message, /No commit was created/);
+      return true;
+    },
+  );
 });
 
-test('fallback plan obeys required scope, body, breaking marker, type, and language', () => {
-  const result = normalizePlan([], [M('a.js')], 'en', {
-    types: ['fix'],
-    scope: {
-      mode: 'required',
-      values: [],
-      disallowedValues: ['changes', 'repository', 'all'],
-    },
-    body: { mode: 'required', maxLines: 1 },
-    breakingChange: 'require',
-    language: 'en',
-  });
-
-  assert.equal(
-    result[0].message,
-    'fix(fallback-1)!: update remaining files\n\n- Include all reviewed file changes',
-  );
+test('normalizePlan rejects empty and policy-invalid plans in either language', () => {
+  for (const language of ['en', 'zh']) {
+    assert.throws(() => normalizePlan([], [M('a.js')], language), /Split plan omitted 1 files/);
+    assert.throws(
+      () => normalizePlan([{ subject: 'invalid message', files: ['a.js'] }], [M('a.js')], language),
+      /Split plan omitted 1 files/,
+    );
+  }
 });
 
 test('normalizePlan drops unknown, duplicate, and empty groups', () => {
