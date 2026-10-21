@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.10] - 2026-10-21
+
+### Fixed
+
+- MiniMax M3.1 models retain their required thinking mode during follow-up requests, preventing split planning from failing with HTTP 400 when thinking is disabled.
+
 ## [2.6.9] - 2026-10-08
 
 ### Fixed
@@ -296,7 +302,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.9...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.10...HEAD
+[2.6.10]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.10
 [2.6.9]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.9
 [2.6.8]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.8
 [2.6.7]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.7
