@@ -133,6 +133,11 @@ export function reasoningEffortsForModel(providerType, modelId) {
 }
 
 export function canDisableReasoningForModel(providerType, modelId) {
+  if (
+    (providerType || '').toLowerCase() === 'minimax' &&
+    /^minimax-m3\.1(?:-|$)/i.test(modelId || '')
+  )
+    return false;
   const known = catalogModel((providerType || '').toLowerCase(), modelId);
   return !known || getSupportedThinkingLevels(known).includes('off');
 }
@@ -230,7 +235,8 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
             } else if (provider === 'minimax') {
               payload.reasoning_split = true;
               delete payload.enable_thinking;
-              if (mode === 'off') payload.thinking = { type: 'disabled' };
+              if (mode === 'off' && canDisableReasoningForModel(provider, modelId))
+                payload.thinking = { type: 'disabled' };
               else delete payload.thinking;
             } else if (nativeOllama) {
               payload.think = mode === 'on';
@@ -250,6 +256,7 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
     },
     reasoningForFollowUp(reasoning) {
       if (reasoning?.mode !== 'on') return reasoning;
+      if (!canDisableReasoningForModel(provider, modelId)) return reasoning;
       if (provider !== 'custom' && canDisableReasoningForModel(provider, modelId))
         return { ...reasoning, mode: 'off' };
       if (reasoning.disabledBody !== undefined) return { ...reasoning, mode: 'off' };
