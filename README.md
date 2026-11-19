@@ -75,7 +75,12 @@ aicommit setup
 
 It walks you through choosing built-in provider defaults (OpenAI, DeepSeek, OpenRouter, MiniMax, Kimi Code, and Ollama) or entering a custom OpenAI-compatible endpoint, then entering your API key and one or more models, choosing a default model and commit language, and optionally testing the connection. Configuration is written atomically to the user config (`~/.aicommit/config.json`); a malformed or old-format existing file is backed up before replacement. The legacy `~/.aicommit.config.json` path remains readable and `aicommit setup` migrates its settings to the canonical path when saving.
 
-The model step configures reasoning independently for each profile. `auto` sends no explicit reasoning switch and leaves the behavior to the provider, `on` requests reasoning and then prompts for its effort, and `off` explicitly disables reasoning when the model supports that switch. Effort defaults to `medium`. For known OpenAI models, setup removes unsupported mode and effort choices, including `off` when reasoning cannot be disabled. When editing an existing model, the wizard preselects valid saved values, falling back to the global reasoning settings when applicable; an unsupported saved mode falls back to `auto`.
+For everyday use, configure only the provider, credentials, model, and language. Reasoning defaults to on with medium effort; output budgets, batching, caching, and retries use built-in defaults. The wizard no longer asks per-model reasoning questions and preserves existing explicit settings.
+
+Use [.aicommit.config.example.json](.aicommit.config.example.json) as the minimal configuration; advanced fields are optional.
+
+<details>
+<summary>Advanced configuration and multiple providers</summary>
 
 To configure by hand, start from [.aicommit.config.example.json](.aicommit.config.example.json). User config is loaded first, then allow-listed generation preferences from the project config at `./.aicommit.config.json` are deep-merged over it. Project config may set `language`, `commitPolicy`, `stripFiles`, `temperature`, and lower diff/token/timeout or repository-context ceilings. A project-owned `prompt` is ignored unless the user config explicitly sets `allowProjectPrompt: true`. Connection/provider fields (including `apiKeyEnv`), reasoning request controls, unknown keys, and attempts to raise a ceiling are ignored with a warning. This prevents a cloned repository from redirecting an authenticated request or silently increasing its cost/data scope.
 
@@ -190,7 +195,7 @@ aicommit -p deepseek -m reasoner
 
 `schemaVersion`, `defaultProvider`, `providers`, and every provider's `providerType`, `apiUrl`, `defaultModel`, and non-empty `models` map are required. Without `-p`, AICommit selects `defaultProvider`; without `-m`, it selects that provider's `defaultModel`. Model profiles inherit global generation settings and provider connection settings, then may override `temperature`, `maxTokens`, `timeoutMs`, `reasoning`, and `extraBody`. Provider and model names are stable local aliases; `modelId` is the identifier sent to the API.
 
-This is the only supported user-config shape. Earlier flat or provider-level `modelId` configurations are rejected; run `aicommit setup` or migrate them explicitly.
+The requirements above apply to the expanded catalog. The compact format shown earlier uses `model` instead of `modelId`. Legacy flat or provider-level `modelId` configurations are still rejected; run `aicommit setup` or migrate them explicitly.
 
 | Key                  | Description                                                                                                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -221,9 +226,11 @@ This is the only supported user-config shape. Earlier flat or provider-level `mo
 | `largeChange`        | Large-change strategy, budgets, and short-lived chunk recovery cache; personal config only, retaining protected summaries for 24 hours up to 32 MiB by default                                                               |
 | `diffContextLines`   | Context lines around each diff hunk (`git diff --unified=<n>`); lower values mean fewer tokens (default: `1`)                                                                                                                |
 | `stripFiles`         | Extra files to stub out of the diff like lock files, matched by basename with `*`/`?` wildcards, e.g. `["*.min.js", "*.map", "*.snap"]` (default: `[]`; project-level entries are merged with user-level ones, not replaced) |
-| `regenerateWithDiff` | `true` re-sends the full diff on every regenerate for more varied rewrites; `false` (default) only asks the model to reword its previous message, which is far cheaper                                                       |
+| `regenerateWithDiff` | `true` re-sends the full diff on every regenerate; `false` (default) uses the previous message and up to 6,000 characters of change evidence to correct omissions and wording                                                |
 | `extraBody`          | Model-profile JSON fields merged into the request body, except `model`/`messages` (default: `{}`)                                                                                                                            |
 | `reasoning`          | Global or model-profile reasoning controls: `mode` / `effort` (default: `on` / `medium`), `maxTokens`, and `maxDisplayChars`                                                                                                 |
+
+</details>
 
 Works with OpenAI, DeepSeek, [OpenRouter](https://openrouter.ai), MiniMax, [Kimi Code](https://www.kimi.com/code/docs/), Ollama (native `/api/chat` or OpenAI-compatible `/v1/chat/completions`), LiteLLM, and other compatible endpoints. HTTPS is required for remote endpoints; plaintext HTTP is accepted only for localhost/loopback.
 
@@ -512,6 +519,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull-request ch
 The default `largeChange.strategy: "auto"` inventories every file locally, groups identical textual edits within a module, and selects representative excerpts under a fixed input budget. Lockfiles, generated files (such as `dist/`, `build/`, `*.map`, and `*.snap`), and `stripFiles` matches contribute metadata only. Complete content still undergoes local secret scanning; these selection rules do not change which files Git commits.
 
 A normal commit typically needs one model request, with no per-file AI calls or recursive model reduction. The inventory contains at most 16 representative groups under a UTF-8 byte budget, prioritizing coverage across code, configuration, tests, and other categories. It explicitly describes sampling limits. Both terminal and JSON output distinguish fully analyzed files, representative excerpts, and metadata-only files. Provider retries, response recovery, policy correction, and user-requested regeneration can still add requests.
+
+`largeChange.timeoutMs` bounds each active generation round, including its analysis and automatic retries. Reviewing or editing a message does not consume that time; a user-requested retry or regeneration starts a fresh deadline. Total token and request limits remain cumulative across rounds.
 
 Split mode builds local candidates and sends them in bounded batches of at most `splitMaxPlanFiles`, then merges the batch plans hierarchically. When an `auto` inventory exceeds four times that candidate limit, adjacent candidates are first bundled locally by top-level module, file kind, and Git status; the model receives compact counts, examples, and selected excerpts while the complete file mapping stays local. Every file remains represented even when the complete candidate inventory cannot fit one request. Exhausted analysis budgets stop without committing; increase the budget or use smaller batches. If the hierarchy cannot converge while budget remains, an all-files commit message can be generated from local change summaries; non-interactive committing requires `--allow-single-fallback`. Plans omitting files or hunks are rejected instead of creating an automatic "update remaining files" commit. Small changes keep the existing request path.
 

@@ -462,13 +462,14 @@ test('valid conventional reply makes no corrective retry', async () => {
   assert.equal(calls.length, 1);
 });
 
-test('regenerate does not re-send the diff — it asks for a rewording of the previous message', async () => {
+test('regenerate uses bounded evidence and the previous message instead of the full diff prompt', async () => {
   const calls = stubFetch([{ choices: [{ message: { content: 'feat: rework login page' } }] }]);
   const { message } = await generateCommitMessage(cfg(), diff, 1, 'feat: add login page');
   assert.equal(message, 'feat: rework login page');
   const user = calls[0].messages.find((m) => m.role === 'user').content;
   assert.ok(!user.includes('Here is the git diff'), 'diff not re-sent');
   assert.match(user, /feat: add login page/, 'previous message fed back');
+  assert.match(user, /change_evidence/);
   assert.match(user, /DIFFERENT commit message/);
   assert.match(
     user,

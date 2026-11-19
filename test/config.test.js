@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   DEFAULT_CONFIG,
   validateConfig,
   validateUserConfig,
+  normalizeUserConfig,
+  compactUserConfig,
   filterProjectConfig,
 } from '../src/config.js';
 
@@ -16,6 +19,59 @@ const cfg = (extra = {}) => ({
 
 test('validateConfig accepts the default config', () => {
   assert.equal(validateConfig(cfg()).modelId, DEFAULT_CONFIG.modelId);
+});
+
+test('the minimal example is valid without explicit runtime tuning', () => {
+  const example = JSON.parse(
+    readFileSync(new URL('../.aicommit.config.example.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(validateUserConfig(example), example);
+  assert.equal(Object.hasOwn(example, 'reasoning'), false);
+  assert.equal(Object.hasOwn(example, 'largeChange'), false);
+  assert.equal(Object.hasOwn(example, 'maxTokens'), false);
+});
+
+test('flat configuration resolves preset endpoints and round-trips credentials and settings', () => {
+  const flat = {
+    provider: 'minimax',
+    model: 'MiniMax-M3.1-Flash',
+    apiKeyEnv: 'MINIMAX_API_KEY',
+    language: 'zh',
+    reasoning: { mode: 'on', effort: 'high' },
+    retry: { maxAttempts: 2 },
+  };
+  validateUserConfig(flat);
+  const normalized = normalizeUserConfig(flat);
+  assert.equal(normalized.providers.minimax.apiUrl, 'https://api.minimaxi.com/v1/chat/completions');
+  assert.equal(normalized.providers.minimax.models.default.modelId, flat.model);
+  assert.deepEqual(compactUserConfig(normalized), flat);
+  assert.equal(Object.hasOwn(flat, 'providers'), false);
+  assert.throws(() => validateUserConfig({ provider: 'minimax' }), /modelId/);
+  assert.throws(() => validateUserConfig({ ...flat, typo: true }), /unknown properties/);
+  assert.throws(
+    () => validateUserConfig({ ...flat, apiUrl: 'http://remote.example.com' }),
+    /HTTPS/,
+  );
+});
+
+test('compact provider profiles preserve names, endpoints, and credentials through normalization', () => {
+  const config = {
+    defaultProvider: 'work',
+    providers: {
+      work: { provider: 'minimax', model: 'MiniMax-M3.1-Flash', apiKeyEnv: 'MINIMAX_API_KEY' },
+      local: {
+        provider: 'custom',
+        model: 'local-model',
+        apiUrl: 'http://localhost:8080/v1/chat/completions',
+      },
+    },
+  };
+  validateUserConfig(config);
+  const normalized = normalizeUserConfig(config);
+  assert.equal(normalized.defaultProvider, 'work');
+  assert.equal(normalized.providers.work.providerType, 'minimax');
+  assert.equal(normalized.providers.local.apiUrl, config.providers.local.apiUrl);
+  assert.deepEqual(normalizeUserConfig(compactUserConfig(normalized)), normalized);
 });
 
 test('validateUserConfig requires the canonical provider and named-model schema', () => {

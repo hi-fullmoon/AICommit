@@ -21,7 +21,10 @@ export function estimateTokens(text) {
 
 export function createAnalysisBudget(settings = {}) {
   const limits = { ...DEFAULT_LARGE_CHANGE, ...settings };
-  const started = Date.now();
+  let started = Date.now();
+  let elapsed = 0;
+  let roundElapsed = 0;
+  let signal = AbortSignal.timeout(limits.timeoutMs);
   let charged = 0;
   let requests = 0;
   let inputTokens = 0;
@@ -29,19 +32,37 @@ export function createAnalysisBudget(settings = {}) {
   let reserveFinal = 0;
   return {
     limits,
-    signal: AbortSignal.timeout(limits.timeoutMs),
+    get signal() {
+      return signal;
+    },
+    startRound() {
+      this.endRound();
+      started = Date.now();
+      roundElapsed = 0;
+      signal = AbortSignal.timeout(limits.timeoutMs);
+    },
+    endRound() {
+      if (started !== null) {
+        roundElapsed = Date.now() - started;
+        elapsed += roundElapsed;
+        started = null;
+      }
+    },
     reserveFinal(tokens) {
       reserveFinal = tokens;
     },
     remainingMs() {
-      return Math.max(0, limits.timeoutMs - (Date.now() - started));
+      return Math.max(
+        0,
+        limits.timeoutMs - (started === null ? roundElapsed : Date.now() - started),
+      );
     },
     snapshot() {
       return {
         requests,
         budgetedTokens: charged,
         maxTotalTokens: limits.maxTotalTokens,
-        elapsedMs: Date.now() - started,
+        elapsedMs: elapsed + (started === null ? 0 : Date.now() - started),
         usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
       };
     },

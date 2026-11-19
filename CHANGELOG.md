@@ -4,6 +4,18 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.11] - 2026-11-19
+
+### Added
+
+- Accept a compact provider, model, credential, and language configuration alongside existing provider catalogs. Setup uses the built-in thinking defaults for new profiles and preserves explicit settings on existing profiles.
+
+### Fixed
+
+- Large-change split planning respects the configured reasoning budget and sends the selected thinking effort to MiniMax M3.1. An exhausted output budget is reported separately from malformed JSON.
+- Reviewing or editing messages no longer consumes the next generation round's deadline. Token and request limits still apply across rounds.
+- Regeneration uses bounded evidence from the original change snapshot and, in split mode, from the selected group. Truncated responses require recovery or manual editing, and edited messages must pass policy validation before use.
+
 ## [2.6.10] - 2026-10-21
 
 ### Fixed
@@ -302,7 +314,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.10...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.11...HEAD
+[2.6.11]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.11
 [2.6.10]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.10
 [2.6.9]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.9
 [2.6.8]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.8

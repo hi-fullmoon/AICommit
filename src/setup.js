@@ -11,6 +11,8 @@ import confirm from '@inquirer/confirm';
 import { checkConnection } from './api.js';
 import {
   CONFIG_SCHEMA_VERSION,
+  normalizeUserConfig,
+  compactUserConfig,
   DEFAULT_CONFIG,
   isSecureApiUrl,
   validateUserConfig,
@@ -19,46 +21,6 @@ import { vimSelect } from './ui.js';
 import { fileExists, formatMs, indentError, maskApiKey } from './utils.js';
 import { loadProviderPresetManifest } from './provider-presets.js';
 import { resolveConfigLocations, userConfigLocations } from './config-paths.js';
-import {
-  canDisableReasoningForModel,
-  getProviderAdapter,
-  reasoningEffortsForModel,
-} from './providers.js';
-
-const REASONING_MODES = new Set(['auto', 'on', 'off']);
-const REASONING_MODE_CHOICES = Object.freeze([
-  {
-    name: 'Provider default (auto)',
-    value: 'auto',
-    description: 'Do not send an explicit reasoning switch',
-  },
-  {
-    name: 'Enabled (on)',
-    value: 'on',
-    description: 'Request reasoning and configure its effort',
-  },
-  {
-    name: 'Disabled (off)',
-    value: 'off',
-    description: 'Explicitly disable reasoning when the model supports that switch',
-  },
-]);
-
-function suggestedReasoningMode({ currentModel, globalReasoning, apiUrl, providerType, modelId }) {
-  const configured = currentModel.reasoning?.mode ?? globalReasoning?.mode;
-  if (REASONING_MODES.has(configured)) return configured;
-  return getProviderAdapter({ apiUrl, providerType, modelId }).capabilities.reasoning === 'native'
-    ? 'on'
-    : 'auto';
-}
-
-function effortDescription(effort) {
-  if (effort === 'low') return 'Fastest and lowest-cost reasoning';
-  if (effort === 'medium') return 'Balanced reasoning (default)';
-  if (effort === 'high') return 'Deeper reasoning with more latency and tokens';
-  if (effort === 'xhigh') return 'Very deep reasoning for models that support it';
-  return 'Maximum reasoning for models that support it';
-}
 
 // Merge the wizard's answers into the one supported Provider/Model schema.
 // Existing providers and unrelated global settings are preserved; the
@@ -86,7 +48,7 @@ async function readExistingConfig(path) {
   }
 
   try {
-    return validateUserConfig(parsed);
+    return normalizeUserConfig(validateUserConfig(parsed));
   } catch (err) {
     throw new Error(
       `Existing config ${path} is valid JSON but has an unsupported structure: ${err.message} ` +
@@ -231,7 +193,7 @@ export async function runSetup(dependencies = {}) {
   // ── 4. Model ────────────────────────────────────────────────────────
 
   const providerType = presetAdapter || existingProvider.providerType || 'custom';
-  const models = { ...presetModels, ...existingProvider.models };
+  const models = { ...existingProvider.models };
   let suggestedModel = existingProvider.defaultModel || presetDefaultModel;
   while (true) {
     const modelNameInput = await inputPrompt({
@@ -245,49 +207,13 @@ export async function runSetup(dependencies = {}) {
     const currentModel = models[modelName] || {};
     const modelIdInput = await inputPrompt({
       message: `Model ID for ${modelName}`,
-      default: currentModel.modelId || undefined,
+      default: currentModel.modelId || presetModels[modelName]?.modelId || undefined,
       validate: (v) => (v.trim() ? true : 'Model ID is required'),
     });
     const modelId = modelIdInput.trim();
-    const reasoningModeChoices = canDisableReasoningForModel(providerType, modelId)
-      ? REASONING_MODE_CHOICES
-      : REASONING_MODE_CHOICES.filter((choice) => choice.value !== 'off');
-    const suggestedMode = suggestedReasoningMode({
-      currentModel,
-      globalReasoning: existing.reasoning,
-      apiUrl,
-      providerType,
-      modelId,
-    });
-    const reasoningMode = await selectPrompt({
-      message: `Reasoning mode for ${modelName}`,
-      default: reasoningModeChoices.some((choice) => choice.value === suggestedMode)
-        ? suggestedMode
-        : 'auto',
-      choices: reasoningModeChoices,
-    });
-    const reasoning = { ...currentModel.reasoning, mode: reasoningMode };
-    if (reasoningMode === 'on') {
-      const efforts = reasoningEffortsForModel(providerType, modelId);
-      const configuredEffort = currentModel.reasoning?.effort ?? existing.reasoning?.effort;
-      const defaultEffort = efforts.includes(configuredEffort)
-        ? configuredEffort
-        : efforts.includes(DEFAULT_CONFIG.reasoning.effort)
-          ? DEFAULT_CONFIG.reasoning.effort
-          : efforts[0];
-      reasoning.effort = await selectPrompt({
-        message: `Reasoning effort for ${modelName}`,
-        default: defaultEffort,
-        choices: efforts.map((effort) => ({
-          name: effort,
-          value: effort,
-          description: effortDescription(effort),
-        })),
-      });
-    } else {
-      delete reasoning.effort;
-    }
-    models[modelName] = { ...currentModel, modelId, reasoning };
+    // Inherit the runtime defaults without writing redundant tuning options.
+    // Preserve explicit settings when editing an existing model.
+    models[modelName] = { ...currentModel, modelId };
     const addAnother = await confirmPrompt({
       message: 'Add another model?',
       default: false,
@@ -385,7 +311,7 @@ export async function runSetup(dependencies = {}) {
   // Write through a same-directory temporary file so interruption cannot
   // leave a partially written config. Permissions are tightened before the
   // atomic replacement as well as after it (best effort on Windows).
-  await writeConfigAtomic(targetPath, merged);
+  await writeConfigAtomic(targetPath, compactUserConfig(merged));
 
   console.log('');
   console.log('  ' + chalk.green.bold('✓ Config saved'));

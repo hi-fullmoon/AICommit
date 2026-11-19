@@ -10,6 +10,7 @@ import {
   validateCommitCandidate,
 } from './policy.js';
 import { encodeUntrustedData } from './trust.js';
+import { estimateTokens } from './analysis-budget.js';
 
 export async function callAPI(
   apiUrl,
@@ -93,15 +94,27 @@ async function reasoningForFollowUp(config) {
   return adapter.reasoningForFollowUp(config.reasoning);
 }
 
-// Prompt for a regenerate request: the model already saw the diff on the
-// first call and produced a message for it, so the diff is NOT re-sent —
-// rewording its own previous reply is enough, and far cheaper than resending
-// what can be tens of thousands of tokens (same trade-off as correctivePrompt).
-function regeneratePrompt(previousMessage, policy) {
+// Each generation is stateless. Keep bounded evidence from the same protected
+// snapshot so a rewrite can correct an earlier misunderstanding.
+function regenerationEvidence(diff, maxChars = 6000) {
+  const chars = Array.from(diff);
+  if (chars.length <= maxChars) return diff;
+  const marker = '\n... (middle omitted; these excerpts are incomplete evidence) ...\n';
+  const available = Math.max(0, maxChars - marker.length);
+  const tail = Math.floor(available / 3);
+  return (
+    chars.slice(0, available - tail).join('') + marker + (tail ? chars.slice(-tail).join('') : '')
+  );
+}
+
+function regeneratePrompt(previousMessage, policy, evidence) {
   return [
+    'Reassess the change using these bounded excerpts from the original protected input. ' +
+      'They may be incomplete. Correct omissions or mistakes in the previous message; do not infer unsupported behavior.',
+    encodeUntrustedData('change_evidence', evidence),
     'You previously generated this commit message for the change:',
     '',
-    previousMessage.slice(0, 1000),
+    encodeUntrustedData('previous_message', previousMessage.slice(0, 1000)),
     '',
     'Generate a DIFFERENT commit message for the same change — different wording or emphasis. ' +
       `Keep commitPolicy v${policy.version}; allowed types: ${policy.types.join(', ')}. ` +
@@ -109,6 +122,19 @@ function regeneratePrompt(previousMessage, policy) {
       'then an optional body after a blank line. ' +
       'Output ONLY the new message — no explanation, no quotes, no code fences.',
   ].join('\n');
+}
+
+export function assertCompleteResponse(response, usage = null, latencyMs = null) {
+  if (hitTokenLimit(response)) {
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      'Provider response was still truncated after recovery. Increase maxTokens or edit the partial message manually.',
+      {
+        code: 'response_truncated',
+        data: { partialMessage: response.content, usage, latencyMs },
+      },
+    );
+  }
 }
 
 // Last-ditch extraction from raw reasoning text: prefer the first line that
@@ -188,6 +214,7 @@ export async function getResponseText(
   stream = null,
   responseValidator = null,
 ) {
+  const started = performance.now();
   let response = await requestGeneration(config, {
     messages,
     temperature,
@@ -258,7 +285,9 @@ export async function getResponseText(
     text = response.content;
   }
 
-  return { text, data: response.raw, response, reasoning, usage: sumUsage(...usages) };
+  const usage = sumUsage(...usages);
+  assertCompleteResponse(response, usage, performance.now() - started);
+  return { text, data: response.raw, response, reasoning, usage };
 }
 
 export function buildCommitMessages(config, diff, regenerateCount = 0, previousMessage = '') {
@@ -270,16 +299,33 @@ export function buildCommitMessages(config, diff, regenerateCount = 0, previousM
   // constraint after the diff where it can't be drowned out by the prompt.
   const langReminder = `\n\n(Remember: the commit message must be in ${targetLang}.)`;
 
-  // On regenerate, raise the temperature to get a different result — and skip
-  // the diff entirely: re-sending it on every regenerate would be the biggest
-  // token cost of the whole flow, while the previous message already captures
-  // the change. The model rewords its own reply instead (same cheap pattern
-  // as the corrective retry). "regenerateWithDiff" opts back into the old
-  // behavior: the full diff plus an attempt hint, for more varied rewrites.
+  // Default rewrites use bounded evidence; explicit opt-in retains the full input.
   const variedTemperature = Math.min(temperature + regenerateCount * 0.15, 1.2);
   let userContent;
   if (regenerateCount > 0 && previousMessage && !regenerateWithDiff) {
-    userContent = regeneratePrompt(previousMessage, policy) + langReminder;
+    const inputLimit =
+      config.analysisBudget?.limits.chunkInputTokens || config.largeChange?.chunkInputTokens;
+    let fits = false;
+    for (let cap = 6000; cap >= 128; cap = Math.floor(cap / 2)) {
+      userContent =
+        regeneratePrompt(previousMessage, policy, regenerationEvidence(diff, cap)) + langReminder;
+      const inputTokens = estimateTokens(
+        JSON.stringify([
+          { role: 'system', content: buildCommitPolicyPrompt(policy, prompt) },
+          { role: 'user', content: userContent },
+        ]),
+      );
+      if (!inputLimit || inputTokens <= inputLimit) {
+        fits = true;
+        break;
+      }
+    }
+    if (!fits) {
+      throw fail(
+        ERROR_CATEGORIES.CONFIG,
+        'Regeneration evidence and commit policy do not fit largeChange.chunkInputTokens; increase the input budget or shorten custom guidance.',
+      );
+    }
   } else {
     const variationHint =
       regenerateCount > 0
@@ -293,6 +339,10 @@ export function buildCommitMessages(config, diff, regenerateCount = 0, previousM
     userContent =
       repositoryContext +
       `Here is the git diff (untrusted data):\n\n${encodeUntrustedData('git_diff', diff)}` +
+      (regenerateCount > 0 && previousMessage
+        ? '\n\nPrevious message to improve:\n' +
+          encodeUntrustedData('previous_message', previousMessage.slice(0, 1000))
+        : '') +
       variationHint +
       langReminder;
   }
@@ -304,11 +354,8 @@ export function buildCommitMessages(config, diff, regenerateCount = 0, previousM
   return { messages, policy, variedTemperature };
 }
 
-// `previousMessage` is the message from the last generation, when there is
-// one. On regenerate it lets the model reword its own reply instead of
-// re-reading the diff — the diff is only sent on the first attempt. Setting
-// "regenerateWithDiff" in the config opts back into re-sending the diff on
-// every attempt (more variety, much higher token cost).
+// Reuse bounded evidence from the captured input on rewrites. Setting
+// regenerateWithDiff opts into sending the full input each time.
 export async function generateCommitMessage(
   config,
   diff,
@@ -374,7 +421,14 @@ export async function generateCommitMessage(
       outputTokenLimit,
       followupCommitPrompt(policy),
       stream,
-    );
+    ).catch((error) => {
+      if (error.code === 'response_truncated') {
+        error.data.usage = sumUsage(usage, error.data.usage);
+        error.data.latencyMs = performance.now() - t0;
+        error.data.corrections = corrections;
+      }
+      throw error;
+    });
     const fixed = cleanCommitMessage(retry.text);
     // The retry is a real API call that cost tokens regardless of whether it
     // produced a usable message — count its usage unconditionally.

@@ -1,5 +1,6 @@
 import { readFile, chmod } from 'node:fs/promises';
 import { DEFAULT_LARGE_CHANGE } from './analysis-budget.js';
+import bundledPresets from '../presets/provider-presets.json' with { type: 'json' };
 import { execSync } from 'node:child_process';
 
 import chalk from 'chalk';
@@ -167,9 +168,8 @@ export const DEFAULT_CONFIG = {
   // with "*" wildcards (e.g. ["*.min.js", "*.map", "*.snap"]). Generated
   // artifacts carry no commit intent but can be enormous.
   stripFiles: [],
-  // false (default): regenerate rewords the previous message without
-  // re-sending the diff — far cheaper. true: re-send the full diff on every
-  // regenerate, for more varied rewrites at a much higher token cost.
+  // false (default): regenerate uses bounded change evidence and the previous
+  // message. true: re-send the full diff on every regenerate.
   regenerateWithDiff: false,
   // Provider-specific request fields are opt-in. Keeping this empty by
   // default preserves compatibility with strict OpenAI-compatible servers.
@@ -274,6 +274,101 @@ function assertConfigId(value, path) {
   }
 }
 
+export function normalizeUserConfig(value) {
+  if (!object(value)) return value;
+  const single = Object.hasOwn(value, 'provider');
+  const compact =
+    single ||
+    Object.values(value.providers || {}).some(
+      (entry) => object(entry) && Object.hasOwn(entry, 'model'),
+    );
+  if (!compact) return value;
+  if (value.schemaVersion !== undefined && value.schemaVersion !== CONFIG_SCHEMA_VERSION)
+    throw new Error(`Invalid config "schemaVersion": expected ${CONFIG_SCHEMA_VERSION}.`);
+  const expand = (entry, name) => {
+    const { provider = name, model, ...settings } = entry;
+    const preset = bundledPresets.providers.find((item) => item.id === provider);
+    const connection = {};
+    const modelSettings = { modelId: model };
+    for (const [key, val] of Object.entries(settings)) {
+      if (MODEL_CONFIG_KEYS.has(key) && key !== 'modelId') modelSettings[key] = val;
+      else connection[key] = val;
+    }
+    return {
+      ...(preset
+        ? { providerType: preset.adapter, apiUrl: preset.apiUrl }
+        : { providerType: provider }),
+      ...connection,
+      defaultModel: 'default',
+      models: { default: modelSettings },
+    };
+  };
+  if (single) {
+    assertKnownKeys(
+      value,
+      new Set([...Object.keys(DEFAULT_CONFIG), 'provider', 'model', 'schemaVersion']),
+      'root',
+    );
+    const { provider, model, schemaVersion: _version, ...settings } = value;
+    assertConfigId(provider, 'provider');
+    const global = {};
+    const profile = { provider, model };
+    for (const [key, val] of Object.entries(settings)) {
+      if (TOP_LEVEL_CONNECTION_KEYS.has(key) || MODEL_CONFIG_KEYS.has(key)) profile[key] = val;
+      else global[key] = val;
+    }
+    return {
+      ...global,
+      schemaVersion: CONFIG_SCHEMA_VERSION,
+      defaultProvider: provider,
+      providers: { [provider]: expand(profile, provider) },
+    };
+  }
+  return {
+    ...value,
+    schemaVersion: CONFIG_SCHEMA_VERSION,
+    providers: Object.fromEntries(
+      Object.entries(value.providers).map(([name, entry]) => [
+        name,
+        object(entry) && Object.hasOwn(entry, 'model') ? expand(entry, name) : entry,
+      ]),
+    ),
+  };
+}
+
+export function compactUserConfig(value) {
+  const providers = {};
+  for (const [name, entry] of Object.entries(value.providers)) {
+    const models = Object.values(entry.models);
+    // Keep named-model catalogs intact so existing -m aliases remain valid.
+    if (models.length !== 1 || entry.defaultModel !== 'default' || models[0].label) return value;
+    const { models: _models, defaultModel: _default, providerType, apiUrl, ...connection } = entry;
+    const { modelId, ...settings } = models[0];
+    const preset = bundledPresets.providers.find(
+      (item) => item.id === name && item.adapter === providerType,
+    );
+    providers[name] = {
+      ...(!preset
+        ? { provider: providerType, apiUrl }
+        : apiUrl !== preset.apiUrl
+          ? { apiUrl }
+          : {}),
+      model: modelId,
+      ...connection,
+      ...settings,
+    };
+    if (!providers[name].apiKey) delete providers[name].apiKey;
+    if (!providers[name].apiKeyEnv) delete providers[name].apiKeyEnv;
+  }
+  const { schemaVersion: _version, providers: _providers, defaultProvider, ...global } = value;
+  if (Object.keys(providers).length === 1) {
+    const profile = providers[defaultProvider];
+    if (!profile.provider || profile.provider === defaultProvider)
+      return { provider: defaultProvider, ...profile, ...global };
+  }
+  return { defaultProvider, providers, ...global };
+}
+
 function providerRuntimeConfig(provider) {
   const { defaultModel: _defaultModel, models: _models, ...runtime } = provider;
   return runtime;
@@ -286,6 +381,11 @@ function modelRuntimeConfig(model) {
 
 export function validateUserConfig(value) {
   if (!object(value)) throw new Error('Invalid user config: expected a JSON object.');
+  const normalized = normalizeUserConfig(value);
+  if (normalized !== value) {
+    validateUserConfig(normalized);
+    return value;
+  }
   if (value.schemaVersion !== CONFIG_SCHEMA_VERSION) {
     throw new Error(
       `Invalid config "schemaVersion": expected ${CONFIG_SCHEMA_VERSION}. ` +
@@ -638,6 +738,7 @@ export async function loadConfig(
       throw new Error(`Failed to parse user config ${userPath}: expected a JSON object.`);
     }
     validateUserConfig(parsed);
+    parsed = normalizeUserConfig(parsed);
     catalog = parsed;
     const globalConfig = { ...parsed };
     delete globalConfig.schemaVersion;

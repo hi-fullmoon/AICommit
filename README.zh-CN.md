@@ -77,7 +77,12 @@ aicommit setup
 
 向导会引导你选择内置 Provider 默认值（OpenAI、DeepSeek、OpenRouter、MiniMax、Kimi Code 和 Ollama），或填写自定义 OpenAI 兼容端点；随后输入 API Key 和一个或多个模型、选择默认模型和提交信息语言，并可选测试连接。配置会原子写入用户配置文件 `~/.aicommit/config.json`；如果已有文件格式错误或属于旧格式，替换前会先备份。旧路径 `~/.aicommit.config.json` 仍可读取，运行 `aicommit setup` 并保存时会把其中设置迁移到规范路径。
 
-模型步骤会为每个配置单独设置推理。`auto` 不发送显式推理开关，交给 Provider 使用默认行为；`on` 请求推理并继续选择强度；`off` 在模型支持该开关时显式关闭推理。强度默认为 `medium`。对于已知的 OpenAI 模型，setup 会过滤不支持的模式和强度选项；无法关闭推理时也不会列出 `off`。编辑已有模型时，向导会回填其中仍有效的保存值；模型级未配置时，则在适用情况下回填全局推理设置，不再受支持的旧模式会回退到 `auto`。
+日常只需配置 Provider、凭据、模型和语言。思考默认开启、强度为 `medium`，输出预算、分批、缓存与重试采用内置默认值；向导不再逐个询问思考参数，编辑已有模型时会保留显式设置。
+
+最小配置见 [.aicommit.config.example.json](.aicommit.config.example.json)，无需复制全部高级参数。
+
+<details>
+<summary>高级配置与多 Provider 示例</summary>
 
 如需手动配置，请从 [.aicommit.config.example.json](.aicommit.config.example.json) 开始。AICommit 先加载用户配置，再将项目配置 `./.aicommit.config.json` 中白名单内的生成偏好深度合并到用户配置之上。项目配置可以设置 `language`、`commitPolicy`、`stripFiles`、`temperature`，也可以降低 diff、token、timeout 或仓库上下文上限。项目拥有的 `prompt` 默认会被忽略，除非用户配置明确设置 `allowProjectPrompt: true`。连接或 Provider 字段（包括 `apiKeyEnv`）、推理请求控制、未知字段，以及任何试图提高上限的配置，都会被忽略并给出警告。这样可以防止克隆的仓库重定向已鉴权请求，或在不知情的情况下扩大成本和数据范围。
 
@@ -192,7 +197,7 @@ aicommit -p deepseek -m reasoner
 
 `schemaVersion`、`defaultProvider`、`providers`，以及每个 Provider 的 `providerType`、`apiUrl`、`defaultModel` 和非空 `models` 都是必填项。未指定 `-p` 时选择 `defaultProvider`；未指定 `-m` 时选择该 Provider 的 `defaultModel`。模型配置会继承全局生成设置和 Provider 连接设置，并可覆盖 `temperature`、`maxTokens`、`timeoutMs`、`reasoning` 与 `extraBody`。Provider 名和模型名是稳定的本地别名，`modelId` 才是发送给 API 的模型标识。
 
-这是唯一支持的用户配置格式。旧版扁平配置或 Provider 级 `modelId` 会被直接拒绝；请运行 `aicommit setup` 或显式迁移。
+上述必填项适用于完整的 Provider 配置。前面的精简格式使用 `model`，而不是 `modelId`。旧版扁平配置或 Provider 级 `modelId` 仍会被拒绝；请运行 `aicommit setup` 或手动迁移。
 
 | 配置项               | 说明                                                                                                                                  |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -223,9 +228,11 @@ aicommit -p deepseek -m reasoner
 | `largeChange`        | 大变更策略、预算和短期分块恢复缓存；缓存只接受个人配置，默认保留受保护摘要 24 小时、最多 32 MiB                                       |
 | `diffContextLines`   | 每个 diff hunk 周围的上下文行数（`git diff --unified=<n>`）；越小越节省 token（默认：`1`）                                            |
 | `stripFiles`         | 额外替换为占位的文件，按 basename 使用 `*` / `?` 通配，如 `["*.min.js", "*.map", "*.snap"]`（默认：`[]`；项目项与用户项合并而非覆盖） |
-| `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff，以获得更多变化；`false`（默认）只要求模型改写上一条消息，成本更低                                 |
+| `regenerateWithDiff` | `true` 表示每次重写都重发完整 diff；`false`（默认）携带上一条消息和最多 6,000 个字符的变更证据，用于纠正遗漏并调整措辞                |
 | `extraBody`          | 模型配置中合并到请求体的 JSON 字段，但不允许覆盖 `model` / `messages`（默认：`{}`）                                                   |
 | `reasoning`          | 全局或模型级推理控制：`mode` / `effort`（默认：`on` / `medium`）、`maxTokens` 和 `maxDisplayChars`                                    |
+
+</details>
 
 AICommit 支持 OpenAI、DeepSeek、[OpenRouter](https://openrouter.ai)、MiniMax、[Kimi Code](https://www.kimi.com/code/docs/)、Ollama（原生 `/api/chat` 或 OpenAI 兼容 `/v1/chat/completions`）、LiteLLM，以及其他兼容端点。远程端点必须使用 HTTPS；明文 HTTP 只允许 localhost / loopback。
 
@@ -514,6 +521,8 @@ exec zsh
 默认 `largeChange.strategy: "auto"` 在本地统计所有文件，按模块聚合相同文本修改，并选取固定预算内的代表性片段。lockfile、生成文件（如 `dist/`、`build/`、`*.map`、`*.snap`）和 `stripFiles` 匹配项只提供元数据。所有内容仍在本地接受敏感信息扫描；这些规则不会改变实际提交的文件。
 
 普通提交通常只需要一次模型请求，不会为每个文件调用 AI，也不会递归调用模型汇总。摘要最多包含 16 个代表组，并受 UTF-8 字节预算约束；优先覆盖代码、配置和测试等不同类别。摘要明确说明抽样范围，界面和 JSON 分别报告全文分析、代表片段和仅元数据的文件数，不把抽样视为完整理解。提供方重试、响应恢复、格式修正和用户重新生成仍可能增加请求。
+
+`largeChange.timeoutMs` 限制每轮实际生成的时间，包括该轮分析和自动重试。阅读或编辑消息不消耗这段时间；用户主动重试或重新生成时会开始新的计时。总 token 限额和请求次数仍跨轮累计。
 
 批次提交先在本地建立候选组，再按每批最多 `splitMaxPlanFiles` 个候选发送，并分层合并各批计划。当 `auto` 清单规模超过该候选上限的四倍时，会先按顶层模块、文件类型和 Git 状态在本地归并相邻候选；模型只接收紧凑计数、少量路径示例和代表片段，完整文件映射始终留在本地。完整候选清单放不进一次请求时，仍会保留每个文件。分析预算耗尽时停止提交，保留变更并提示提高预算或减少单批文件。如果分层规划无法收敛且预算仍充足，可根据本地变更摘要生成覆盖全部文件的单次提交；非交互提交需要 `--allow-single-fallback`。遗漏文件或 hunk 的计划会被拒绝，不再自动生成“更新其余文件”。小变更保持原有请求路径。
 

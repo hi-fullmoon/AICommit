@@ -172,6 +172,7 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
   const nativeOllama =
     provider === 'ollama' && /\/api\/(?:chat|generate)\/?$/i.test(endpoint(apiUrl)?.pathname || '');
   const known = catalogModel(provider, modelId);
+  const miniMaxAdaptive = provider === 'minimax' && !canDisableReasoningForModel(provider, modelId);
   const openAIReasoning = provider === 'openai' && isOpenAIReasoningModel(modelId);
   const tokenField = openAIReasoning ? 'max_completion_tokens' : 'max_tokens';
   const model = {
@@ -182,7 +183,8 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
     // The transport pins the full configured URL, including nonstandard proxy paths.
     baseUrl: endpoint(apiUrl)?.origin || '',
     reasoning:
-      known?.reasoning ?? (openAIReasoning || ['deepseek', 'openrouter'].includes(provider)),
+      known?.reasoning ??
+      (openAIReasoning || miniMaxAdaptive || ['deepseek', 'openrouter'].includes(provider)),
     contextWindow: known?.contextWindow || 128000,
     maxTokens: known?.maxTokens || 16384,
   };
@@ -235,6 +237,7 @@ export function getProviderAdapter({ apiUrl, providerType = '', modelId = '' }) 
             } else if (provider === 'minimax') {
               payload.reasoning_split = true;
               delete payload.enable_thinking;
+              if (miniMaxAdaptive && mode === 'on') payload.reasoning_effort = reasoningEffort;
               if (mode === 'off' && canDisableReasoningForModel(provider, modelId))
                 payload.thinking = { type: 'disabled' };
               else delete payload.thinking;

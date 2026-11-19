@@ -75,6 +75,7 @@ import {
   invalidPlanMessages,
   applyMessageCorrections,
   summarizeChanges,
+  summarizeGroupChanges,
 } from './change-analysis.js';
 import { updateGitHash, spoolGit } from './git-spool.js';
 import { createAnalysisCache } from './analysis-cache.js';
@@ -1825,6 +1826,7 @@ export async function splitFlow(
       machineOutput,
       cancelMessage: 'Split cancelled.',
       failureMessage: 'Split planning failed',
+      analysisBudget: planningConfig.analysisBudget,
       task: async (stream) => {
         if (large) {
           let plan;
@@ -2114,25 +2116,6 @@ export async function splitFlow(
       });
 
       for (const idx of picked) {
-        const rawGroupDiff = analysis
-          ? await summarizeChanges(
-              planningConfig,
-              analysis.facts.filter((fact) => groups[idx].files.includes(fact.path)),
-            )
-          : getGroupDiff(
-              projectRoot,
-              head,
-              scope,
-              groups[idx],
-              allFiles,
-              config.diffContextLines,
-              planningConfig.stripFiles,
-              protectModelInput,
-              untrackedSnapshot.previews,
-            );
-        const groupDiff = protectModelInput
-          ? protectSensitiveDiff(rawGroupDiff).diff
-          : rawGroupDiff;
         if (
           getSplitStateFingerprint(projectRoot, head, undefined, scope) !== plannedStateFingerprint
         ) {
@@ -2159,14 +2142,46 @@ export async function splitFlow(
             machineOutput,
             cancelMessage: 'Split cancelled.',
             failureMessage: `Group ${idx + 1} regenerate failed`,
-            task: (stream) =>
-              generateCommitMessage(
+            analysisBudget: planningConfig.analysisBudget,
+            task: async (stream) => {
+              const rawGroupDiff = analysis
+                ? await summarizeGroupChanges(
+                    planningConfig,
+                    analysis,
+                    groups[idx].files,
+                    captured.manifest,
+                  )
+                : getGroupDiff(
+                    projectRoot,
+                    head,
+                    scope,
+                    groups[idx],
+                    allFiles,
+                    config.diffContextLines,
+                    planningConfig.stripFiles,
+                    protectModelInput,
+                    untrackedSnapshot.previews,
+                  );
+              const groupDiff = protectModelInput
+                ? protectSensitiveDiff(rawGroupDiff).diff
+                : rawGroupDiff;
+              if (
+                getSplitStateFingerprint(projectRoot, head, undefined, scope) !==
+                plannedStateFingerprint
+              ) {
+                throw fail(
+                  ERROR_CATEGORIES.CONCURRENT_MODIFICATION,
+                  'The working tree changed while preparing message regeneration; no request was sent.',
+                );
+              }
+              return generateCommitMessage(
                 analysis ? planningConfig : config,
                 groupDiff,
                 regenCounts[idx],
                 groups[idx].message,
                 stream,
-              ),
+              );
+            },
             successMessage(result) {
               let done = `Group ${idx + 1} regenerated in ${chalk.bold(formatMs(result.elapsed))}`;
               if (result.usage) done += chalk.dim(`  · tokens: ${formatUsage(result.usage)}`);
@@ -2178,6 +2193,7 @@ export async function splitFlow(
           rewriteCount += 1 + (corrections || 0);
         } catch (err) {
           regenCounts[idx]--;
+          if (err.category === ERROR_CATEGORIES.CONCURRENT_MODIFICATION) throw err;
           console.log(`\n  ${indentError(err)}\n`);
         }
       }

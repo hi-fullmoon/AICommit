@@ -14,6 +14,7 @@ export async function runModelTask({
   failureMessage,
   successMessage,
   task,
+  analysisBudget = null,
 }) {
   const spinner = ora({ text: chalk.dim(spinnerText), color: 'cyan' }).start();
   let liveReasoning;
@@ -51,7 +52,13 @@ export async function runModelTask({
   process.on('SIGINT', cancelOnSigint);
 
   try {
-    const result = await task(stream);
+    let result;
+    analysisBudget?.startRound();
+    try {
+      result = await task(stream);
+    } finally {
+      analysisBudget?.endRound();
+    }
     if (liveReasoning) await liveReasoning.stop();
     spinner.succeed(successMessage(result));
     return result;

@@ -1,7 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -10,12 +18,83 @@ import {
   analyzeChanges,
   captureChanges,
   summarizeChanges,
+  summarizeGroupChanges,
 } from '../src/change-analysis.js';
 import { getStagedChangedFiles } from '../src/split.js';
 import { cleanupGitSpools } from '../src/git-spool.js';
-import { compactLocalPlanFacts, localInputBytes, localPlanBatches } from '../src/local-analysis.js';
+import {
+  compactLocalPlanFacts,
+  localInputBytes,
+  localPlanBatches,
+  localOverview,
+  selectLocalGroupFacts,
+} from '../src/local-analysis.js';
 import { buildCommitMessages } from '../src/api.js';
 import { estimateTokens } from '../src/analysis-budget.js';
+import { decodeUntrustedData } from '../src/trust.js';
+
+test('fallback regeneration retains real Git evidence for the full plan and edited subgroups', async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'aicommit-fallback-regeneration-'));
+  t.after(() => {
+    cleanupGitSpools();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+  const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+  git('init', '-q');
+  for (const name of ['api.js', 'local-analysis.js']) {
+    writeFileSync(join(cwd, name), readFileSync(new URL(`../src/${name}`, import.meta.url)));
+  }
+  git('add', '-A');
+  const cfg = config();
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  const analysis = await analyzeChanges(cfg, capture);
+  for (const requestedStrategy of ['auto', 'deep']) {
+    const planningConfig = {
+      ...cfg,
+      largeChange: { ...cfg.largeChange, strategy: requestedStrategy },
+    };
+    for (const strategy of ['auto', 'fallback']) {
+      const result = { ...analysis, coverage: { ...analysis.coverage, strategy } };
+      for (const paths of [['api.js', 'local-analysis.js'], ['local-analysis.js']]) {
+        await t.test(
+          `${requestedStrategy} config, ${strategy} coverage, ${paths.length} files`,
+          async () => {
+            const summary = await summarizeGroupChanges(
+              planningConfig,
+              result,
+              paths,
+              capture.manifest,
+            );
+            const inventory = JSON.parse(summary);
+            assert.equal(inventory.totalFiles, paths.length);
+            assert.equal(
+              inventory.additions,
+              capture.manifest
+                .filter((file) => paths.includes(file.path))
+                .reduce((sum, file) => sum + file.additions, 0),
+            );
+            assert.ok(inventory.samples.some((sample) => sample.representativeExcerpt));
+            assert.deepEqual(
+              inventory.samples.flatMap((sample) => sample.examples).sort(),
+              [...paths].sort(),
+            );
+            const request = buildCommitMessages(
+              planningConfig,
+              summary,
+              1,
+              'refactor: preserve generation evidence',
+            );
+            const block = request.messages[1].content.match(
+              /BEGIN_AICOMMIT_UNTRUSTED_JSON\n[^\n]*\nEND_AICOMMIT_UNTRUSTED_JSON/,
+            )[0];
+            assert.equal(JSON.parse(decodeUntrustedData(block).content).totalFiles, paths.length);
+          },
+        );
+      }
+    }
+  }
+  assert.equal(cfg.analysisBudget.snapshot().requests, 0);
+});
 
 test('real Git hunks retain behavior changes after imports and fit the complete request budget', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'aicommit-local-budget-'));
@@ -120,6 +199,16 @@ test('local inventory deduplicates full edits, preserves module boundaries and p
   const result = await analyzeChanges(cfg, capture);
   const repeated = result.facts.find((fact) => fact.files.includes('src/a.js'));
   assert.deepEqual(repeated.files, ['src/a.js', 'src/b.js']);
+  const selected = selectLocalGroupFacts(result.facts, ['src/b.js'], capture.manifest);
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected[0].files, ['src/b.js']);
+  assert.equal(selected[0].additions, 1);
+  assert.equal(selected[0].deletions, 0);
+  assert.equal(selected[0].evidence, repeated.evidence);
+  const groupSummary = JSON.parse(localOverview(cfg, selected).text);
+  assert.equal(groupSummary.totalFiles, 1);
+  assert.equal(groupSummary.additions, 1);
+  assert.deepEqual(groupSummary.samples[0].examples, ['src/b.js']);
   assert.equal(result.facts.find((fact) => fact.files.includes('other/c.js')).files.length, 1);
   for (const path of ['src/long-a.js', 'src/long-b.js'])
     assert.equal(result.facts.find((fact) => fact.files.includes(path)).files.length, 1);

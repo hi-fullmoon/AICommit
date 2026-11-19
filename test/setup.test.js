@@ -123,35 +123,11 @@ test('runSetup saves a preset provider atomically with environment credentials',
 
   const modelNames = ['gpt-4o', 'quality'];
   let addAnotherCount = 0;
-  const effortPrompts = [];
   const spinnerEvents = [];
   await runSetup({
     targetPath,
     selectPrompt: async (question) => {
       if (question.message === 'Choose a provider') return 'openai';
-      if (question.message === 'Reasoning mode for gpt-4o') {
-        assert.equal(question.default, 'auto');
-        return 'off';
-      }
-      if (question.message === 'Reasoning mode for quality') {
-        assert.equal(question.default, 'on');
-        assert.deepEqual(
-          question.choices.map((choice) => choice.value),
-          ['auto', 'on'],
-          'o3 cannot disable reasoning',
-        );
-        return 'on';
-      }
-      if (question.message === 'Reasoning effort for quality') {
-        effortPrompts.push(question.message);
-        assert.equal(question.default, 'medium');
-        assert.deepEqual(
-          question.choices.map((choice) => choice.value),
-          ['low', 'medium', 'high'],
-          'known OpenAI models only offer supported effort levels',
-        );
-        return question.default;
-      }
       if (question.message === 'Choose the default model') return 'quality';
       if (question.message === 'Commit message language') return 'en';
       return unexpectedPrompt('select', question);
@@ -205,14 +181,10 @@ test('runSetup saves a preset provider atomically with environment credentials',
     apiKeyEnv: 'AICOMMIT_SETUP_TEST_KEY',
     defaultModel: 'quality',
     models: {
-      'gpt-4o': { label: 'GPT-4o', modelId: 'gpt-test', reasoning: { mode: 'off' } },
-      'gpt-5.6-sol': { label: 'GPT-5.6 Sol', modelId: 'gpt-5.6-sol' },
-      'gpt-5.6-terra': { label: 'GPT-5.6 Terra', modelId: 'gpt-5.6-terra' },
-      'gpt-5.6-luna': { label: 'GPT-5.6 Luna', modelId: 'gpt-5.6-luna' },
-      quality: { modelId: 'o3', reasoning: { mode: 'on', effort: 'medium' } },
+      'gpt-4o': { modelId: 'gpt-test' },
+      quality: { modelId: 'o3' },
     },
   });
-  assert.deepEqual(effortPrompts, ['Reasoning effort for quality']);
   if (process.platform !== 'win32') {
     assert.equal(statSync(targetPath).mode & 0o777, 0o600);
   }
@@ -253,18 +225,6 @@ test('runSetup migrates a valid legacy user config to the canonical path', async
     home: root,
     selectPrompt: async (question) => {
       if (question.message === 'Choose a provider') return 'openai';
-      if (question.message === 'Reasoning mode for quality') {
-        assert.equal(question.default, 'on');
-        return question.default;
-      }
-      if (question.message === 'Reasoning effort for quality') {
-        assert.equal(question.default, 'high', 'existing model effort is used as the default');
-        assert.deepEqual(
-          question.choices.map((choice) => choice.value),
-          ['low', 'medium', 'high'],
-        );
-        return question.default;
-      }
       if (question.message === 'Choose the default model') return 'quality';
       if (question.message === 'Commit message language') return 'en';
       return unexpectedPrompt('select', question);
@@ -308,10 +268,6 @@ test('runSetup preserves invalid config and cancels after a failed connection te
     targetPath,
     selectPrompt: async (question) => {
       if (question.message === 'Choose a provider') return 'deepseek';
-      if (question.message === 'Reasoning mode for chat') {
-        assert.equal(question.default, 'on');
-        return 'auto';
-      }
       if (question.message === 'Choose the default model') return 'chat';
       if (question.message === 'Commit message language') return 'zh';
       return unexpectedPrompt('select', question);
@@ -351,7 +307,7 @@ test('runSetup preserves invalid config and cancels after a failed connection te
   assert.ok(backup, 'invalid source config is backed up');
   assert.equal(readFileSync(join(root, '.aicommit', backup), 'utf-8'), '{invalid json\n');
   assert.deepEqual(checkedConfig.reasoning, {
-    mode: 'auto',
+    mode: 'on',
     effort: 'medium',
     maxTokens: 4096,
     maxDisplayChars: 12000,
@@ -408,10 +364,6 @@ test('setup discovers a new compatible provider only from preset data', async (t
         providerChoices = question.choices;
         return 'acme';
       }
-      if (question.message === 'Reasoning mode for default') {
-        assert.equal(question.default, 'auto');
-        return 'auto';
-      }
       if (question.message === 'Commit message language') return 'en';
       return unexpectedPrompt('select', question);
     },
@@ -431,11 +383,8 @@ test('setup discovers a new compatible provider only from preset data', async (t
   assert.ok(providerChoices.some((choice) => choice.value === 'acme'));
   const saved = JSON.parse(readFileSync(targetPath, 'utf8'));
   assert.deepEqual(saved.providers.acme, {
-    providerType: 'custom',
+    provider: 'custom',
     apiUrl: 'https://api.acme.example/v1/chat/completions',
-    apiKey: '',
-    apiKeyEnv: '',
-    defaultModel: 'default',
-    models: { default: { modelId: 'acme-v2', reasoning: { mode: 'auto' } } },
+    model: 'acme-v2',
   });
 });

@@ -33,6 +33,7 @@ import {
 import { cleanupGitSpools } from './git-spool.js';
 import { createAnalysisCache } from './analysis-cache.js';
 import { generateCommitMessage } from './api.js';
+import { normalizeCommitPolicy } from './policy.js';
 import {
   statusColor,
   statusIcon,
@@ -693,8 +694,7 @@ async function runMain() {
 
   while (true) {
     try {
-      // Pass the previous message so a regenerate can ask for a rewording
-      // instead of re-sending the full diff (see generateCommitMessage).
+      // Rewrites reuse evidence from the same captured, protected snapshot.
       ({
         message,
         elapsed,
@@ -708,6 +708,7 @@ async function runMain() {
         machineOutput,
         cancelMessage: 'Commit cancelled.',
         failureMessage: 'API call failed',
+        analysisBudget: generationConfig.analysisBudget,
         task: async (stream) => {
           if (large && !analysis) {
             analyzedFacts ||= await analyzeChanges(
@@ -766,11 +767,37 @@ async function runMain() {
         message: 'The API call failed. What would you like to do?',
         choices: [
           ...(message ? [{ name: 'Keep the previous message', value: 'keep' }] : []),
+          ...(err.code === 'response_truncated' && err.data?.partialMessage?.trim()
+            ? [{ name: 'Edit the partial message', value: 'edit' }]
+            : []),
           { name: 'Try again', value: 'retry' },
           { name: 'Cancel', value: 'cancel' },
         ],
       });
       if (choice === 'keep') break; // commit with the previous good message
+      if (choice === 'edit') {
+        const edited = await editMessage(err.data.partialMessage, {
+          policy: normalizeCommitPolicy(config.commitPolicy, config.language),
+          diff: modelDiff,
+        });
+        if (edited) {
+          message = edited;
+          wasEdited = true;
+          usage = generationConfig.analysisBudget?.snapshot().usage || err.data.usage;
+          elapsed = generationConfig.analysisBudget?.snapshot().elapsedMs ?? err.data.latencyMs;
+          automaticCorrectionCount += err.data.corrections || 0;
+          persistentAnalysisCache?.clear();
+          persistentAnalysisCache = null;
+          break;
+        }
+        return finishCancelled({
+          message,
+          latencyMs: elapsed,
+          usage,
+          edited: wasEdited,
+          rewrites: regenerateCount + automaticCorrectionCount,
+        });
+      }
       if (choice === 'retry') continue;
       return finishCancelled({
         message,
@@ -809,7 +836,10 @@ async function runMain() {
     }
 
     if (action === 'edit') {
-      const edited = await editMessage(message);
+      const edited = await editMessage(message, {
+        policy: normalizeCommitPolicy(config.commitPolicy, config.language),
+        diff: modelDiff,
+      });
       if (edited) {
         message = edited;
         wasEdited = true;

@@ -295,6 +295,25 @@ export function analyzeLocally(config, capture, protect, previews) {
   };
 }
 
+// An edited split plan can separate files that shared one local fact. Restrict
+// paths and counts to the selected group while reusing its identical-edit evidence.
+export function selectLocalGroupFacts(facts, paths, manifest) {
+  const selected = new Set(paths);
+  const filesByPath = new Map(manifest.map((file) => [file.path, file]));
+  return facts.flatMap((fact) => {
+    const files = fact.files.filter((path) => selected.has(path));
+    if (!files.length) return [];
+    return [
+      {
+        ...fact,
+        files,
+        additions: files.reduce((sum, path) => sum + filesByPath.get(path).additions, 0),
+        deletions: files.reduce((sum, path) => sum + filesByPath.get(path).deletions, 0),
+      },
+    ];
+  });
+}
+
 function planningBucketKey(fact) {
   const topLevel = fact.module === '.' ? '.' : fact.module.split('/')[0];
   return JSON.stringify([

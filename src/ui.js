@@ -10,6 +10,7 @@ import editor from '@inquirer/editor';
 import wrapAnsi from 'wrap-ansi';
 
 import { sanitizeTerminalText } from './utils.js';
+import { validateCommitCandidate } from './policy.js';
 
 // Shared status → color/icon maps (A/M/D/R/C/T from git, '?' = untracked)
 export const statusColor = {
@@ -527,25 +528,40 @@ export async function confirmAction(message, reasoning) {
   return action;
 }
 
-export async function editMessage(message) {
+export async function editMessage(message, { policy, diff = '' } = {}) {
   // `postfix` is the temp file's extension (not a help text) — ".md" gives
   // the editor markdown highlighting; guidance belongs in `message`.
-  const edited = await editor({
-    message: 'Edit your commit message (save and close to continue, leave empty to cancel)',
-    default: message,
-    postfix: '.md',
-    waitForUseInput: false,
-  });
+  let current = message;
+  while (true) {
+    const edited = await editor({
+      message: 'Edit your commit message (save and close to continue, leave empty to cancel)',
+      default: current,
+      postfix: '.md',
+      waitForUseInput: false,
+    });
 
-  const cleaned = sanitizeTerminalText(edited).trim();
-  if (!cleaned) return null;
+    const cleaned = sanitizeTerminalText(edited).trim();
+    if (!cleaned) return null;
 
-  displayMessage(cleaned);
-  const reconfirm = await confirm({
-    message: 'Commit with this edited message?',
-    default: true,
-    theme: { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
-  });
+    const validation = validateCommitCandidate(cleaned, { policy, diff });
+    if (!validation.valid) {
+      for (const error of validation.errors) {
+        console.log(chalk.yellow(`  commitPolicy: ${error.message}`));
+      }
+      current = cleaned;
+      continue;
+    }
+    for (const warning of validation.warnings) {
+      console.log(chalk.yellow(`  Quality check: ${warning.message}`));
+    }
 
-  return reconfirm ? cleaned : null;
+    displayMessage(cleaned);
+    const reconfirm = await confirm({
+      message: 'Commit with this edited message?',
+      default: true,
+      theme: { prefix: { idle: chalk.dim('?'), done: chalk.green('?') } },
+    });
+
+    return reconfirm ? cleaned : null;
+  }
 }

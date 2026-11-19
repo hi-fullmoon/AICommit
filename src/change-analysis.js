@@ -14,6 +14,7 @@ import {
   localOverview,
   compactLocalPlanFacts,
   localPlanBatches,
+  selectLocalGroupFacts,
 } from './local-analysis.js';
 
 function gitQuote(path) {
@@ -314,6 +315,13 @@ function parseAnalysisJson(raw) {
   throw new SyntaxError('Response contains no complete JSON array.');
 }
 
+export function analysisOutputTokenLimit(config) {
+  const contentLimit = Math.min(2048, config.maxTokens || 1024);
+  return config.reasoning?.mode === 'off'
+    ? contentLimit
+    : Math.max(contentLimit, config.reasoning?.maxTokens || 4096);
+}
+
 async function jsonCall(config, instruction, items, validate = null, stream = null) {
   let validationError = '';
   const parseAndValidate = (raw) => {
@@ -328,7 +336,7 @@ async function jsonCall(config, instruction, items, validate = null, stream = nu
       { role: 'user', content: encodeUntrustedData('change_analysis', JSON.stringify(items)) },
     ],
     0,
-    Math.min(2048, config.maxTokens || 1024),
+    analysisOutputTokenLimit(config),
     () =>
       'Return the complete requested JSON array, preserving every required input ID exactly once. ' +
       `Required IDs: ${JSON.stringify(items.map((item) => item.id))}. ` +
@@ -343,8 +351,27 @@ async function jsonCall(config, instruction, items, validate = null, stream = nu
         return false;
       }
     },
-  );
+  ).catch((cause) => {
+    if (cause.code !== 'response_truncated') throw cause;
+    const nextAction =
+      config.reasoning?.mode === 'off'
+        ? 'Increase maxTokens if it is below 2048, or split the changes into smaller batches.'
+        : 'Increase reasoning.maxTokens or split the changes into smaller batches.';
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      `Large-change analysis reached its output limit (${analysisOutputTokenLimit(config)} tokens) ` +
+        `after retrying and did not return complete JSON. ${nextAction}`,
+      { cause, code: 'response_truncated', nextAction, data: { usage: cause.data?.usage } },
+    );
+  });
   stream?.onReasoningComplete?.(result.reasoning);
+  if (!result.text.trim()) {
+    throw fail(
+      ERROR_CATEGORIES.RESPONSE_FORMAT,
+      'Large-change analysis did not return a JSON answer after retrying.',
+      { code: 'analysis_empty_response', data: { usage: result.usage } },
+    );
+  }
   try {
     return parseAndValidate(result.text);
   } catch (cause) {
@@ -538,7 +565,7 @@ function estimateInitialDeepCost(
     batchTokens += size;
   }
   flush();
-  const output = Math.min(2048, config.maxTokens || 1024);
+  const output = analysisOutputTokenLimit(config);
   let reductionRequests = 0;
   if (config.analysisTask === 'split') {
     for (const fragments of fragmentsByFile.values()) {
@@ -779,6 +806,18 @@ export async function analyzeChanges(
     await Promise.all(pending);
     budget.reserveFinal(0);
   }
+}
+
+export async function summarizeGroupChanges(config, analysis, paths, manifest) {
+  // Capacity fallback also produces local facts, even when personal settings
+  // still request deep analysis. Select by the result's source, not that setting.
+  if (['auto', 'fallback'].includes(analysis.coverage.strategy)) {
+    return localOverview(config, selectLocalGroupFacts(analysis.facts, paths, manifest)).text;
+  }
+  return summarizeChanges(
+    config,
+    analysis.facts.filter((fact) => paths.includes(fact.path)),
+  );
 }
 
 export async function summarizeChanges(config, facts) {
