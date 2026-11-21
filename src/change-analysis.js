@@ -39,7 +39,7 @@ function gitQuote(path) {
   );
 }
 
-export function captureChanges(commands, cwd, files, config) {
+export function captureChanges(commands, cwd, files, config, { split = false } = {}) {
   const source = spoolGit(
     commands.map((args) => [
       '-c',
@@ -72,6 +72,18 @@ export function captureChanges(commands, cwd, files, config) {
       byHeader.set(`diff --git ${gitQuote(`a/${newPath}`)} ${gitQuote(`b/${newPath}`)}`, file);
       byHeader.set(`diff --git ${gitQuote(`a/${oldPath}`)} ${gitQuote(`b/${oldPath}`)}`, file);
     }
+    const diffLimit = split ? config.splitMaxDiffChars || 16000 : config.maxDiffChars || 30000;
+    let diffChunks = [];
+    let diffChars = 0;
+    const appendDiff = (chunk) => {
+      if (!diffChunks) return;
+      diffChars += chunk.length;
+      if (diffChars > diffLimit) {
+        diffChunks = null;
+        return;
+      }
+      diffChunks.push(chunk);
+    };
     const findings = new Set();
     const sections = [];
     let current;
@@ -82,9 +94,23 @@ export function captureChanges(commands, cwd, files, config) {
         const file = byHeader.get(header);
         if (!file)
           throw new Error('Git diff contains a path outside the captured change manifest.');
-        current = { file, header, ordinal: ordinal++, privateKey: false };
+        const paths = file.addPaths || [file.path];
+        const lock = paths.some(isLockFile);
+        const stripped = !lock && paths.some((p) => matchStripPattern(p, config.stripFiles));
+        current = {
+          file,
+          header,
+          ordinal: ordinal++,
+          privateKey: false,
+          omittedInDiff: lock || stripped,
+        };
         sections.push(current);
         file.sections.push(current.ordinal);
+        if (lock) appendDiff(`${header}\n(lock file — content omitted)\n`);
+        else if (stripped) appendDiff(`${header}\n(generated file — content omitted)\n`);
+        else appendDiff(line);
+      } else if (current && !current.omittedInDiff) {
+        appendDiff(line);
       }
       if (!current) continue;
       const file = current.file;
@@ -109,7 +135,7 @@ export function captureChanges(commands, cwd, files, config) {
       source,
       manifest,
       findings: [...findings],
-      diff: source.text(Math.min(config.maxDiffChars || 30000, config.splitMaxDiffChars || 16000)),
+      diff: diffChunks ? diffChunks.join('').trim() : null,
       stats: {
         files: files.length,
         additions: manifest.reduce((n, f) => n + f.additions, 0),
@@ -964,8 +990,9 @@ export function needsAnalysis(capture, config, split = false) {
   if (split && capture.manifest.length > (config.splitMaxPlanFiles || 100)) return true;
   return (
     estimateTokens(capture.diff) > (config.largeChange?.chunkInputTokens || 12000) * 0.6 ||
-    capture.diff
-      .split(/(?=^diff --git )/m)
-      .some((section) => section.length > (config.maxFileDiffChars || 3000))
+    (split &&
+      capture.diff
+        .split(/(?=^diff --git )/m)
+        .some((section) => section.length > (config.maxFileDiffChars || 3000)))
   );
 }

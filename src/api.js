@@ -158,7 +158,7 @@ function extractFromReasoning(reasoning, policy) {
 // reasoning trace and no content.
 function followupCommitPrompt(policy) {
   return (
-    'Based on your analysis above, output ONLY the final commitPolicy v1 message. ' +
+    `Based on your analysis above, output ONLY the final commitPolicy v${policy.version} message. ` +
     `Use one of these types: ${policy.types.join(', ')}. ` +
     'Do not include any other text, explanation, or code fences.'
   );
@@ -408,8 +408,14 @@ export async function generateCommitMessage(
   let validation = await validate(message);
   if (message.trim() && validation.needsCorrection) {
     corrections = 1;
+    const correctionReasoning = await reasoningForFollowUp(config);
+    const correctionTokenLimit =
+      correctionReasoning?.mode === 'on'
+        ? Math.max(maxTokens, correctionReasoning.maxTokens || 4096)
+        : maxTokens;
+    const correctionTemperature = Math.min(config.temperature ?? 0.3, 0.2);
     const retry = await getResponseText(
-      config,
+      { ...config, reasoning: correctionReasoning },
       [
         messages[0],
         {
@@ -417,8 +423,8 @@ export async function generateCommitMessage(
           content: buildPolicyCorrectionPrompt(message, validation.errors, policy),
         },
       ],
-      variedTemperature,
-      outputTokenLimit,
+      correctionTemperature,
+      correctionTokenLimit,
       followupCommitPrompt(policy),
       stream,
     ).catch((error) => {

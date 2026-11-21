@@ -419,7 +419,37 @@ test('non-conventional reply triggers one counted corrective retry without re-se
   const retry = calls[1].messages;
   assert.equal(retry[0].role, 'system', 'system prompt kept for language/format constraints');
   assert.match(retry.at(-1).content, /Updated the login page styling\./, 'bad reply fed back');
+  assert.match(retry.at(-1).content, /Language: English/);
   assert.ok(!retry.some((m) => m.content.includes('Here is the git diff')), 'diff not re-sent');
+  assert.equal(calls[1].temperature, 0.2, 'corrective retry uses low deterministic temperature');
+});
+
+test('corrective retry disables follow-up reasoning and keeps low temperature after regenerate', async () => {
+  const calls = stubFetch([
+    { choices: [{ message: { content: 'Updated the login page styling.' } }] },
+    { choices: [{ message: { content: 'style: update login page styling' } }] },
+  ]);
+  const { message, corrections } = await generateCommitMessage(
+    cfg({
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
+      modelId: 'openai/o4-mini',
+      temperature: 0.7,
+      reasoning: { mode: 'on', effort: 'medium', maxTokens: 4096 },
+    }),
+    diff,
+    2,
+    'feat: prior message',
+  );
+  assert.equal(message, 'style: update login page styling');
+  assert.equal(corrections, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].temperature, 0.2, 'corrective retry uses low deterministic temperature');
+  assert.deepEqual(
+    calls[1].reasoning,
+    { effort: 'none' },
+    'corrective retry disables reasoning on providers that support follow-up downgrade',
+  );
+  assert.equal(calls[1].max_tokens, 1024, 'corrective retry restores non-reasoning maxTokens');
 });
 
 test('corrective retry usage aggregates with the first call', async () => {

@@ -794,3 +794,36 @@ test('largeChange configuration rejects unknown, invalid and contradictory limit
     /strategy/,
   );
 });
+
+test('single-commit capture omits lockfile and stripped bodies and avoids premature large-change fallback', (t) => {
+  const { cwd, git } = repo(t);
+  writeFileSync(join(cwd, 'package-lock.json'), `${JSON.stringify({ lock: 'x'.repeat(40000) })}\n`);
+  writeFileSync(join(cwd, 'bundle.min.js'), `${'a'.repeat(40000)}\n`);
+  writeFileSync(join(cwd, 'src.js'), 'export const line = "hello world";\n'.repeat(120));
+  git('add', '-A');
+  const cfg = config({
+    maxDiffChars: 30000,
+    splitMaxDiffChars: 4000,
+    maxFileDiffChars: 3000,
+    stripFiles: ['*.min.js'],
+  });
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  assert.notEqual(capture.diff, null);
+  assert.match(capture.diff, /\(lock file — content omitted\)/);
+  assert.match(capture.diff, /\(generated file — content omitted\)/);
+  assert.match(capture.diff, /export const line = "hello world";/);
+  assert.equal(needsAnalysis(capture, cfg), false);
+  assert.equal(needsAnalysis(capture, cfg, true), true);
+
+  const splitCapture = captureChanges(
+    [['diff', '--staged']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    cfg,
+    {
+      split: true,
+    },
+  );
+  assert.equal(splitCapture.diff, null);
+  assert.equal(needsAnalysis(splitCapture, cfg, true), true);
+});

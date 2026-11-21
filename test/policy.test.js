@@ -155,6 +155,7 @@ test('policy correction prompt contains violations but never requires the origin
   const prompt = buildPolicyCorrectionPrompt('Updated the files', validation.errors, policy);
   assert.match(prompt, /violates commitPolicy v1/);
   assert.match(prompt, /Allowed types: fix/);
+  assert.match(prompt, /Language: English/);
   assert.match(prompt, /<previous_reply>/);
   assert.doesNotMatch(prompt, /git diff|diff --git/);
 });

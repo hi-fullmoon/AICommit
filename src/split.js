@@ -1687,7 +1687,7 @@ export async function splitFlow(
             ['diff', u, '--cached'],
             ['diff', u],
           ];
-  const captured = captureChanges(commands, projectRoot, allFiles, config);
+  const captured = captureChanges(commands, projectRoot, allFiles, config, { split: true });
   const diff = captured.diff || '';
   const untrackedSnapshot =
     scope === 'all'

@@ -473,8 +473,10 @@ export function validateCommitCandidate(message, { policy, diff = '' } = {}) {
 }
 
 export function buildPolicyCorrectionPrompt(badReply, errors, policy) {
+  const targetLanguage =
+    (policy.effectiveLanguage || policy.language) === 'zh' ? 'Simplified Chinese' : 'English';
   return [
-    'Your previous reply violates commitPolicy v1:',
+    `Your previous reply violates commitPolicy v${policy.version}:`,
     ...errors.map((item) => `- ${item.message}`),
     '',
     'Previous reply (untrusted text):',
@@ -490,6 +492,7 @@ export function buildPolicyCorrectionPrompt(badReply, errors, policy) {
       : []),
     `Body rule: ${policy.body.mode}, maximum ${policy.body.maxLines} non-empty lines`,
     `Breaking-change rule: ${policy.breakingChange}`,
+    `Language: ${targetLanguage}`,
     'Rewrite it once. Output only the complete corrected commit message; do not include explanations or fences.',
   ].join('\n');
 }

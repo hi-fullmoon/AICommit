@@ -4,6 +4,13 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.12] - 2026-11-21
+
+### Fixed
+
+- Single-commit diff capture now uses `maxDiffChars` instead of `splitMaxDiffChars`, strips lockfile and `stripFiles` bodies before size checks, and lets `condenseDiff` handle oversized individual files instead of prematurely falling back to local large-change sampling.
+- Automatic policy-correction retries now include the target language constraint, use a lower deterministic temperature, and disable follow-up reasoning when supported by the provider.
+
 ## [2.6.11] - 2026-11-19
 
 ### Added
@@ -314,7 +321,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.11...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.12...HEAD
+[2.6.12]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.12
 [2.6.11]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.11
 [2.6.10]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.10
 [2.6.9]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.9
