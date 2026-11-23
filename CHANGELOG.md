@@ -4,6 +4,13 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.13] - 2026-11-23
+
+### Fixed
+
+- Diff capture now handles single lines exceeding 1 MiB by streaming oversized lines for secret scanning and degrading only the affected file to metadata-only instead of aborting the commit.
+- Generated files (including `.gitattributes` `linguist-generated` and `-diff` entries), lockfiles, and `stripFiles` matches now collect metadata via `--numstat`/`--raw` and skip full Git text diff generation, keeping fast-path diffs intact and speeding up large build commits.
+
 ## [2.6.12] - 2026-11-21
 
 ### Fixed
@@ -321,7 +328,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.12...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.13...HEAD
+[2.6.13]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.13
 [2.6.12]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.12
 [2.6.11]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.11
 [2.6.10]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.10

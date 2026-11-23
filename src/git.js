@@ -200,6 +200,46 @@ export function matchStripPattern(path, patterns) {
   });
 }
 
+// Query Git attribute rules (.gitattributes, .git/info/attributes, global
+// attributes) for paths marked `linguist-generated` or `-diff`/`binary`.
+export function getGitGeneratedPaths(cwd, paths) {
+  const unique = [...new Set((paths || []).filter(Boolean))];
+  const generated = new Set();
+  if (!unique.length) return generated;
+  const batchSize = 2000;
+  try {
+    for (let offset = 0; offset < unique.length; offset += batchSize) {
+      const batch = unique.slice(offset, offset + batchSize);
+      const out = execFileSync(
+        'git',
+        ['--no-pager', 'check-attr', '--stdin', '-z', 'linguist-generated', 'diff'],
+        {
+          cwd,
+          input: `${batch.join('\0')}\0`,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          maxBuffer: 8 * 1024 * 1024,
+        },
+      );
+      const fields = out.split('\0');
+      for (let i = 0; i + 2 < fields.length; i += 3) {
+        const path = fields[i];
+        const attr = fields[i + 1];
+        const value = fields[i + 2];
+        if (
+          (attr === 'linguist-generated' && (value === 'set' || value === 'true')) ||
+          (attr === 'diff' && value === 'unset')
+        ) {
+          generated.add(path);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal: fall back to built-in path heuristics if check-attr fails.
+  }
+  return generated;
+}
+
 // Paths on a "diff --git a/x b/y" header line, unquoted and without the a/ b/
 // prefix. Handles git's C-style quoting of paths that contain spaces.
 function diffSectionPaths(line) {

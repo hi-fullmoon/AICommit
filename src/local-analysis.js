@@ -31,7 +31,7 @@ function clip(text, bytes) {
 function category(file, config) {
   if (isLockFile(file.path)) return 'lockfile';
   if (matchStripPattern(file.path, config.stripFiles)) return 'excluded';
-  if (isGeneratedFile(file.path)) return 'generated';
+  if (file.gitGenerated || isGeneratedFile(file.path)) return 'generated';
   if (/(?:^|\/)(?:test|tests|__tests__)\/|\.(?:test|spec)\./.test(file.path)) return 'test';
   if (/\.(?:md|rst|txt)$/.test(file.path)) return 'documentation';
   if (/(?:^|\/)(?:[^/]*config[^/]*|package\.json)$|\.(?:ya?ml|toml)$/.test(file.path))

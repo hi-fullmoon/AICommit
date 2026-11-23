@@ -1,5 +1,11 @@
 import { spoolGit } from './git-spool.js';
-import { isLockFile, matchStripPattern, protectSensitiveText } from './git.js';
+import {
+  getGitGeneratedPaths,
+  isLockFile,
+  isSensitiveFile,
+  matchStripPattern,
+  protectSensitiveText,
+} from './git.js';
 import { createAnalysisBudget, DEFAULT_LARGE_CHANGE, estimateTokens } from './analysis-budget.js';
 import { getResponseText } from './api.js';
 import { encodeUntrustedData } from './trust.js';
@@ -39,9 +45,136 @@ function gitQuote(path) {
   );
 }
 
-export function captureChanges(commands, cwd, files, config, { split = false } = {}) {
-  const source = spoolGit(
+function batchPaths(files, maxPerBatch = 200) {
+  const batches = [];
+  let current = [];
+  for (const file of files) {
+    const paths = file.addPaths || [file.path];
+    if (current.length && current.length + paths.length > maxPerBatch) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(...paths);
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+function collectOmittedMetadata(commands, cwd, omittedByPath) {
+  const numstatSource = spoolGit(
     commands.map((args) => [
+      ...args,
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      '--numstat',
+      '-z',
+    ]),
+    cwd,
+  );
+  try {
+    const iter = numstatSource.nulFields();
+    for (let next = iter.next(); !next.done; next = iter.next()) {
+      const match = next.value.match(/^(\d+|-)\t(\d+|-)\t(.*)$/);
+      if (!match) continue;
+      const [, add, del] = match;
+      let path = match[3];
+      let oldPath = null;
+      if (path === '') {
+        const first = iter.next();
+        const second = iter.next();
+        if (first.done || second.done) break;
+        oldPath = first.value;
+        path = second.value;
+      }
+      const file =
+        (oldPath !== null && omittedByPath.get(`${oldPath}\0${path}`)) ||
+        omittedByPath.get(path) ||
+        (oldPath !== null && omittedByPath.get(oldPath));
+      if (!file) continue;
+      if (add === '-' || del === '-') {
+        file.binary = true;
+      } else {
+        file.additions += Number(add);
+        file.deletions += Number(del);
+      }
+    }
+  } finally {
+    numstatSource.dispose();
+  }
+
+  const rawSource = spoolGit(
+    commands.map((args) => [
+      ...args,
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      '--raw',
+      '-z',
+    ]),
+    cwd,
+  );
+  try {
+    const iter = rawSource.nulFields();
+    for (let next = iter.next(); !next.done; next = iter.next()) {
+      const match = next.value.match(/^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z]\d*)$/);
+      if (!match) continue;
+      const [, oldMode, newMode, status] = match;
+      const first = iter.next();
+      if (first.done) break;
+      let oldPath = null;
+      let path = first.value;
+      if (status.startsWith('R') || status.startsWith('C')) {
+        const second = iter.next();
+        if (second.done) break;
+        oldPath = first.value;
+        path = second.value;
+      }
+      const file =
+        (oldPath !== null && omittedByPath.get(`${oldPath}\0${path}`)) ||
+        omittedByPath.get(path) ||
+        (oldPath !== null && omittedByPath.get(oldPath));
+      if (!file) continue;
+      if (oldMode !== '000000') file.oldMode = oldMode;
+      if (newMode !== '000000') file.newMode = newMode;
+    }
+  } finally {
+    rawSource.dispose();
+  }
+}
+
+export function captureChanges(commands, cwd, files, config, { split = false } = {}) {
+  const allPaths = files.flatMap((file) => file.addPaths || [file.path]);
+  const gitGenerated = getGitGeneratedPaths(cwd, allPaths);
+  const deep = isDeepAnalysis(config);
+  const omitKindById = new Map();
+  const manifest = files.map((file, i) => {
+    const id = `F${i + 1}`;
+    const paths = file.addPaths || [file.path];
+    const lock = paths.some(isLockFile);
+    const stripped = !lock && paths.some((p) => matchStripPattern(p, config.stripFiles));
+    const gitGen = !lock && !stripped && paths.some((p) => gitGenerated.has(p));
+    const autoGen = !lock && !stripped && !gitGen && !deep && paths.some(isGeneratedFile);
+    if (lock) omitKindById.set(id, 'lock');
+    else if (stripped || gitGen || autoGen) omitKindById.set(id, 'generated');
+    return {
+      ...file,
+      id,
+      sections: [],
+      additions: 0,
+      deletions: 0,
+      metadataOnly: false,
+      gitGenerated: gitGen,
+    };
+  });
+
+  const tracked = manifest.filter((file) => file.status !== '??' && file.status !== '?');
+  const omittedTracked = tracked.filter((file) => omitKindById.has(file.id));
+  const textTracked = tracked.filter((file) => !omitKindById.has(file.id));
+
+  let diffCommands;
+  if (!omittedTracked.length) {
+    diffCommands = commands.map((args) => [
       '-c',
       'core.quotePath=false',
       ...args,
@@ -50,18 +183,30 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
       '--no-color',
       '--src-prefix=a/',
       '--dst-prefix=b/',
-    ]),
-    cwd,
-  );
+    ]);
+  } else if (!textTracked.length) {
+    diffCommands = [];
+  } else {
+    const batches = batchPaths(textTracked);
+    diffCommands = commands.flatMap((args) =>
+      batches.map((batch) => [
+        '--literal-pathspecs',
+        '-c',
+        'core.quotePath=false',
+        ...args,
+        '--no-ext-diff',
+        '--no-textconv',
+        '--no-color',
+        '--src-prefix=a/',
+        '--dst-prefix=b/',
+        '--',
+        ...batch,
+      ]),
+    );
+  }
+
+  const source = spoolGit(diffCommands, cwd);
   try {
-    const manifest = files.map((file, i) => ({
-      ...file,
-      id: `F${i + 1}`,
-      sections: [],
-      additions: 0,
-      deletions: 0,
-      metadataOnly: false,
-    }));
     const byHeader = new Map();
     for (const file of manifest) {
       const paths = file.addPaths || [file.path];
@@ -85,10 +230,59 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
       diffChunks.push(chunk);
     };
     const findings = new Set();
+
+    if (omittedTracked.length) {
+      const omittedByPath = new Map();
+      for (const file of omittedTracked) {
+        const paths = file.addPaths || [file.path];
+        const oldPath = paths[0];
+        const newPath = paths.at(-1);
+        omittedByPath.set(`${oldPath}\0${newPath}`, file);
+        omittedByPath.set(newPath, file);
+        omittedByPath.set(oldPath, file);
+        for (const p of paths) {
+          if (isSensitiveFile(p)) findings.add(`sensitive file: ${p}`);
+        }
+        file.metadataOnly = true;
+        const header = `diff --git ${gitQuote(`a/${oldPath}`)} ${gitQuote(`b/${newPath}`)}`;
+        const label =
+          omitKindById.get(file.id) === 'lock'
+            ? '(lock file — content omitted)'
+            : '(generated file — content omitted)';
+        appendDiff(`${header}\n${label}\n`);
+      }
+      collectOmittedMetadata(commands, cwd, omittedByPath);
+    }
     const sections = [];
     let current;
     let ordinal = 0;
-    for (const line of source.lines()) {
+    let oversizedOverlap = Buffer.alloc(0);
+    const recordSensitive = (text, section) => {
+      const checked = protectSensitiveText(text, section.file.path);
+      for (const finding of checked.findings) findings.add(finding);
+      if (
+        checked.findings.some((f) => f.startsWith('private-key') || f.startsWith('sensitive file:'))
+      )
+        section.privateKey = true;
+    };
+    const scanOversizedChunk = (chunk) => {
+      if (!current) return;
+      const windowBuf = oversizedOverlap.length ? Buffer.concat([oversizedOverlap, chunk]) : chunk;
+      recordSensitive(windowBuf.toString('utf8'), current);
+      oversizedOverlap = Buffer.from(windowBuf.subarray(Math.max(0, windowBuf.length - 256)));
+    };
+    for (const entry of source.scanLines(1024 * 1024, { onOversizedChunk: scanOversizedChunk })) {
+      if (entry.oversized) {
+        oversizedOverlap = Buffer.alloc(0);
+        if (!current) continue;
+        if (!current.omittedInDiff) diffChunks = null;
+        const file = current.file;
+        file.metadataOnly = true;
+        if (current.inHunk && entry.prefix.startsWith('+')) file.additions++;
+        if (current.inHunk && entry.prefix.startsWith('-')) file.deletions++;
+        continue;
+      }
+      const line = entry.text;
       if (line.startsWith('diff --git ')) {
         const header = line.trimEnd();
         const file = byHeader.get(header);
@@ -114,12 +308,7 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
       }
       if (!current) continue;
       const file = current.file;
-      const checked = protectSensitiveText(line, file.path);
-      for (const finding of checked.findings) findings.add(finding);
-      if (
-        checked.findings.some((f) => f.startsWith('private-key') || f.startsWith('sensitive file:'))
-      )
-        current.privateKey = true;
+      recordSensitive(line, current);
       if (line.startsWith('@@')) current.inHunk = true;
       if (current.inHunk && line.startsWith('+')) file.additions++;
       if (current.inHunk && line.startsWith('-')) file.deletions++;
@@ -156,7 +345,12 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
             metadataOnly: false,
           };
         }
-        for (const line of source.lines()) {
+        for (const entry of source.scanLines()) {
+          if (entry.oversized) {
+            if (section) section.file.metadataOnly = true;
+            continue;
+          }
+          const line = entry.text;
           if (line.startsWith('diff --git ')) {
             if (body) {
               yield unit();
@@ -171,6 +365,7 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
           const omitted =
             file.metadataOnly ||
             isLockFile(file.path) ||
+            file.gitGenerated ||
             (!isDeepAnalysis(config) && isGeneratedFile(file.path)) ||
             matchStripPattern(file.path, config.stripFiles) ||
             (protect && section.privateKey);
@@ -192,13 +387,21 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
           if (!file.sections.length || file.metadataOnly) {
             const omitContent =
               isLockFile(file.path) ||
+              file.gitGenerated ||
               matchStripPattern(file.path, config.stripFiles) ||
               (!isDeepAnalysis(config) && isGeneratedFile(file.path));
             const full = previews?.sources?.get(file.addPaths?.[0] || file.path);
             if (!omitContent && full && !full.binary && !(protect && full.privateKey)) {
               let part = '';
               let number = 0;
-              for (const line of full.source.lines()) {
+              let oversized = false;
+              for (const entry of full.source.scanLines()) {
+                if (entry.oversized) {
+                  oversized = true;
+                  part = '';
+                  break;
+                }
+                const line = entry.text;
                 if (part && part.length + line.length > cap) {
                   yield {
                     id: `${file.id}U${++number}`,
@@ -211,16 +414,20 @@ export function captureChanges(commands, cwd, files, config, { split = false } =
                 }
                 part += protect ? protectSensitiveText(line, file.path).text : line;
               }
-              if (part)
+              if (part) {
                 yield {
-                  id: `${file.id}U${number + 1}`,
+                  id: `${file.id}U${++number}`,
                   fileId: file.id,
                   path: file.path,
                   text: part,
                   metadataOnly: false,
                 };
-              file.metadataOnly = false;
-              continue;
+              }
+              if (!oversized || number > 0) {
+                file.metadataOnly = false;
+                continue;
+              }
+              file.metadataOnly = true;
             }
             const preview = previews?.get(file.addPaths?.[0] || file.path);
             const text =

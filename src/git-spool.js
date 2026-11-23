@@ -80,6 +80,60 @@ export function spoolGit(commands, cwd, { env = undefined } = {}) {
         }
         if (pending.length) yield pending.toString('utf8');
       },
+      *scanLines(maxLineBytes = 1024 * 1024, { onOversizedChunk = null } = {}) {
+        let pending = Buffer.alloc(0);
+        let skipping = false;
+        let skipPrefix = '';
+        let skipBytes = 0;
+        const emitChunk = (chunk) => {
+          skipBytes += chunk.length;
+          if (onOversizedChunk && chunk.length) onOversizedChunk(chunk);
+        };
+        for (const buffer of this.buffers()) {
+          let offset = 0;
+          if (skipping) {
+            const end = buffer.indexOf(10);
+            if (end === -1) {
+              emitChunk(buffer);
+              continue;
+            }
+            emitChunk(buffer.subarray(0, end + 1));
+            yield { oversized: true, prefix: skipPrefix, bytes: skipBytes };
+            skipping = false;
+            skipPrefix = '';
+            skipBytes = 0;
+            offset = end + 1;
+            if (offset >= buffer.length) continue;
+          }
+          const slice = offset ? buffer.subarray(offset) : buffer;
+          const data = pending.length ? Buffer.concat([pending, slice]) : slice;
+          let start = 0;
+          for (let end = data.indexOf(10); end !== -1; end = data.indexOf(10, start)) {
+            if (end - start > maxLineBytes) {
+              const lineBuf = data.subarray(start, end + 1);
+              const prefix = lineBuf.subarray(0, Math.min(32, lineBuf.length)).toString('utf8');
+              if (onOversizedChunk) onOversizedChunk(lineBuf);
+              yield { oversized: true, prefix, bytes: lineBuf.length };
+            } else {
+              yield { oversized: false, text: data.subarray(start, end + 1).toString('utf8') };
+            }
+            start = end + 1;
+          }
+          pending = Buffer.from(data.subarray(start));
+          if (pending.length > maxLineBytes) {
+            skipPrefix = pending.subarray(0, Math.min(32, pending.length)).toString('utf8');
+            skipBytes = 0;
+            emitChunk(pending);
+            pending = Buffer.alloc(0);
+            skipping = true;
+          }
+        }
+        if (skipping) {
+          yield { oversized: true, prefix: skipPrefix, bytes: skipBytes };
+        } else if (pending.length) {
+          yield { oversized: false, text: pending.toString('utf8') };
+        }
+      },
       *nulFields(maxFieldBytes = 16 * 1024) {
         let pending = Buffer.alloc(0);
         for (const buffer of this.buffers()) {

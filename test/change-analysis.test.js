@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -742,6 +742,85 @@ test('extreme single lines fail explicitly rather than silently truncating', (t)
   const source = spoolGit([], cwd);
   source.append(Buffer.alloc(1024 * 1024 + 1, 65));
   assert.throws(() => [...source.lines()], /line exceeds/);
+});
+
+test('capture degrades non-generated files with >1 MiB single lines to metadataOnly while scanning secrets', async (t) => {
+  const { cwd, git } = repo(t);
+  mkdirSync(join(cwd, 'web'), { recursive: true });
+  const oversizedSource = `${'x'.repeat(1024 * 1024 + 2048)} AKIAIOSFODNN7EXAMPLE ${'y'.repeat(1024)}\n`;
+  writeFileSync(join(cwd, 'web/inline-data.js'), oversizedSource);
+  writeFileSync(join(cwd, 'web/app.js'), 'export function loadPdf(url) {\n  return url;\n}\n');
+  git('add', '-A');
+
+  const cfg = analysisConfig(config({ language: 'en', largeChange: { strategy: 'auto' } }));
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  t.after(() => capture.dispose());
+
+  const dataFile = capture.manifest.find((f) => f.path === 'web/inline-data.js');
+  const appFile = capture.manifest.find((f) => f.path === 'web/app.js');
+  assert.equal(dataFile.metadataOnly, true);
+  assert.equal(dataFile.additions, 1);
+  assert.equal(appFile.metadataOnly, false);
+  assert.equal(appFile.additions, 3);
+  assert.ok(
+    capture.findings.some((f) => f.includes('cloud access key') && f.includes('inline-data.js')),
+    'secrets inside >1 MiB lines are still detected',
+  );
+
+  const result = await analyzeChanges(cfg, capture);
+  assert.equal(result.coverage.totalFiles, 2);
+  assert.equal(result.coverage.sampledFiles, 1);
+  assert.equal(result.coverage.metadataOnlyFiles, 1);
+  assert.match(result.summary, /loadPdf/);
+});
+
+test('generated and .gitattributes files skip full Git text diff while preserving metadata and fast-path diff', async (t) => {
+  const { cwd, git } = repo(t);
+  writeFileSync(
+    join(cwd, '.gitattributes'),
+    'custom-gen/** linguist-generated=true\nno-diff.dat -diff\n',
+  );
+  git('add', '.gitattributes');
+  git('commit', '-qm', 'add gitattributes');
+
+  mkdirSync(join(cwd, 'build/generic-legacy/web'), { recursive: true });
+  mkdirSync(join(cwd, 'custom-gen'), { recursive: true });
+  mkdirSync(join(cwd, 'web'), { recursive: true });
+  writeFileSync(
+    join(cwd, 'build/generic-legacy/web/viewer.js.map'),
+    `${'a'.repeat(1024 * 1024 + 512)}\n`,
+  );
+  writeFileSync(join(cwd, 'custom-gen/schema.ts'), 'export const generated = true;\n'.repeat(10));
+  writeFileSync(join(cwd, 'no-diff.dat'), 'opaque-data\n'.repeat(5));
+  writeFileSync(join(cwd, 'web/app.js'), 'export const ready = true;\n');
+  git('add', '-A');
+
+  const cfg = analysisConfig(config({ language: 'en', largeChange: { strategy: 'auto' } }));
+  const capture = captureChanges([['diff', '--staged']], cwd, getStagedChangedFiles(cwd), cfg);
+  t.after(() => capture.dispose());
+
+  assert.ok(
+    capture.source.size < 4096,
+    `expected Git text diff spool to skip >1 MiB generated files, got ${capture.source.size} bytes`,
+  );
+  assert.ok(capture.diff, 'fast-path diff remains available when generated files are omitted');
+  assert.match(capture.diff, /viewer\.js\.map[\s\S]*generated file — content omitted/);
+  assert.match(capture.diff, /custom-gen\/schema\.ts[\s\S]*generated file — content omitted/);
+  assert.match(capture.diff, /no-diff\.dat[\s\S]*generated file — content omitted/);
+  assert.match(capture.diff, /export const ready = true;/);
+
+  const schemaFile = capture.manifest.find((f) => f.path === 'custom-gen/schema.ts');
+  const mapFile = capture.manifest.find((f) => f.path === 'build/generic-legacy/web/viewer.js.map');
+  assert.equal(schemaFile.gitGenerated, true);
+  assert.equal(schemaFile.additions, 10);
+  assert.equal(mapFile.additions, 1);
+
+  const result = await analyzeChanges(cfg, capture);
+  const generatedFacts = result.facts.filter((f) => f.kind === 'generated');
+  const generatedPaths = generatedFacts.flatMap((f) => f.files);
+  assert.ok(generatedPaths.includes('custom-gen/schema.ts'));
+  assert.ok(generatedPaths.includes('no-diff.dat'));
+  assert.ok(generatedPaths.includes('build/generic-legacy/web/viewer.js.map'));
 });
 
 test('ten thousand generated files finish local reduction and generation with one provider call', async (t) => {
