@@ -4,6 +4,12 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 
 ## [Unreleased]
 
+## [2.6.14] - 2026-11-23
+
+### Fixed
+
+- Suppressed implicit patch output (`--no-patch`) when collecting `--numstat` and `--raw` metadata for omitted lockfiles and generated files, fixing `NUL-delimited Git field exceeds 16384 bytes` errors when `-U<n>` diff context flags are passed.
+
 ## [2.6.13] - 2026-11-23
 
 ### Fixed
@@ -328,7 +334,8 @@ This file lists notable user-facing changes. Internal refactors, test-only chang
 - Added file-level split planning and execution with Git-state concurrency checks.
 - Added provider presets and user/project configuration boundaries.
 
-[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.13...HEAD
+[Unreleased]: https://github.com/hi-fullmoon/AICommit/compare/v2.6.14...HEAD
+[2.6.14]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.14
 [2.6.13]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.13
 [2.6.12]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.12
 [2.6.11]: https://github.com/hi-fullmoon/AICommit/tree/v2.6.11

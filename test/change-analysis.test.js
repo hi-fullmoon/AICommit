@@ -906,3 +906,24 @@ test('single-commit capture omits lockfile and stripped bodies and avoids premat
   assert.equal(splitCapture.diff, null);
   assert.equal(needsAnalysis(splitCapture, cfg, true), true);
 });
+
+test('collectOmittedMetadata suppresses patch output when diff command includes -U context flag', (t) => {
+  const { cwd, git } = repo(t);
+  writeFileSync(join(cwd, 'pnpm-lock.yaml'), `lockfileVersion: '9.0'\n${'a: 1\n'.repeat(5000)}`);
+  writeFileSync(join(cwd, 'index.js'), 'export const ok = true;\n');
+  git('add', '-A');
+  const cfg = config({ maxDiffChars: 30000 });
+  const capture = captureChanges(
+    [['diff', '-U3', '--staged']],
+    cwd,
+    getStagedChangedFiles(cwd),
+    cfg,
+  );
+  t.after(() => capture.dispose());
+
+  const lockFile = capture.manifest.find((f) => f.path === 'pnpm-lock.yaml');
+  assert.equal(lockFile.metadataOnly, true);
+  assert.equal(lockFile.additions, 5001);
+  assert.match(capture.diff, /\(lock file — content omitted\)/);
+  assert.match(capture.diff, /export const ok = true;/);
+});
